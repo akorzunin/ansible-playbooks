@@ -1,0 +1,15 @@
+- name: Run nvidia test
+  hosts: local_workstation
+  become: false
+
+  tasks:
+    - name: Cd to nvidia test dir
+      ansible.builtin.command:
+        cmd: docker-compose up
+        chdir: ~/Documents/nvidia-test
+      register: my_output
+      changed_when: my_output.rc != 0
+
+    - name: Debug my_output.stdout as part of a string
+      ansible.builtin.debug:
+        msg: "msg=The script's stdout was `{{ my_output.stdout }}`."

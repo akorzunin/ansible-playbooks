@@ -1,0 +1,11 @@
+- name: Deploy transmission
+  hosts: local_workstation
+  become: false
+
+  tasks:
+    - name: Deploy transmission
+      ansible.builtin.command:
+        cmd: docker-compose up -d
+        chdir: ~/Documents/transmission
+      register: my_output
+      changed_when: my_output.rc != 0

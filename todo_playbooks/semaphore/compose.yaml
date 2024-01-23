@@ -1,0 +1,14 @@
+services:
+  semaphore:
+    ports:
+      - 4000:3000
+    image: semaphoreui/semaphore:latest
+    environment:
+      SEMAPHORE_DB_DIALECT: bolt
+      SEMAPHORE_ADMIN_PASSWORD: admin
+      SEMAPHORE_ADMIN_NAME: admin
+      SEMAPHORE_ADMIN_EMAIL: akorzunin123@gmail.com
+      SEMAPHORE_ADMIN: admin
+    volumes:
+      - ./config:/etc/semaphore:rw # config.json location
+      - ./db:/var/lib/semaphore:rw # database.boltdb location (Not required if using mysql or postgres)

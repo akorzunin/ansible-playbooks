@@ -1,0 +1,11 @@
+- name: Deploy jellyfin
+  hosts: local_workstation
+  become: false
+
+  tasks:
+    - name: Deploy jellyfin
+      ansible.builtin.command:
+        cmd: docker-compose up -d
+        chdir: ~/Documents/jellyfin
+      register: my_output
+      changed_when: my_output.rc != 0

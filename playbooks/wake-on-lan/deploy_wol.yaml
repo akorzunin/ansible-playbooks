@@ -1,0 +1,11 @@
+- name: Deploy wol
+  hosts: local_pi
+  become: false
+
+  tasks:
+    - name: Deploy wol
+      ansible.builtin.command:
+        cmd: docker-compose up -d
+        chdir: ~/Documents/wol
+      register: my_output
+      changed_when: my_output.rc != 0

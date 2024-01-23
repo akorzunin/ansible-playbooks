@@ -1,0 +1,18 @@
+- name: Setup portainer
+  hosts: local_workstation
+  become: true
+
+  tasks:
+    - name: Create portainer container
+      community.general.docker_container:
+        name: portainer
+        image: portainer/portainer-ce
+        state: started
+        recreate: true
+        restart_policy: always
+        published_ports:
+          - "8999:8000" # probably not used anymore
+          - "9000:9000" # http port
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+          - portainer_data:/data

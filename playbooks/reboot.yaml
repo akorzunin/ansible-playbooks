@@ -1,0 +1,8 @@
+- name: Reboot server
+  hosts: local_workstation
+
+  become: true
+  tasks:
+    - name: Reboot server
+      ansible.builtin.reboot:
+        reboot_timeout: 300

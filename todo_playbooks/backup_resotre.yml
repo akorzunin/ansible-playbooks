@@ -1,0 +1,25 @@
+- name: Restore service files from backup
+  hosts: local_workstation
+  become: true
+  vars:
+    backup_name: "ubuntu_ws_01_2024"
+    service_name: "nvidia-test"
+    user_name: "akorz"
+  tasks:
+    - name: Create Documents directory if it does not exist
+      become: false
+      ansible.builtin.file:
+        path: "~/Documents"
+        state: directory
+        owner: "{{ user_name }}"
+        group: "{{ user_name }}"
+        mode: "0600"
+    - name: Copy backup files to user's home directory
+      become: true
+      ansible.builtin.copy:
+        src: "/mnt/storage/backups/{{ backup_name }}/home/Documents/{{ service_name }}"
+        dest: "/home/{{ user_name }}/Documents/{{ service_name }}"
+        remote_src: true
+        owner: "{{ user_name }}"
+        group: "{{ user_name }}"
+        mode: "0777"

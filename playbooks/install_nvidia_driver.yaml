@@ -1,0 +1,9 @@
+- name: Install Nvidia drivers
+  hosts: local_workstation
+  become: true
+  tasks:
+    - name: Install NVIDIA drivers
+      ansible.builtin.include_role:
+        name: nvidia.nvidia_driver
+        vars:
+          nvidia_driver_ubuntu_packages_suffix: ""
