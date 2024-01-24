@@ -4,7 +4,7 @@
 
   tasks:
     - name: Create portainer container
-      community.general.docker_container:
+      community.docker.docker_container:
         name: portainer
         image: portainer/portainer-ce
         state: started
