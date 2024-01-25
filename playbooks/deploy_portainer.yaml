@@ -11,7 +11,6 @@
         recreate: true
         restart_policy: always
         published_ports:
-          - "8999:8000" # probably not used anymore
           - "9000:9000" # http port
         volumes:
           - /var/run/docker.sock:/var/run/docker.sock
