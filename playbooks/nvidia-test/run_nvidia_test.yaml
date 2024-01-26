@@ -1,8 +1,6 @@
 - name: Run nvidia test
   hosts: local_workstation
   become: false
-  vars:
-    local_ansible_dir: ~/documents/ansible
 
   tasks:
     - name: Setup service directory
@@ -13,19 +11,19 @@
 
     - name: Copy compose.yaml file to service directory
       ansible.builtin.copy:
-        src: |
-          {{ local_ansible_dir }} playbooks/nvidia-test/compose.yaml
+        src: ~/documents/ansible/playbooks/nvidia-test/compose.yaml
         dest: ~/Documents/nvidia-test/
         mode: "0644"
         backup: true
+        remote_src: false
 
     - name: Cd to nvidia test dir
       ansible.builtin.command:
         chdir: ~/Documents/nvidia-test
         cmd: docker-compose up
-      register: my_output
-      changed_when: my_output.rc != 0
+      register: docker_compose_output
+      changed_when: docker_compose_output.rc != 0
 
-    - name: Debug my_output.stdout as part of a string
+    - name: Debug docker_compose_output as part of a string
       ansible.builtin.debug:
-        msg: "msg=The script's stdout was `{{ my_output.stdout }}`."
+        var: docker_compose_output
