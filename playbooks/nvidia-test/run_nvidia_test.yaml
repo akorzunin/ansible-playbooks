@@ -1,12 +1,28 @@
 - name: Run nvidia test
   hosts: local_workstation
   become: false
+  vars:
+    local_ansible_dir: ~/documents/ansible
 
   tasks:
+    - name: Setup service directory
+      ansible.builtin.file:
+        path: ~/Documents/nvidia-test
+        state: directory
+        mode: "0755"
+
+    - name: Copy compose.yaml file to service directory
+      ansible.builtin.copy:
+        src: |
+          {{ local_ansible_dir }} playbooks/nvidia-test/compose.yaml
+        dest: ~/Documents/nvidia-test/
+        mode: "0644"
+        backup: true
+
     - name: Cd to nvidia test dir
       ansible.builtin.command:
-        cmd: docker-compose up
         chdir: ~/Documents/nvidia-test
+        cmd: docker-compose up
       register: my_output
       changed_when: my_output.rc != 0
 

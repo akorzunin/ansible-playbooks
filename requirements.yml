@@ -1,0 +1,9 @@
+---
+roles:
+  # Install a role from Ansible Galaxy.
+  - name: nvidia.nvidia_driver
+
+
+collections:
+  # Install a collection from Ansible Galaxy.
+  - name: community.docker
