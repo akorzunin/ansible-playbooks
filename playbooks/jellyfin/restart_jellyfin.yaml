@@ -1,0 +1,13 @@
+- name: Restart jellyfin
+  hosts: local_workstation
+  become: false
+
+  tasks:
+    - name: Restart jellyfin
+      community.docker.docker_container:
+        name: jellyfin
+        image: jellyfin/jellyfin
+        state: started
+        restart: true
+        comparisons:
+          '*': ignore

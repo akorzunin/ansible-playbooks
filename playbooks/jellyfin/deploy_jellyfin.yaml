@@ -3,6 +3,14 @@
   become: false
 
   tasks:
+    - name: Copy compose.yaml file to service directory
+      ansible.builtin.copy:
+        src: ~/documents/ansible/playbooks/jellyfin/compose.yaml
+        dest: ~/Documents/jellyfin/
+        mode: "0644"
+        backup: true
+        remote_src: false
+
     - name: Deploy jellyfin
       ansible.builtin.command:
         cmd: docker-compose up -d
