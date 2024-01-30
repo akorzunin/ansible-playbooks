@@ -1,0 +1,10 @@
+---
+# .ansible-lint
+
+profile: production
+
+exclude_paths:
+  - .github
+  - todo_playbooks
+  - playbooks/**/*compose.yaml
+  - playbooks/install_nvidia_driver.yaml
