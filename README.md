@@ -3,7 +3,7 @@
 ansible-lint command
 
 ```sh
-ansible-lint playbooks --exclude playbooks/**/*compose.yaml --exclude playbooks/install_nvidia_driver.yaml
+ansible-lint
 ```
 
 dependencies
