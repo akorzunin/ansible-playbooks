@@ -11,9 +11,17 @@
         backup: true
         remote_src: false
 
+    - name: Copy compose.yaml file to service directory
+      ansible.builtin.copy:
+        src: ~/documents/ansible/playbooks/wake-on-lan/computers.txt
+        dest: ~/Documents/wake-on-lan/
+        mode: "0644"
+        backup: true
+        remote_src: false
+
     - name: Deploy wol
       ansible.builtin.command:
         cmd: docker-compose up -d
-        chdir: ~/Documents/wol
+        chdir: ~/Documents/wake-on-lan
       register: my_output
       changed_when: my_output.rc != 0
