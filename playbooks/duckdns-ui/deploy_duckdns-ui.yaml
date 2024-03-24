@@ -1,0 +1,33 @@
+- name: Deploy ducdns-ui
+  hosts: local_pi
+  become: false
+
+  tasks:
+    - name: Copy compose.yaml file to service directory
+      ansible.builtin.copy:
+        src: ~/documents/ansible/playbooks/duckdns-ui/compose.yaml
+        dest: ~/Documents/duckdns-ui/
+        mode: "0644"
+        backup: true
+        remote_src: false
+
+    - name: Copy .env file
+      ansible.builtin.copy:
+        src: ~/documents/ansible/playbooks/duckdns-ui/.env
+        dest: ~/Documents/duckdns-ui/
+        mode: "0644"
+        backup: true
+
+    - name: Pull new image duckdns-ui
+      ansible.builtin.command:
+        cmd: docker-compose pull
+        chdir: ~/Documents/duckdns-ui
+      register: out
+      changed_when: out.rc != 0
+
+    - name: Deploy duckdns-ui
+      ansible.builtin.command:
+        cmd: docker-compose up --force-recreate -d
+        chdir: ~/Documents/duckdns-ui
+      register: out
+      changed_when: out.rc != 0

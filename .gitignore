@@ -1,3 +1,4 @@
 hosts
 **/computers.txt
 playbooks/wake-on-lan/computers.txt
+.env
