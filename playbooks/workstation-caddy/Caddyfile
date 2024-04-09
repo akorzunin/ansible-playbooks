@@ -1,0 +1,21 @@
+ws-portainer.akorz.duckdns.org {
+    reverse_proxy localhost:9000
+}
+pi-portainer.akorz.duckdns.org {
+    reverse_proxy 192.168.1.58:9000
+}
+jellyfin.akorz.duckdns.org {
+    reverse_proxy localhost:8096
+}
+transmission.akorz.duckdns.org {
+    basicauth {
+		admin $2a$14$9SIqO/8k6wtbJEu83KsVmeSkZ6YS7vHlKzn2loOpFG42quMl7SV4O
+	}
+    reverse_proxy localhost:9092
+}
+wol.akorz.duckdns.org {
+    basicauth {
+		admin $2a$14$Zy4S4Ae0Oy08KtRM1oWwuu99WEK4T5G5vVAHGGlx9GlUlfd798OBO
+	}
+    reverse_proxy 192.168.1.58:8080
+}

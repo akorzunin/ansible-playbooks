@@ -1,0 +1,35 @@
+- name: Deploy ws Caddy
+  hosts: local_workstation
+  become: false
+
+  tasks:
+    - name: Copy Dockefile file to service directory
+      ansible.builtin.copy:
+        src: ~/documents/ansible/playbooks/workstation-caddy/Dockerfile
+        dest: ~/Documents/workstation-caddy/
+        mode: "0644"
+        backup: true
+        remote_src: false
+
+    - name: Copy compose.yaml file to service directory
+      ansible.builtin.copy:
+        src: ~/documents/ansible/playbooks/workstation-caddy/compose.yaml
+        dest: ~/Documents/workstation-caddy/
+        mode: "0644"
+        backup: true
+        remote_src: false
+
+    - name: Copy Caddyfile file to service directory
+      ansible.builtin.copy:
+        src: ~/documents/ansible/playbooks/workstation-caddy/Caddyfile
+        dest: ~/Documents/workstation-caddy/
+        mode: "0644"
+        backup: true
+        remote_src: false
+
+    - name: Deploy reverse_proxy
+      ansible.builtin.command:
+        cmd: docker-compose up -d --build
+        chdir: ~/Documents/workstation-caddy
+      register: my_output
+      changed_when: my_output.rc != 0
