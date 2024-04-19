@@ -1,0 +1,9 @@
+services:
+  dwman:
+    image: akorzunin/dwman:test
+    ports:
+      - ${PORT:-8000}:8000
+    env_file: .env
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data:rw
