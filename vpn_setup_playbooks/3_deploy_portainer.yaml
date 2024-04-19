@@ -1,0 +1,17 @@
+- name: Setup portainer
+  hosts: vps_sw_1
+  become: true
+
+  tasks:
+    - name: Create portainer container
+      community.docker.docker_container:
+        name: portainer
+        image: portainer/portainer-ce
+        state: started
+        recreate: true
+        restart_policy: always
+        published_ports:
+          - "9000:9000" # http port
+        volumes:
+          - /var/run/docker.sock:/var/run/docker.sock
+          - portainer_data:/data

@@ -1,0 +1,8 @@
+- name: Upgrade ubunu packages
+  hosts: vps_sw_1
+  become: true
+  tasks:
+    - name: Update and upgrade apt packages
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: true
