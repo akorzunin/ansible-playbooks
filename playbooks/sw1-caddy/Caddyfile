@@ -1,0 +1,12 @@
+dwman.duckdns.org {
+    reverse_proxy localhost:8000
+}
+wireguard.dwman.duckdns.org {
+    basicauth {
+        admin $2a$14$x/Uu9yowDoE1d4ORgJ2wVeCmCyhnOTXCfqgUxK8hzTtIDp0RsnW8.
+    }
+    reverse_proxy localhost:51821
+}
+portainer.dwman.duckdns.org {
+    reverse_proxy localhost:9000
+}
