@@ -1,0 +1,30 @@
+- name: Deploy ws-logs
+  hosts: local_workstation
+  become: false
+
+  tasks:
+    - name: Copy files to service directory
+      ansible.builtin.copy:
+        src: '{{ item }}'
+        dest: ~/Documents/ws-logs/
+        mode: "0644"
+        backup: true
+        remote_src: false
+      loop:
+        - ~/documents/ansible/playbooks/ws-logs/compose.yml
+        - ~/documents/ansible/playbooks/ws-logs/.env
+        - ~/documents/ansible/playbooks/ws-logs/prometheus.yml
+
+    - name: Create docker network
+      ansible.builtin.command:
+        cmd: docker network create ws-logs
+      register: out
+      changed_when: out.rc == 0
+      failed_when: out.rc >= 2
+
+    - name: Deploy ws-logs
+      ansible.builtin.command:
+        cmd: docker-compose up -d
+        chdir: ~/Documents/ws-logs
+      register: out
+      changed_when: out.rc != 0
