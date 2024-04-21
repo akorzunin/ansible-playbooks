@@ -24,3 +24,6 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu, video]
+          memory: 700M
+        limits:
+          memory: 2.0G
