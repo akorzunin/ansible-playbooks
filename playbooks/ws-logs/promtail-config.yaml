@@ -1,0 +1,40 @@
+server:
+  http_listen_port: 9080
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: containerlogs
+          host: docker
+          __path__: /var/lib/docker/containers/*/*-json.log
+    pipeline_stages:
+      - cri: {}
+      - json:
+          expressions:
+            log: log
+            stream: stream
+            time: time
+            tag: attrs.tag
+      - timestamp:
+          format: RFC3339Nano
+          source: time
+      - labels:
+          stream:
+          container_id:
+          tag:
+          compose_project:
+          compose_service:
+          stack_name:
+          swarm_service_name:
+          swarm_task_name:
+      - output:
+          source: log

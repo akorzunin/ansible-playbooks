@@ -14,6 +14,8 @@
         - ~/documents/ansible/playbooks/ws-logs/compose.yml
         - ~/documents/ansible/playbooks/ws-logs/.env
         - ~/documents/ansible/playbooks/ws-logs/prometheus.yml
+        - ~/documents/ansible/playbooks/ws-logs/loki-config.yaml
+        - ~/documents/ansible/playbooks/ws-logs/promtail-config.yaml
 
     - name: Create docker network
       ansible.builtin.command:
