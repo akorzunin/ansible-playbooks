@@ -22,3 +22,6 @@ wol.akorz.duckdns.org {
 grafana.akorz.duckdns.org {
     reverse_proxy localhost:3000
 }
+firefly.akorz.duckdns.org {
+    reverse_proxy localhost:8081
+}

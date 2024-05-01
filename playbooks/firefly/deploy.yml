@@ -1,0 +1,31 @@
+- name: Deploy firefly
+  hosts: local_workstation
+  become: false
+
+  tasks:
+    - name: Copy files to service directory
+      ansible.builtin.copy:
+        src: '{{ item }}'
+        dest: ~/Documents/firefly/
+        mode: "0644"
+        backup: true
+        remote_src: false
+      loop:
+        - ~/documents/ansible/playbooks/firefly/compose.yml
+        - ~/documents/ansible/playbooks/firefly/.env
+        - ~/documents/ansible/playbooks/firefly/.db.env
+        - ~/documents/ansible/playbooks/firefly/.importer.env
+
+    - name: Create docker network
+      ansible.builtin.command:
+        cmd: docker network create firefly_iii
+      register: out
+      changed_when: out.rc == 0
+      failed_when: out.rc >= 2
+
+    - name: Deploy firefly
+      ansible.builtin.command:
+        cmd: docker-compose up -d
+        chdir: ~/Documents/firefly
+      register: out
+      changed_when: out.rc != 0
