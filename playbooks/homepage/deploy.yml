@@ -1,0 +1,21 @@
+- name: Deploy homepage
+  hosts: local_workstation
+  become: false
+
+  tasks:
+    - name: Copy files to service directory
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: ~/Documents/homepage/
+        mode: "0644"
+        backup: true
+        remote_src: false
+      loop:
+        - ~/documents/ansible/playbooks/homepage/compose.yml
+
+    - name: Deploy homepage
+      ansible.builtin.command:
+        cmd: docker-compose up -d
+        chdir: ~/Documents/homepage
+      register: out
+      changed_when: out.rc != 0
