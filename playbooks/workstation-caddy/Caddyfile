@@ -25,3 +25,9 @@ grafana.akorz.duckdns.org {
 firefly.akorz.duckdns.org {
     reverse_proxy localhost:8081
 }
+firefly-importer.akorz.duckdns.org {
+    basicauth {
+		admin $2a$14$JC4WETVBevwbGaP214EWS.jwX0CR/gaJQyAXqxfdvHf/YrIK6kYfW
+	}
+    reverse_proxy localhost:8181
+}
