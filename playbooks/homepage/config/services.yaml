@@ -1,0 +1,67 @@
+---
+# For configuration options and examples, please see:
+# https://gethomepage.dev/latest/configs/services
+
+- Global services:
+    - WS-Portainer:
+        href: https://ws-portainer.akorz.duckdns.org
+        description: Workstation container dashboard
+        icon: si-portainer
+    - Grafana:
+        href: https://grafana.akorz.duckdns.org
+        description: Monitoring and dashboards
+        icon: si-grafana
+    - Jellyfin:
+        href: https://jellyfin.akorz.duckdns.org
+        description: Mediaserver
+        icon: si-jellyfin
+    - Trasmission:
+        href: https://transmission.akorz.duckdns.org
+        description: Torrent client
+        icon: si-transmission
+    - WakeOnLan:
+        href: https://wol.akorz.duckdns.org
+        description: Remote wake service
+        icon: mdi-lan
+    - Firefly:
+        href: https://firefly.akorz.duckdns.org
+        description: Finance tracking service
+        icon: si-fireflyiii
+    - Firefly-importer:
+        href: https://firefly-importer.akorz.duckdns.org
+        description: csv import tool
+        icon: si-fireflyiii
+
+- Local services:
+    - WS-Portainer-local:
+        href: http://192.168.1.132:9000
+        description: Workstation container dashboard
+        icon: si-portainer
+    - Grafana-local:
+        href: http://192.168.1.132:3000
+        description: Monitoring and dashboards
+        icon: si-grafana
+    - Jellyfin-local:
+        href: http://192.168.1.132:8096
+        description: Mediaserver
+        icon: si-jellyfin
+    - Trasmission-local:
+        href: http://192.168.1.132:9092
+        description: Torrent client
+        icon: si-transmission
+    - WakeOnLan-local:
+        href: http://192.168.1.58:8080
+        description: Remote wake service
+        icon: mdi-lan
+    - Firefly-local:
+        href: http://192.168.1.132:8081
+        description: Finance tracking service
+        icon: si-fireflyiii
+    - Pi-Portainer-local:
+        href: http://192.168.1.132:9000
+        description: Workstation container dashboard
+        icon: si-portainer
+    - DuckDNS-UI-local:
+        href: http://192.168.1.58:3000
+        description: UI for dynamic IP service
+        icon: mdi-duck

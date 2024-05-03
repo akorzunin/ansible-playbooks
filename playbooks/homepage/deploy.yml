@@ -5,13 +5,22 @@
   tasks:
     - name: Copy files to service directory
       ansible.builtin.copy:
-        src: "{{ item }}"
-        dest: ~/Documents/homepage/
+        src: "{{ item.src }}"
+        dest: ~/Documents/homepage/{{ item.dest }}
         mode: "0644"
         backup: true
         remote_src: false
       loop:
-        - ~/documents/ansible/playbooks/homepage/compose.yml
+        - src: ~/documents/ansible/playbooks/homepage/compose.yml
+          dest:
+        - src: ~/documents/ansible/playbooks/homepage/config/bookmarks.yaml
+          dest: config/
+        - src: ~/documents/ansible/playbooks/homepage/config/services.yaml
+          dest: config/
+        - src: ~/documents/ansible/playbooks/homepage/config/settings.yaml
+          dest: config
+        - src: ~/documents/ansible/playbooks/homepage/config/widgets.yaml
+          dest: config/
 
     - name: Deploy homepage
       ansible.builtin.command:

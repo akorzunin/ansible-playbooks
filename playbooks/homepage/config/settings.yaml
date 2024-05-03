@@ -1,0 +1,22 @@
+---
+# For configuration options and examples, please see:
+# https://gethomepage.dev/latest/configs/settings
+
+title: Akorz - Homepage
+headerStyle: boxedWidgets
+iconStyle: theme
+
+background:
+  image: https://images.unsplash.com/photo-1502790671504-542ad42d5189?auto=format&fit=crop&w=2560&q=80
+  blur: xl
+
+layout:
+  Global services:
+    style: row
+    columns: 4
+  Local services:
+    style: row
+    columns: 4
+  Links:
+    style: row
+    columns: 4

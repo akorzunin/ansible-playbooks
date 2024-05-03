@@ -1,0 +1,11 @@
+---
+# For configuration options and examples, please see:
+# https://gethomepage.dev/latest/configs/bookmarks
+
+- Links:
+    - Github:
+        - icon: si-github
+          href: https://github.com/akorzunin
+    - Playbooks:
+        - icon: si-ansible
+          href: https://github.com/akorzunin/ansible-playbooks
