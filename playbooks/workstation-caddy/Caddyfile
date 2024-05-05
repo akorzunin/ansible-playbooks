@@ -34,3 +34,6 @@ firefly-importer.akorz.duckdns.org {
 homepage.akorz.duckdns.org {
     reverse_proxy localhost:3030
 }
+dwman-test.akorz.duckdns.org {
+    reverse_proxy localhost:8088
+}

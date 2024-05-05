@@ -10,3 +10,6 @@ wireguard.dwman.duckdns.org {
 portainer.dwman.duckdns.org {
     reverse_proxy localhost:9000
 }
+test-dwman.duckdns.org {
+    reverse_proxy localhost:8088
+}

@@ -3,33 +3,20 @@
   become: false
 
   tasks:
-    - name: Copy Dockefile file to service directory
+    - name: Copy files to service directory
       ansible.builtin.copy:
-        src: ~/documents/ansible/playbooks/sw1-caddy/Dockerfile
+        src: '{{ item }}'
         dest: ~/Documents/sw1-caddy/
         mode: "0644"
         backup: true
         remote_src: false
-
-    - name: Copy compose.yaml file to service directory
-      ansible.builtin.copy:
-        src: ~/documents/ansible/playbooks/sw1-caddy/compose.yaml
-        dest: ~/Documents/sw1-caddy/
-        mode: "0644"
-        backup: true
-        remote_src: false
-
-    - name: Copy Caddyfile file to service directory
-      ansible.builtin.copy:
-        src: ~/documents/ansible/playbooks/sw1-caddy/Caddyfile
-        dest: ~/Documents/sw1-caddy/
-        mode: "0644"
-        backup: true
-        remote_src: false
+      loop:
+        - ~/documents/ansible/playbooks/sw1-caddy/compose.yaml
+        - ~/documents/ansible/playbooks/sw1-caddy/Caddyfile
 
     - name: Deploy reverse_proxy
       ansible.builtin.command:
-        cmd: docker-compose up -d --build
+        cmd: docker compose up -d --force-recreate
         chdir: ~/Documents/sw1-caddy
       register: out
       changed_when: out.rc != 0
