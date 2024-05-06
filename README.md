@@ -1,9 +1,9 @@
 # My collection of ansible playbooks
 
-ansible-lint command
+Run all checks locally
 
 ```sh
-ansible-lint
+pre-commit run --all-files
 ```
 
 dependencies

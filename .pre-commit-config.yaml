@@ -3,7 +3,9 @@ repos:
     rev: v4.5.0
     hooks:
       - id: trailing-whitespace
-  - repo: https://github.com/mpalmer/action-validator
-    rev: v0.5.4
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+  - repo: https://github.com/ansible/ansible-lint
+    rev: v24.2.3
     hooks:
-      - id: action-validator
+      - id: ansible-lint
