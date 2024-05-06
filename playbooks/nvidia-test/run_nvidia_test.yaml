@@ -17,7 +17,7 @@
         backup: true
         remote_src: false
 
-    - name: Cd to nvidia test dir
+    - name: Run test container
       ansible.builtin.command:
         chdir: ~/Documents/nvidia-test
         cmd: docker-compose up

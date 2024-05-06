@@ -1,6 +1,7 @@
 services:
   duckdns-ui:
     image: akorzunin/duckdns-ui:latest
+    container_name: duckdns-ui
     ports:
       - 3000:3000
     env_file:

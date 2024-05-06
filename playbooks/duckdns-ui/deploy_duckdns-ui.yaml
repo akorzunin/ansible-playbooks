@@ -5,18 +5,14 @@
   tasks:
     - name: Copy compose.yaml file to service directory
       ansible.builtin.copy:
-        src: ~/documents/ansible/playbooks/duckdns-ui/compose.yaml
+        src: '{{ item }}'
         dest: ~/Documents/duckdns-ui/
         mode: "0644"
         backup: true
         remote_src: false
-
-    - name: Copy .env file
-      ansible.builtin.copy:
-        src: ~/documents/ansible/playbooks/duckdns-ui/.env
-        dest: ~/Documents/duckdns-ui/
-        mode: "0644"
-        backup: true
+      loop:
+        - ~/documents/ansible/playbooks/duckdns-ui/compose.yaml
+        - ~/documents/ansible/playbooks/duckdns-ui/.env
 
     - name: Pull new image duckdns-ui
       ansible.builtin.command:
