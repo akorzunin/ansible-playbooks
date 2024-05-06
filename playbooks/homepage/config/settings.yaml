@@ -11,12 +11,30 @@ background:
   blur: xl
 
 layout:
-  Global services:
-    style: row
-    columns: 4
-  Local services:
-    style: row
-    columns: 4
-  Links:
-    style: row
-    columns: 4
+  - Global services:
+      tab: Workstation
+      style: row
+      columns: 4
+  - Local services:
+      tab: Workstation
+      style: row
+      columns: 4
+  - SW1 services (DNS):
+      tab: SW1 (Stockholm)
+      style: row
+      columns: 4
+  - SW1 services (IP):
+      tab: SW1 (Stockholm)
+      style: row
+      columns: 4
+  - PL1 services (DNS):
+      tab: PL1 (Warsaw)
+      style: row
+      columns: 4
+  - PL1 services (IP):
+      tab: PL1 (Warsaw)
+      style: row
+      columns: 4
+  - Links:
+      style: row
+      columns: 4

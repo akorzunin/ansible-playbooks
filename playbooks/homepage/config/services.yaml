@@ -65,3 +65,39 @@
         href: http://192.168.1.58:3000
         description: UI for dynamic IP service
         icon: mdi-duck
+
+- SW1 services (DNS):
+    - SW1-Portainer:
+        href: https://portainer.dwman.duckdns.org
+        description: Container dashboard
+        icon: si-portainer
+    - SW1-test-dwman:
+        href: https://test-dwman.duckdns.org
+        description: Test env
+        icon: mdi-play
+    - SW1-Wireguard:
+        href: https://wireguard.dwman.duckdns.org
+        description: VPN web UI
+        icon: si-wireguard
+
+- SW1 services (IP):
+    - SW1-Portainer:
+        href: http://77.221.140.146:9000
+        description: Container dashboard
+        icon: si-portainer
+    - SW1-test-dwman:
+        href: http://77.221.140.146:8088/
+        description: Test env
+        icon: mdi-play
+
+- PL1 services (DNS):
+    - PL1-dwman:
+        href: https://savespotifydw.duckdns.org
+        description: Prod env
+        icon: mdi-play
+
+- PL1 services (IP):
+    - PL1-Portainer:
+        href: http://91.193.18.241:9443
+        description: Container dashboard
+        icon: si-portainer
