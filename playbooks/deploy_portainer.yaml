@@ -1,12 +1,12 @@
 - name: Setup portainer
-  hosts: local_workstation
+  hosts: local_workstation, vps_sw_1
   become: true
 
   tasks:
     - name: Create portainer container
       community.docker.docker_container:
         name: portainer
-        image: portainer/portainer-ce
+        image: portainer/portainer-ce:2.20.2
         state: started
         recreate: true
         restart_policy: always
