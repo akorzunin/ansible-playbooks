@@ -1,0 +1,12 @@
+name: 3proxy
+services:
+  3proxy:
+    image: 3proxy/3proxy
+    container_name: 3proxy
+    restart: unless-stopped
+    ports:
+      - 3000:443
+      - 3000:3000
+    volumes:
+      - ./proxy-config.cfg:/etc/3proxy/3proxy.cfg:ro
+      - ./users.env:/etc/3proxy/users:ro

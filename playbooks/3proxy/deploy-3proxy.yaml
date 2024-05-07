@@ -1,0 +1,23 @@
+- name: Deploy 3proxy
+  hosts: local_workstation, vps_sw_1
+  become: false
+
+  tasks:
+    - name: Copy files to service directory
+      ansible.builtin.copy:
+        src: '{{ item }}'
+        dest: ~/Documents/3proxy/
+        mode: "0644"
+        backup: true
+        remote_src: false
+      loop:
+        - ~/documents/ansible/playbooks/3proxy/compose.yml
+        - ~/documents/ansible/playbooks/3proxy/users.env
+        - ~/documents/ansible/playbooks/3proxy/proxy-config.cfg
+
+    - name: Deploy 3proxy
+      ansible.builtin.command:
+        cmd: docker compose up --force-recreate -d
+        chdir: ~/Documents/3proxy
+      register: out
+      changed_when: out.rc != 0
