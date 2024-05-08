@@ -5,15 +5,15 @@
   tasks:
     - name: Copy files to service directory
       ansible.builtin.copy:
-        src: '{{ item }}'
+        src: "{{ item }}"
         dest: ~/Documents/3proxy/
         mode: "0644"
         backup: true
         remote_src: false
       loop:
-        - ~/documents/ansible/playbooks/3proxy/compose.yml
-        - ~/documents/ansible/playbooks/3proxy/users.env
-        - ~/documents/ansible/playbooks/3proxy/proxy-config.cfg
+        - "{{ lookup('env', 'PWD') }}/playbooks/3proxy/compose.yml"
+        - "{{ lookup('env', 'PWD') }}/playbooks/3proxy/users.env"
+        - "{{ lookup('env', 'PWD') }}/playbooks/3proxy/proxy-config.cfg"
 
     - name: Deploy 3proxy
       ansible.builtin.command:
