@@ -16,7 +16,7 @@
 
     - name: Deploy reverse_proxy
       ansible.builtin.command:
-        cmd: docker-compose up -d
+        cmd: docker compose up -d --force-recreate
         chdir: ~/Documents/workstation-caddy
       register: out
       changed_when: out.rc != 0
