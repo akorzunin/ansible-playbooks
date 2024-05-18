@@ -20,7 +20,7 @@
     - name: Run test container
       ansible.builtin.command:
         chdir: ~/Documents/nvidia-test
-        cmd: docker-compose up
+        cmd: docker compose up
       register: docker_compose_output
       changed_when: docker_compose_output.rc != 0
 

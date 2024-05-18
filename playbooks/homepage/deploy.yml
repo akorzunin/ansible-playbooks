@@ -1,5 +1,5 @@
 - name: Deploy homepage
-  hosts: local_workstation
+  hosts: all
   become: false
 
   tasks:

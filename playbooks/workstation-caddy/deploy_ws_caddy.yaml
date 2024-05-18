@@ -1,5 +1,5 @@
 - name: Deploy ws Caddy
-  hosts: local_workstation
+  hosts: all
   become: false
 
   tasks:
