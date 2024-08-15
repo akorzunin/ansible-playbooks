@@ -1,0 +1,29 @@
+services:
+  3x-ui:
+    image: ghcr.io/mhsanaei/3x-ui:v2.3.13
+    container_name: 3x-ui
+    volumes:
+      - $PWD/db/:/etc/x-ui/
+      - $PWD/cert/:/root/cert/
+    environment:
+      XRAY_VMESS_AEAD_FORCED: "false"
+    tty: true
+    restart: unless-stopped
+    ports:
+      - "2053:2053"
+      - "50000-51000/udp"
+      - "50000-51000/tcp"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - 3x-ui
+
+networks:
+  3x-ui:
+    external: true

@@ -40,3 +40,6 @@ dwman-test.akorz.duckdns.org {
 supericosahedron.akorz.duckdns.org {
     reverse_proxy 192.168.1.58:8282
 }
+3x-ui.akorz.duckdns.org {
+    reverse_proxy 192.168.1.132:2053
+}

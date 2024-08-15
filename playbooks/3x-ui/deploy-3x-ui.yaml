@@ -1,0 +1,21 @@
+- name: Deploy 3x-ui
+  hosts: all
+  become: false
+
+  tasks:
+    - name: Copy files to service directory
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: ~/Documents/3x-ui
+        mode: "0644"
+        backup: true
+        remote_src: false
+      loop:
+        - "{{ lookup('env', 'PWD') }}/playbooks/3x-ui/compose.yml"
+
+    - name: Deploy 3x-ui
+      ansible.builtin.command:
+        cmd: docker compose up --force-recreate -d
+        chdir: ~/Documents/3x-ui
+      register: out
+      changed_when: out.rc != 0
