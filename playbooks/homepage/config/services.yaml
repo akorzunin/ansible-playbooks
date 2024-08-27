@@ -58,7 +58,7 @@
         description: Finance tracking service
         icon: si-fireflyiii
     - Pi-Portainer-local:
-        href: http://192.168.1.132:9000
+        href: http://192.168.1.58:9000
         description: Workstation container dashboard
         icon: si-portainer
     - DuckDNS-UI-local:
