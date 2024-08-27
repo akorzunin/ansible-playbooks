@@ -6,7 +6,7 @@
     - name: Copy files to service directory
       ansible.builtin.copy:
         src: "{{ item }}"
-        dest: ~/Documents/3x-ui
+        dest: ~/Documents/3x-ui/
         mode: "0644"
         backup: true
         remote_src: false
