@@ -1,0 +1,21 @@
+- name: Deploy node-exporter
+  hosts: all
+  become: false
+
+  tasks:
+    - name: Copy files to service directory
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: ~/Documents/node-exporter/
+        mode: "0644"
+        backup: true
+        remote_src: false
+      loop:
+        - "{{ lookup('env', 'PWD') }}/playbooks/node-exporter/compose.yml"
+
+    - name: Deploy node-exporter
+      ansible.builtin.command:
+        cmd: docker compose up --force-recreate -d
+        chdir: ~/Documents/node-exporter
+      register: out
+      changed_when: out.rc != 0

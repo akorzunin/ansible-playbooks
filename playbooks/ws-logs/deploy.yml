@@ -1,5 +1,5 @@
 - name: Deploy ws-logs
-  hosts: local_workstation
+  hosts: all
   become: false
 
   tasks:
@@ -26,7 +26,7 @@
 
     - name: Deploy ws-logs
       ansible.builtin.command:
-        cmd: docker-compose up -d
+        cmd: docker compose up -d --force-recreate
         chdir: ~/Documents/ws-logs
       register: out
       changed_when: out.rc != 0
