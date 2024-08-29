@@ -3,3 +3,5 @@ hosts
 playbooks/wake-on-lan/computers.txt
 *.env
 *hosts
+.ansible_pass
+external_vars.yml

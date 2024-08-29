@@ -1,12 +1,23 @@
 - name: Deploy homepage
   hosts: all
   become: false
+  vars:
+    remote_install_path: ~/Documents/homepage
+  vars_files:
+    - "{{ lookup('env', 'PWD') }}/external_vars.yml"
 
   tasks:
+    - name: Render config templates
+      ansible.builtin.template:
+        src: "{{ lookup('env', 'PWD') }}/playbooks/homepage/config/services.yaml.j2"
+        mode: "0644"
+        dest: "{{ remote_install_path }}/config/services.yaml"
+        remote_src: false
+
     - name: Copy files to service directory
       ansible.builtin.copy:
         src: "{{ item.src }}"
-        dest: ~/Documents/homepage/{{ item.dest }}
+        dest: "{{ remote_install_path }}/{{ item.dest }}"
         mode: "0644"
         backup: true
         remote_src: false
@@ -15,8 +26,6 @@
           dest:
         - src: ~/documents/ansible/playbooks/homepage/config/bookmarks.yaml
           dest: config/
-        - src: ~/documents/ansible/playbooks/homepage/config/services.yaml
-          dest: config/
         - src: ~/documents/ansible/playbooks/homepage/config/settings.yaml
           dest: config
         - src: ~/documents/ansible/playbooks/homepage/config/widgets.yaml
@@ -24,7 +33,7 @@
 
     - name: Deploy homepage
       ansible.builtin.command:
-        cmd: docker-compose up -d
-        chdir: ~/Documents/homepage
+        cmd: docker compose up -d --force-recreate
+        chdir: "{{ remote_install_path }}"
       register: out
       changed_when: out.rc != 0

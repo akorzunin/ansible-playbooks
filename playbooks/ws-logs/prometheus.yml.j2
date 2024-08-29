@@ -9,11 +9,11 @@ scrape_configs:
 
   - job_name: "nodeexporter-pi"
     static_configs:
-      - targets: ["192.168.1.58:9100"]
+      - targets: ["{{ HOST_LOCAL_PI_IP }}:9100"]
 
   - job_name: "nodeexporter-sw1"
     static_configs:
-      - targets: ["77.221.140.146:9100"]
+      - targets: ["{{ HOST_SW1_IP }}:9100"]
 
   - job_name: "cadvisor"
     static_configs:
@@ -21,11 +21,11 @@ scrape_configs:
 
   - job_name: "cadvisor-pi"
     static_configs:
-      - targets: ["192.168.1.58:3003"]
+      - targets: ["{{ HOST_LOCAL_PI_IP }}:3003"]
 
   - job_name: "cadvisor-sw1"
     static_configs:
-      - targets: ["77.221.140.146:3003"]
+      - targets: ["{{ HOST_SW1_IP }}:3003"]
 
   - job_name: "prometheus"
     static_configs:

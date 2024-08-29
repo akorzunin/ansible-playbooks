@@ -4,89 +4,93 @@
 
 - Global services:
     - WS-Portainer:
-        href: https://ws-portainer.akorz.duckdns.org
+        href: https://ws-portainer.{{ DNS_HOME }}
         description: Workstation container dashboard
         icon: si-portainer
     - Grafana:
-        href: https://grafana.akorz.duckdns.org
+        href: https://grafana.{{ DNS_HOME }}
         description: Monitoring and dashboards
         icon: si-grafana
     - Jellyfin:
-        href: https://jellyfin.akorz.duckdns.org
+        href: https://jellyfin.{{ DNS_HOME }}
         description: Mediaserver
         icon: si-jellyfin
     - Trasmission:
-        href: https://transmission.akorz.duckdns.org
+        href: https://transmission.{{ DNS_HOME }}
         description: Torrent client
         icon: si-transmission
     - WakeOnLan:
-        href: https://wol.akorz.duckdns.org
+        href: https://wol.{{ DNS_HOME }}
         description: Remote wake service
         icon: mdi-lan
     - Firefly:
-        href: https://firefly.akorz.duckdns.org
+        href: https://firefly.{{ DNS_HOME }}
         description: Finance tracking service
         icon: si-fireflyiii
-    - Firefly-importer:
-        href: https://firefly-importer.akorz.duckdns.org
-        description: csv import tool
-        icon: si-fireflyiii
+    - SW1-3x-ui:
+        href: https://3x-ui.{{ DNS_SW1 }}
+        description: VLESS VPN web UI
+        icon: mdi-vpn
 
 - Local services:
     - WS-Portainer-local:
-        href: http://192.168.1.132:9000
+        href: http://{{ HOST_LOCAL_WS_IP }}:9000
         description: Workstation container dashboard
         icon: si-portainer
     - Grafana-local:
-        href: http://192.168.1.132:3000
+        href: http://{{ HOST_LOCAL_WS_IP }}:3000
         description: Monitoring and dashboards
         icon: si-grafana
     - Jellyfin-local:
-        href: http://192.168.1.132:8096
+        href: http://{{ HOST_LOCAL_WS_IP }}:8096
         description: Mediaserver
         icon: si-jellyfin
     - Trasmission-local:
-        href: http://192.168.1.132:9092
+        href: http://{{ HOST_LOCAL_WS_IP }}:9092
         description: Torrent client
         icon: si-transmission
     - WakeOnLan-local:
-        href: http://192.168.1.58:8080
+        href: http://{{ HOST_LOCAL_PI_IP }}:8080
         description: Remote wake service
         icon: mdi-lan
     - Firefly-local:
-        href: http://192.168.1.132:8081
+        href: http://{{ HOST_LOCAL_WS_IP }}:8081
         description: Finance tracking service
         icon: si-fireflyiii
     - Pi-Portainer-local:
-        href: http://192.168.1.58:9000
+        href: http://{{ HOST_LOCAL_PI_IP }}:9000
         description: Workstation container dashboard
         icon: si-portainer
     - DuckDNS-UI-local:
-        href: http://192.168.1.58:3000
+        href: http://{{ HOST_LOCAL_PI_IP }}:3000
         description: UI for dynamic IP service
         icon: mdi-duck
 
 - SW1 services (DNS):
     - SW1-Portainer:
-        href: https://portainer.dwman.duckdns.org
+        href: https://portainer.{{ DNS_SW1 }}
         description: Container dashboard
         icon: si-portainer
     - SW1-test-dwman:
-        href: https://test-dwman.duckdns.org
+        href: https://test-{{ DNS_SW1 }}
         description: Test env
         icon: mdi-play
     - SW1-Wireguard:
-        href: https://wireguard.dwman.duckdns.org
+        href: https://wireguard.{{ DNS_SW1 }}
         description: VPN web UI
         icon: si-wireguard
+    - SW1-3x-ui:
+        href: https://3x-ui.{{ DNS_SW1 }}
+        description: VLESS VPN web UI
+        icon: mdi-vpn
 
 - SW1 services (IP):
     - SW1-Portainer:
-        href: http://77.221.140.146:9000
+        href: http://{{ HOST_SW1_IP }}:9000
         description: Container dashboard
         icon: si-portainer
     - SW1-test-dwman:
-        href: http://77.221.140.146:8088/
+        href: http://{{ HOST_SW1_IP }}:8088/
         description: Test env
         icon: mdi-play
 
@@ -98,6 +102,6 @@
 
 - PL1 services (IP):
     - PL1-Portainer:
-        href: http://91.193.18.241:9443
+        href: http://{{ HOST_PL1_IP }}:9443
         description: Container dashboard
         icon: si-portainer
