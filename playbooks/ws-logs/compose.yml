@@ -80,7 +80,7 @@ services:
       org.label-schema.group: "monitoring"
 
   loki:
-    image: grafana/loki:2.9.7
+    image: grafana/loki:3.1.1
     container_name: loki
     ports:
       - "3100:3100"
@@ -89,7 +89,7 @@ services:
     command: -config.file=/etc/loki/local-config.yaml
 
   promtail:
-    image: grafana/promtail:2.9.7
+    image: grafana/promtail:3.1.1
     container_name: promtail
     volumes:
       - ./promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
@@ -98,8 +98,3 @@ services:
     command: -config.file=/etc/promtail/promtail-config.yaml
     depends_on:
       - loki
-
-networks:
-  default:
-    name: $DOCKER_MY_NETWORK
-    external: true

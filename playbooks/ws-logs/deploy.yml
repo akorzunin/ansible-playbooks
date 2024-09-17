@@ -26,13 +26,6 @@
         - ~/documents/ansible/playbooks/ws-logs/loki-config.yaml
         - ~/documents/ansible/playbooks/ws-logs/promtail-config.yaml
 
-    - name: Create docker network
-      ansible.builtin.command:
-        cmd: docker network create ws-logs
-      register: out
-      changed_when: out.rc == 0
-      failed_when: out.rc >= 2
-
     - name: Deploy ws-logs
       ansible.builtin.command:
         cmd: docker compose up -d --force-recreate
