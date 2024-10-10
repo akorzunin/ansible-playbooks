@@ -1,10 +1,12 @@
 # My collection of ansible playbooks
 
-Shell script to run playbooks (fzf required)
-example:
-```sh
-sh deploy.sh --step --extra-vars "var_host=localhost"
-```
+## Create new secret
+
+    ansible-vault encrypt_string --vault-password-file .ansible_pass "amogus"
+
+## Run playbook
+
+    ansible-playbook --vault-password-file=.ansible_pass ./playbooks/deploy_portainer.yaml  -l local_workstation
 
 Run all checks locally
 

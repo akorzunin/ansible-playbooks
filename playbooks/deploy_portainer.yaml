@@ -3,15 +3,26 @@
   become: true
 
   tasks:
+    - name: Remove existing portainer container
+      ansible.builtin.command: docker rm -f portainer
+      ignore_errors: true
+      register: out
+      changed_when: out.rc == 0
+
     - name: Create portainer container
-      community.docker.docker_container:
-        name: portainer
-        image: portainer/portainer-ce:2.20.2
-        state: started
-        recreate: true
-        restart_policy: always
-        published_ports:
-          - "9000:9000"
-        volumes:
-          - /var/run/docker.sock:/var/run/docker.sock
-          - portainer_data:/data
+      ansible.builtin.command: docker run \
+        --name portainer \
+        -d \
+        --restart always \
+        -p 9000:9000 \
+        -v /var/run/docker.sock:/var/run/docker.sock \
+        -v portainer_data:/data \
+        portainer/portainer-ce:2.21.3
+      register: portainer_container
+      changed_when: portainer_container.rc == 0
+
+    - name: Ensure portainer container is running
+      ansible.builtin.command: docker start portainer
+      when: not portainer_container.changed
+      register: out
+      changed_when: out.rc == 0
