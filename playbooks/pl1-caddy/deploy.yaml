@@ -1,0 +1,24 @@
+- name: Deploy ws Caddy
+  hosts: all
+  become: false
+  vars:
+    local_path: "{{ lookup('env', 'PWD') }}/playbooks/pl1-caddy/"
+    remote_install_path: ~/deploy/vps-caddy
+
+  tasks:
+    - name: Copy files to service directory
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ remote_install_path }}"
+        mode: "0644"
+        remote_src: false
+      loop:
+        - "{{ local_path }}/compose.yaml"
+        - "{{ local_path }}/Caddyfile"
+
+    - name: Deploy reverse_proxy
+      ansible.builtin.command:
+        cmd: docker compose up -d --force-recreate
+        chdir: "{{ remote_install_path }}"
+      register: out
+      changed_when: out.rc != 0

@@ -1,21 +1,21 @@
 - name: Deploy cadvisor
   hosts: all
   become: false
+  vars:
+    local_path: "{{ lookup('env', 'PWD') }}/playbooks/cadvisor/"
+    remote_install_path: ~/deploy/cadvisor/
 
   tasks:
     - name: Copy files to service directory
       ansible.builtin.copy:
-        src: "{{ item }}"
-        dest: ~/Documents/cadvisor/
+        src: "{{ local_path }}/compose.yml"
+        dest: "{{ remote_install_path }}"
         mode: "0644"
-        backup: true
         remote_src: false
-      loop:
-        - "{{ lookup('env', 'PWD') }}/playbooks/cadvisor/compose.yml"
 
     - name: Deploy cadvisor
       ansible.builtin.command:
         cmd: docker compose up --force-recreate -d
-        chdir: ~/Documents/cadvisor
+        chdir: "{{ remote_install_path }}"
       register: out
       changed_when: out.rc != 0
