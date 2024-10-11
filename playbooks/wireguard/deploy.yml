@@ -1,0 +1,25 @@
+- name: Setup wireguard
+  hosts: all
+  become: false
+  vars:
+    local_path: "{{ lookup('env', 'PWD') }}/playbooks/wireguard/"
+    remote_install_path: ~/deploy/wireguard/
+  vars_files:
+    - "{{ lookup('env', 'PWD') }}/external_vars.yml"
+
+  tasks:
+    - name: Copy compose.yml file to service directory
+      ansible.builtin.copy:
+        src: "{{ local_path }}/compose.yml"
+        dest: "{{ remote_install_path }}"
+        mode: "0644"
+        remote_src: false
+
+    - name: Deploy wireguard
+      ansible.builtin.command:
+        cmd: docker compose up -d --force-recreate
+        chdir: "{{ remote_install_path }}"
+      environment:
+        WG_HOST: "{{ HOST_PL1_IP }}"
+      register: out
+      changed_when: out.rc != 0

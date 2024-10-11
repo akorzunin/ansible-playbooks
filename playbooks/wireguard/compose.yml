@@ -1,14 +1,11 @@
 services:
   wireguard:
-    image: ghcr.io/wg-easy/wg-easy
+    image: ghcr.io/wg-easy/wg-easy:12
     container_name: wireguard
-    env_file: .env
+    environment:
+      - WG_HOST=${WG_HOST}
     volumes:
       - ./wireguard/data:/etc/wireguard
-    security_opt:
-      - no-new-privileges:true
-    networks:
-      - wireguard
     ports:
       - "51820:51820/udp"
       - "127.0.0.1:51821:51821"
@@ -19,7 +16,3 @@ services:
     sysctls:
       - net.ipv4.ip_forward=1
       - net.ipv4.conf.all.src_valid_mark=1
-
-networks:
-  wireguard:
-    external: true
