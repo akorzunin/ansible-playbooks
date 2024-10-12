@@ -1,5 +1,6 @@
 DNS_HOME: example.org
 DNS_SW1: example.org
+DNS_PL1: example.org
 HOST_LOCAL_WS_IP: 0.0.0.0
 HOST_LOCAL_PI_IP: 0.0.0.0
 HOST_SW1_IP: 0.0.0.0

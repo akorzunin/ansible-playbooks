@@ -2,29 +2,30 @@
   hosts: all
   become: false
   vars:
-    remote_install_path: ~/Documents/ws-logs
+    local_path: "{{ lookup('env', 'PWD') }}/playbooks/ws-logs/"
+    remote_install_path: ~/deploy/ws-logs/
   vars_files:
     - "{{ lookup('env', 'PWD') }}/external_vars.yml"
 
   tasks:
-    - name: Render config templates
-      ansible.builtin.template:
-        src: "{{ lookup('env', 'PWD') }}/playbooks/ws-logs/prometheus.yml.j2"
-        mode: "0644"
-        dest: "{{ remote_install_path }}/prometheus.yml"
-        remote_src: false
-
     - name: Copy files to service directory
       ansible.builtin.copy:
-        src: "{{ item }}"
+        src: "{{ local_path }}/{{ item }}"
         dest: "{{ remote_install_path }}/"
         mode: "0644"
         remote_src: false
       loop:
-        - ~/documents/ansible/playbooks/ws-logs/compose.yml
-        - ~/documents/ansible/playbooks/ws-logs/.env
-        - ~/documents/ansible/playbooks/ws-logs/loki-config.yaml
-        - ~/documents/ansible/playbooks/ws-logs/promtail-config.yaml
+        - compose.yml
+        - .env
+        - loki-config.yaml
+        - promtail-config.yaml
+
+    - name: Render config templates
+      ansible.builtin.template:
+        src: "{{ local_path }}/prometheus.yml.j2"
+        mode: "0644"
+        dest: "{{ remote_install_path }}/prometheus.yml"
+        remote_src: false
 
     - name: Deploy ws-logs
       ansible.builtin.command:
