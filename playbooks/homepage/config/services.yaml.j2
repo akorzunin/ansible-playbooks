@@ -27,10 +27,6 @@
         href: https://firefly.{{ DNS_HOME }}
         description: Finance tracking service
         icon: si-fireflyiii
-    - SW1-3x-ui:
-        href: https://3x-ui.{{ DNS_SW1 }}
-        description: VLESS VPN web UI
-        icon: mdi-vpn
 
 - Local services:
     - WS-Portainer-local:
@@ -41,6 +37,10 @@
         href: http://{{ HOST_LOCAL_WS_IP }}:3000
         description: Monitoring and dashboards
         icon: si-grafana
+    - Prometheus-local:
+        href: http://{{ HOST_LOCAL_WS_IP }}:9090/targets?search=
+        description: Active monitoring jobs
+        icon: si-prometheus
     - Jellyfin-local:
         href: http://{{ HOST_LOCAL_WS_IP }}:8096
         description: Mediaserver
@@ -67,41 +67,45 @@
         icon: mdi-duck
 
 - SW1 services (DNS):
-    - SW1-Portainer:
+    - Portainer:
         href: https://portainer.{{ DNS_SW1 }}
         description: Container dashboard
         icon: si-portainer
-    - SW1-test-dwman:
-        href: https://test-{{ DNS_SW1 }}
-        description: Test env
-        icon: mdi-play
-    - SW1-Wireguard:
+    - Wireguard:
         href: https://wireguard.{{ DNS_SW1 }}
         description: VPN web UI
         icon: si-wireguard
-    - SW1-3x-ui:
+    - 3x-ui:
         href: https://3x-ui.{{ DNS_SW1 }}
         description: VLESS VPN web UI
-        icon: mdi-vpn
-
-- SW1 services (IP):
-    - SW1-Portainer:
-        href: http://{{ HOST_SW1_IP }}:9000
-        description: Container dashboard
-        icon: si-portainer
-    - SW1-test-dwman:
-        href: http://{{ HOST_SW1_IP }}:8088/
+        icon: si-ray
+    - Dwman:
+        href: https://dwman.{{ DNS_SW1 }}
+        description: Playlist saver service
+        icon: mdi-play
+    - test-dwman:
+        href: https://test-dwman.{{ DNS_SW1 }}
         description: Test env
         icon: mdi-play
 
+- SW1 services (IP):
+    - Portainer:
+        href: http://{{ HOST_SW1_IP }}:9000
+        description: Container dashboard
+        icon: si-portainer
+
 - PL1 services (DNS):
-    - PL1-dwman:
-        href: https://savespotifydw.duckdns.org
-        description: Prod env
-        icon: mdi-play
+    - Portainer:
+        href: https://portainer.{{ DNS_PL1 }}
+        description: Container dashboard
+        icon: si-portainer
+    - 3x-ui:
+        href: https://3x-ui.{{ DNS_PL1 }}
+        description: VLESS VPN web UI
+        icon: si-ray
 
 - PL1 services (IP):
-    - PL1-Portainer:
-        href: http://{{ HOST_PL1_IP }}:9443
+    - Portainer:
+        href: http://{{ HOST_PL1_IP }}:9000
         description: Container dashboard
         icon: si-portainer

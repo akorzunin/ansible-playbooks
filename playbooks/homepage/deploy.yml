@@ -2,34 +2,34 @@
   hosts: all
   become: false
   vars:
-    remote_install_path: ~/Documents/homepage
+    local_path: "{{ lookup('env', 'PWD') }}/playbooks/homepage/"
+    remote_install_path: ~/deploy/homepage/
   vars_files:
     - "{{ lookup('env', 'PWD') }}/external_vars.yml"
 
   tasks:
+    - name: Copy files to service directory
+      ansible.builtin.copy:
+        src: "{{ local_path }}/{{ item.src }}"
+        dest: "{{ remote_install_path }}/{{ item.dest }}"
+        mode: "0644"
+        remote_src: false
+      loop:
+        - src: compose.yml
+          dest:
+        - src: config/bookmarks.yaml
+          dest: config/
+        - src: config/settings.yaml
+          dest: config
+        - src: config/widgets.yaml
+          dest: config/
+
     - name: Render config templates
       ansible.builtin.template:
-        src: "{{ lookup('env', 'PWD') }}/playbooks/homepage/config/services.yaml.j2"
+        src: "{{ local_path }}/config/services.yaml.j2"
         mode: "0644"
         dest: "{{ remote_install_path }}/config/services.yaml"
         remote_src: false
-
-    - name: Copy files to service directory
-      ansible.builtin.copy:
-        src: "{{ item.src }}"
-        dest: "{{ remote_install_path }}/{{ item.dest }}"
-        mode: "0644"
-        backup: true
-        remote_src: false
-      loop:
-        - src: ~/documents/ansible/playbooks/homepage/compose.yml
-          dest:
-        - src: ~/documents/ansible/playbooks/homepage/config/bookmarks.yaml
-          dest: config/
-        - src: ~/documents/ansible/playbooks/homepage/config/settings.yaml
-          dest: config
-        - src: ~/documents/ansible/playbooks/homepage/config/widgets.yaml
-          dest: config/
 
     - name: Deploy homepage
       ansible.builtin.command:
