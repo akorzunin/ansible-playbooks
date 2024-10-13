@@ -13,9 +13,9 @@ wireguard.akorz-sw1.duckdns.org {
 3x-ui.akorz-sw1.duckdns.org {
     reverse_proxy localhost:2053
 }
-test-dwman.akorz-sw1.duckdns.org {
-    reverse_proxy localhost:8000
-}
 dwman.akorz-sw1.duckdns.org {
+    reverse_proxy localhost:8008
+}
+test-dwman.akorz-sw1.duckdns.org {
     reverse_proxy localhost:8088
 }
