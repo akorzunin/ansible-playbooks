@@ -1,6 +1,6 @@
 services:
   app:
-    image: fireflyiii/core:latest
+    image: fireflyiii/core:version-6.1.9
     hostname: app
     container_name: firefly_iii_core
     restart: unless-stopped
@@ -14,7 +14,7 @@ services:
     depends_on:
       - db
   db:
-    image: "postgres:latest"
+    image: postgres:13.16
     hostname: db
     container_name: firefly_iii_db
     restart: unless-stopped
@@ -23,18 +23,6 @@ services:
       - firefly_iii
     volumes:
       - ./firefly-data/db:/var/lib/postgresql/data:rw
-  importer:
-    image: fireflyiii/data-importer:latest
-    hostname: importer
-    restart: unless-stopped
-    container_name: firefly_iii_importer
-    networks:
-      - firefly_iii
-    ports:
-      - '8181:8080'
-    depends_on:
-      - app
-    env_file: .importer.env
 
 networks:
   firefly_iii:
