@@ -4,6 +4,8 @@
 
     ansible-vault encrypt_string --vault-password-file .ansible_pass "amogus"
 
+    caddy hash-password --algo=argon2 --plaintext=amogus
+
 ## Run playbook
 
     ansible-playbook --vault-password-file=.ansible_pass ./playbooks/deploy_portainer.yaml  -l local_workstation
