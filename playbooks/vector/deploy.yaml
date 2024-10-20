@@ -1,0 +1,30 @@
+- name: Deploy homepage
+  hosts: all
+  become: false
+  vars:
+    local_path: "{{ lookup('env', 'PWD') }}/playbooks/vector/"
+    remote_install_path: ~/deploy/vector/
+  vars_files:
+    - "{{ lookup('env', 'PWD') }}/external_vars.yml"
+
+  tasks:
+    - name: Copy files to service directory
+      ansible.builtin.copy:
+        src: "{{ local_path }}/{{ item }}"
+        dest: "{{ remote_install_path }}"
+        mode: "0644"
+        remote_src: false
+      loop:
+        - vector.yaml
+        - compose.yaml
+
+    - name: Deploy vector
+      ansible.builtin.command:
+        cmd: docker compose up -d --force-recreate
+        chdir: "{{ remote_install_path }}"
+      environment:
+        VECTOR_LOG_HOST: "{{ inventory_hostname }}"
+        LOGGING_LOKI_USER: "{{ AUTH_USER }}"
+        LOGGING_LOKI_PASS: "{{ AUTH_PASS }}"
+      register: out
+      changed_when: out.rc != 0

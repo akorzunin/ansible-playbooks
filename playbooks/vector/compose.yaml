@@ -1,0 +1,11 @@
+services:
+  vector:
+    image: timberio/vector:0.41.1-alpine
+    container_name: vector
+    environment:
+      - VECTOR_LOG_HOST=${VECTOR_LOG_HOST}
+      - LOGGING_LOKI_USER=${LOGGING_LOKI_USER}
+      - LOGGING_LOKI_PASS=${LOGGING_LOKI_PASS}
+    volumes:
+      - ./vector.yaml:/etc/vector/vector.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
