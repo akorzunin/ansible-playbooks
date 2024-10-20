@@ -1,6 +1,4 @@
 services:
-
-  # MONITORING SYSTEM AND THE METRICS DATABASE
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
@@ -22,9 +20,9 @@ services:
     ports:
       - "9090:9090"
     labels:
-      org.label-schema.group: "monitoring"
+      org.label-schema.group: "monitoring" # deprecated
+      org.opencontainers.group: "monitoring"
 
-  # WEB BASED UI VISUALISATION OF METRICS
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
@@ -37,9 +35,9 @@ services:
     ports:
       - "3000:3000"
     labels:
-      org.label-schema.group: "monitoring"
+      org.label-schema.group: "monitoring" # deprecated
+      org.opencontainers.group: "monitoring"
 
-  # HOST LINUX MACHINE METRICS EXPORTER
   nodeexporter:
     image: prom/node-exporter:latest
     container_name: nodeexporter
@@ -57,11 +55,11 @@ services:
     expose:
       - "9100"
     labels:
-      org.label-schema.group: "monitoring"
+      org.label-schema.group: "monitoring" # deprecated
+      org.opencontainers.group: "monitoring"
 
-  # DOCKER CONTAINERS METRICS EXPORTER
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:latest
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
     container_name: cadvisor
     hostname: cadvisor
     restart: unless-stopped
@@ -73,28 +71,29 @@ services:
       - /var/run:/var/run:ro
       - /sys:/sys:ro
       - /var/lib/docker:/var/lib/docker:ro
-      - /cgroup:/cgroup:ro # doesn't work on MacOS only for Linux
+      - /cgroup:/cgroup:ro
     expose:
       - "3000"
     labels:
-      org.label-schema.group: "monitoring"
+      org.label-schema.group: "monitoring" # deprecated
+      org.opencontainers.group: "monitoring"
 
   loki:
     image: grafana/loki:3.1.1
     container_name: loki
+    restart: unless-stopped
     ports:
       - "3100:3100"
     volumes:
       - ./loki-config.yaml:/etc/loki/local-config.yaml:ro
     command: -config.file=/etc/loki/local-config.yaml
 
-  promtail:
-    image: grafana/promtail:3.1.1
-    container_name: promtail
+  vector:
+    image: timberio/vector:0.41.1-alpine
+    container_name: vector
+    restart: unless-stopped
+    environment:
+      - VECTOR_LOG_HOST=workstation
     volumes:
-      - ./promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
-      - ./promtail-data:/var/promtail:rw
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-    command: -config.file=/etc/promtail/promtail-config.yaml
-    depends_on:
-      - loki
+      - ./vector.yaml:/etc/vector/vector.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock

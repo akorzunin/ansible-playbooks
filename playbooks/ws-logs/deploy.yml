@@ -18,7 +18,7 @@
         - compose.yml
         - .env
         - loki-config.yaml
-        - promtail-config.yaml
+        - vector.yaml
 
     - name: Render config templates
       ansible.builtin.template:
