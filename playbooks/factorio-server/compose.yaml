@@ -1,0 +1,13 @@
+services:
+    factorio:
+        container_name: factorio-server
+        image: factoriotools/factorio:2.0.7
+        restart: unless-stopped
+        stdin_open: true
+        tty: true
+        ports:
+            - 34197:34197/udp
+            - 27015:27015/tcp
+        volumes:
+            - ./data:/factorio
+            # - ./factorio/bin:/opt/factorio/bin:ro
