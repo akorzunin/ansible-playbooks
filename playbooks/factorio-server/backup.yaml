@@ -1,0 +1,27 @@
+- name: Deploy factorio-server
+  hosts: all
+  become: false
+  vars:
+    local_path: "{{ lookup('env', 'PWD') }}/playbooks/factorio-server/"
+    remote_install_path: ~/deploy/factorio-server/
+    backup_name: factorio-server-backup-{{ ansible_date_time.iso8601 }}
+
+  tasks:
+    - name: Make backup
+      ansible.builtin.shell:
+        cmd: |
+          set -o pipefail
+          echo "/save {{ backup_name }}.zip" |
+          unbuffer -p docker attach factorio-server
+        chdir: "{{ remote_install_path }}/data/saves/"
+        executable: /bin/bash
+      register: out
+      changed_when: out.rc != 0
+
+    - name: Save backup to cloud
+      ansible.builtin.command:
+        cmd: |-
+          rclone copy ./{{ backup_name }}.zip remote:factorio-bacups
+        chdir: "{{ remote_install_path }}/data/saves/"
+      register: out
+      changed_when: out.rc != 0
