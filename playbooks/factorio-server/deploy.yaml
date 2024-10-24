@@ -13,6 +13,13 @@
         mode: "0644"
         remote_src: false
 
+    - name: Pull factorio-server
+      ansible.builtin.command:
+        cmd: docker compose pull
+        chdir: "{{ remote_install_path }}"
+      register: out
+      changed_when: out.rc != 0
+
     - name: Deploy factorio-server
       ansible.builtin.command:
         cmd: docker compose up --force-recreate -d

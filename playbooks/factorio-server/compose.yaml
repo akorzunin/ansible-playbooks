@@ -1,7 +1,7 @@
 services:
     factorio:
         container_name: factorio-server
-        image: factoriotools/factorio:2.0.9
+        image: factoriotools/factorio:stable
         restart: unless-stopped
         stdin_open: true
         tty: true
