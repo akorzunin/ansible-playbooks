@@ -1,0 +1,42 @@
+- name: Deploy semaphore
+  hosts: all
+  become: false
+  vars:
+    local_path: "{{ lookup('env', 'PWD') }}/playbooks/semaphore/"
+    remote_install_path: ~/deploy/semaphore/
+    local_root: "{{ lookup('env', 'PWD') }}/"
+  vars_files:
+    - "{{ lookup('env', 'PWD') }}/external_vars.yml"
+
+  tasks:
+    - name: Copy files to service directory
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ remote_install_path }}{{ item.dest }}"
+        mode: "0644"
+        remote_src: false
+      loop:
+        - src: "{{ local_path }}/compose.yaml"
+          dest:
+        - src: "{{ local_root }}/hosts"
+          dest: data/
+        - src: "{{ local_root }}/ansible.cfg"
+          dest: ansible/
+
+    - name: Set dirs permissions
+      ansible.builtin.command:
+        cmd: mkdir -m 777 -p config db data
+        chdir: "{{ remote_install_path }}"
+      register: out
+      changed_when: out.rc != 0
+
+    - name: Deploy semaphore
+      ansible.builtin.command:
+        cmd: docker compose up --force-recreate -d
+        chdir: "{{ remote_install_path }}"
+      environment:
+        SEMAPHORE_ADMIN_PASSWORD: "{{ AUTH_PASS }}"
+        SEMAPHORE_ADMIN_NAME: "{{ AUTH_USER }}"
+        SEMAPHORE_ADMIN: "{{ AUTH_USER }}"
+      register: out
+      changed_when: out.rc != 0

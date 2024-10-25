@@ -1,0 +1,20 @@
+services:
+  semaphore:
+    container_name: semaphore
+    image: semaphoreui/semaphore:v2.10.32
+    restart: unless-stopped
+    privileged: true
+    ports:
+      - 8300:3000
+    environment:
+      SEMAPHORE_DB_DIALECT: bolt
+      SEMAPHORE_ADMIN_PASSWORD: ${SEMAPHORE_ADMIN_PASSWORD}
+      SEMAPHORE_ADMIN_NAME: ${SEMAPHORE_ADMIN_NAME}
+      SEMAPHORE_ADMIN: ${SEMAPHORE_ADMIN}
+      ANSIBLE_HOST_KEY_CHECKING: "False"
+      TZ: Europe/Moscow
+    volumes:
+      - ./config:/etc/semaphore # config.json location
+      - ./db:/var/lib/semaphore # database.boltdb location
+      - ./data:/opt/data
+      - ./ansible:/etc/ansible
