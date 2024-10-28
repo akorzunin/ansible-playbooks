@@ -1,0 +1,21 @@
+- name: Deploy jellyfin
+  hosts: all
+  become: false
+  vars:
+    local_path: "{{ lookup('env', 'PWD') }}/playbooks/jellyfin/"
+    remote_install_path: ~/Documents/jellyfin/ # TODO: Migrate to ~/deploy/jellyfin/
+
+  tasks:
+    - name: Copy files to service directory
+      ansible.builtin.copy:
+        src: "{{ local_path }}/compose.yaml"
+        dest: "{{ remote_install_path }}"
+        mode: "0644"
+        remote_src: false
+
+    - name: Deploy factorio-server
+      ansible.builtin.command:
+        cmd: docker compose up --force-recreate -d
+        chdir: "{{ remote_install_path }}"
+      register: out
+      changed_when: out.rc != 0

@@ -1,21 +1,17 @@
 version: '3.5'
 services:
   jellyfin:
-    image: jellyfin/jellyfin:10.9.6
+    image: jellyfin/jellyfin:10.10.0
     container_name: jellyfin
     ports:
       - 8096:8096
     volumes:
-      - /home/akorz/Documents/jellyfin/config:/config
-      - /home/akorz/Documents/jellyfin/cache:/cache
-      - /home/akorz/Documents/jellyfin/media:/media
-      - /home/akorz/Documents/jellyfin/media2:/media2:ro
+      - ./jellyfin/config:/config
+      - ./jellyfin/cache:/cache
+      - ./jellyfin/media:/media
+      - ./jellyfin/media2:/media2:ro
       - /mnt/storage/jellyfin_media/:/storage:rw
-    restart: 'unless-stopped'
-    # Optional - alternative address used for autodiscovery
-    environment:
-      - JELLYFIN_PublishedServerUrl=http://192.168.1.132
-
+    restart: unless-stopped
     runtime: nvidia
     deploy:
       resources:
