@@ -13,6 +13,19 @@
         mode: "0644"
         remote_src: false
 
+    - name: Get current Factorio version
+      ansible.builtin.command:
+        cmd: >-
+          docker inspect factoriotools/factorio:stable
+          --format "{{ '{{' }} index .Config.Labels \"factorio.version\" {{ '}}' }}"
+      register: factorio_version
+      changed_when: factorio_version.rc != 0
+      failed_when: factorio_version.rc > 1
+
+    - name: Info
+      ansible.builtin.debug:
+        msg: "Current Factorio version: {{ factorio_version.stdout | default('unknown', true) }}"
+
     - name: Pull factorio-server
       ansible.builtin.command:
         cmd: docker compose pull
@@ -26,3 +39,16 @@
         chdir: "{{ remote_install_path }}"
       register: out
       changed_when: out.rc != 0
+
+    - name: Get updated Factorio version
+      ansible.builtin.command:
+        cmd: >-
+          docker inspect factoriotools/factorio:stable
+          --format "{{ '{{' }} index .Config.Labels \"factorio.version\" {{ '}}' }}"
+      register: factorio_version
+      changed_when: factorio_version.rc != 0
+      failed_when: factorio_version.rc > 1
+
+    - name: Info
+      ansible.builtin.debug:
+        msg: "Updated Factorio version: {{ factorio_version.stdout | default('unknown', true) }}"
