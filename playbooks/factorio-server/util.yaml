@@ -1,0 +1,14 @@
+- name: Get current Factorio version
+  ansible.builtin.command:
+    cmd: >-
+      docker inspect factoriotools/factorio:stable
+      --format "{{ '{{index .Config.Labels \"factorio.version\" }}' }}"
+  register: factorio_version
+  changed_when: factorio_version.rc != 0
+  failed_when: factorio_version.rc > 1
+
+- name: Info
+  ansible.builtin.debug:
+    msg: "{{ status }} Factorio version: {{ factorio_version.stdout | default('unknown', true) }}"
+  vars:
+    status: Current
