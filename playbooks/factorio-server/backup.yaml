@@ -7,6 +7,16 @@
     backup_name: factorio-server-backup-{{ ansible_date_time.iso8601 }}
 
   tasks:
+    - name: Check map unchanged
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -o pipefail
+          docker logs factorio-server --since 24h | grep -wc "JOIN"
+      register: map_changed
+      changed_when: map_changed.stdout | int != 0
+      failed_when: map_changed.stdout | int == 0
+
     - name: Make backup
       ansible.builtin.shell:
         cmd: |
