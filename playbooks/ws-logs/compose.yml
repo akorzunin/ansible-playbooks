@@ -1,6 +1,6 @@
 services:
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.0.0
     container_name: prometheus
     hostname: prometheus
     user: root
@@ -24,7 +24,7 @@ services:
       org.opencontainers.group: "monitoring"
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.3.0
     container_name: grafana
     hostname: grafana
     user: root
@@ -39,7 +39,7 @@ services:
       org.opencontainers.group: "monitoring"
 
   nodeexporter:
-    image: prom/node-exporter:latest
+    image: prom/node-exporter:v1.8.2
     container_name: nodeexporter
     hostname: nodeexporter
     restart: unless-stopped
@@ -59,7 +59,7 @@ services:
       org.opencontainers.group: "monitoring"
 
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    image: gcr.io/cadvisor/cadvisor:v0.51.0
     container_name: cadvisor
     hostname: cadvisor
     restart: unless-stopped
@@ -79,7 +79,7 @@ services:
       org.opencontainers.group: "monitoring"
 
   loki:
-    image: grafana/loki:3.1.1
+    image: grafana/loki:3.2.1
     container_name: loki
     restart: unless-stopped
     ports:
@@ -89,8 +89,10 @@ services:
     command: -config.file=/etc/loki/local-config.yaml
 
   vector:
-    image: timberio/vector:0.41.1-alpine
+    image: timberio/vector:0.42.0-alpine
     container_name: vector
+    depends_on:
+      - loki
     restart: unless-stopped
     environment:
       - VECTOR_LOG_HOST=workstation
