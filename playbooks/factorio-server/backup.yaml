@@ -28,6 +28,12 @@
       register: out
       changed_when: out.rc != 0
 
+    - name: Wait for backup to finish
+      ansible.builtin.wait_for:
+        path: "{{ remote_install_path }}/data/saves/{{ backup_name }}.zip"
+        state: present
+        timeout: 60
+
     - name: Save backup to cloud
       ansible.builtin.command:
         cmd: |-
