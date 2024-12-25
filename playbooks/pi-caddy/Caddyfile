@@ -43,3 +43,6 @@ supericosahedron.akorz.duckdns.org {
 3x-ui.akorz.duckdns.org {
     reverse_proxy 192.168.1.132:2053
 }
+test-aurora-api.akorz.duckdns.org {
+    reverse_proxy 192.168.1.132:8089
+}
