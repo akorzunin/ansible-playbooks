@@ -1,0 +1,15 @@
+services:
+    minio:
+        ports:
+            - 9002:9000
+            - 9001:9001
+        user: ${UID}:${GID}
+        restart: unless-stopped
+        container_name: minio
+        environment:
+            - MINIO_ROOT_USER=ROOTUSER
+            - MINIO_ROOT_PASSWORD=CHANGEME123
+        volumes:
+            - ./data:/data
+        image: quay.io/minio/minio
+        command: server /data --console-address ":9001"
