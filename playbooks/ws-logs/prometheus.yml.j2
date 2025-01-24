@@ -15,6 +15,10 @@ scrape_configs:
     static_configs:
       - targets: ["cadvisor:8080"]
 
+  - job_name: "nvidia-gpu-exporter"
+    static_configs:
+      - targets: ["nvidia-gpu-exporter:9835"]
+
   - job_name: "nodeexporter-pi"
     static_configs:
       - targets: ["{{ HOST_LOCAL_PI_IP }}:9100"]
