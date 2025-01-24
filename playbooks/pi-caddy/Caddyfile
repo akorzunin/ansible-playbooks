@@ -49,3 +49,6 @@ test-aurora-api.akorz.duckdns.org {
 test-polar-lights.akorz.duckdns.org {
     reverse_proxy 192.168.1.132:8090
 }
+open-webui.akorz.duckdns.org {
+    reverse_proxy 192.168.1.132:8080
+}
