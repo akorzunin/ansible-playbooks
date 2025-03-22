@@ -1,0 +1,34 @@
+- name: Deploy uptime kuma
+  hosts: all
+  become: false
+  vars:
+    project_dir: ~/deploy/uptime-kuma
+
+  tasks:
+    - name: Create project directory
+      ansible.builtin.file:
+        path: "{{ project_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Copy files to service directory
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ project_dir }}/{{ item }}"
+        mode: "0755"
+      loop:
+        - compose.yaml
+
+    - name: Pull new image
+      ansible.builtin.command:
+        cmd: docker compose pull
+        chdir: "{{ project_dir }}"
+      register: out
+      changed_when: out.rc != 0
+
+    - name: Deploy new image
+      ansible.builtin.command:
+        cmd: docker compose up -d --force-recreate
+        chdir: "{{ project_dir }}"
+      register: out
+      changed_when: out.rc != 0
