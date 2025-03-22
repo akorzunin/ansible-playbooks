@@ -1,6 +1,6 @@
 services:
   duckdns-ui:
-    image: akorzunin/duckdns-ui:latest
+    image: ghcr.io/akorzunin/duckdns-ui:0.1.2
     container_name: duckdns-ui
     ports:
       - 3000:3000

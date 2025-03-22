@@ -16,14 +16,14 @@
 
     - name: Pull new image duckdns-ui
       ansible.builtin.command:
-        cmd: docker-compose pull
+        cmd: docker compose pull
         chdir: ~/Documents/duckdns-ui
       register: out
       changed_when: out.rc != 0
 
     - name: Deploy duckdns-ui
       ansible.builtin.command:
-        cmd: docker-compose up --force-recreate -d
+        cmd: docker compose up -d --force-recreate
         chdir: ~/Documents/duckdns-ui
       register: out
       changed_when: out.rc != 0
