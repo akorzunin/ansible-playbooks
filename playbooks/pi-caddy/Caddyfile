@@ -52,3 +52,7 @@ test-polar-lights.akorz.duckdns.org {
 open-webui.akorz.duckdns.org {
     reverse_proxy 192.168.1.132:8080
 }
+
+bredmond.akorz.duckdns.org {
+    reverse_proxy 192.168.1.132:3001
+}
