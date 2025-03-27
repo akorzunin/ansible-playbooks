@@ -2,3 +2,4 @@
 collections:
   # Install a collection from Ansible Galaxy.
   - name: community.docker
+  - name: community.general

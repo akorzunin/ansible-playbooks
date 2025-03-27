@@ -1,0 +1,50 @@
+- name: Backup firefly postgres database
+  hosts: all
+  become: false
+  vars:
+    local_path: "{{ lookup('env', 'PWD') }}/playbooks/firefly/"
+    remote_install_path: /home/{{ ansible_user }}/Documents/firefly
+    backup_name: firefly-backup-{{ ansible_date_time.iso8601 }}.tar.gz
+    remote_backup_dir: /home/{{ ansible_user }}/backups/firefly
+
+  tasks:
+    - name: Make backup
+      ansible.builtin.command:
+        cmd: docker compose down
+        chdir: "{{ remote_install_path }}"
+      register: out
+      changed_when: out.rc != 0
+
+    - name: Copy database files
+      community.general.archive:
+        path: "{{ remote_install_path }}/firefly-data"
+        dest: "{{ remote_backup_dir }}/{{ backup_name }}"
+        mode: "0644"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+      become: true
+
+    - name: Start docker compose
+      ansible.builtin.command:
+        cmd: docker compose up -d
+        chdir: "{{ remote_install_path }}"
+      register: out
+      changed_when: out.rc != 0
+
+    - name: Save backup to cloud
+      ansible.builtin.command:
+        cmd: >-
+         rclone copy
+         {{ remote_backup_dir }}/{{ backup_name }}
+         remote:firefly-backups/
+      register: out
+      changed_when: out.rc != 0
+
+    - name: Delete old backups
+      ansible.builtin.command:
+        cmd: >-
+          rclone delete
+          remote:firefly-backups
+          --min-age 400d
+      register: out
+      changed_when: out.rc != 0
