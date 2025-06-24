@@ -30,3 +30,6 @@ sinks:
       host: "$VECTOR_LOG_HOST"
       image: "{{ .image }}"
       source: vector
+      level: "{{ .message.level }}"
+    structured_metadata:
+      "*": "{{ .message }}"
