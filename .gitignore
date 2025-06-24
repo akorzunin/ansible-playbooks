@@ -5,3 +5,4 @@ playbooks/wake-on-lan/computers.txt
 *hosts
 .ansible_pass
 external_vars.yml
+.aider*
