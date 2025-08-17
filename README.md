@@ -8,7 +8,7 @@
 
 ## Run playbook
 
-    ansible-playbook --vault-password-file=.ansible_pass ./playbooks/deploy_portainer.yaml  -l local_workstation
+    ansible-playbook --vault-password-file=.ansible_pass ./playbooks/deploy_portainer.yaml -i ./hosts  -l local_workstation
 
 Run all checks locally
 
