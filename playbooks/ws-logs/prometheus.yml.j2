@@ -29,11 +29,11 @@ scrape_configs:
 
   - job_name: "nodeexporter-sw1"
     static_configs:
-      - targets: ["{{ HOST_SW1_IP }}:9100"]
+      - targets: ["{{ HOST_SW1_IP }}:901"]
 
   - job_name: "cadvisor-sw1"
     static_configs:
-      - targets: ["{{ HOST_SW1_IP }}:3003"]
+      - targets: ["{{ HOST_SW1_IP }}:900"]
 
   - job_name: "nodeexporter-pl1"
     static_configs:

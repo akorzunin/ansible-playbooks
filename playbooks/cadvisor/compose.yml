@@ -13,6 +13,6 @@ services:
       - /var/lib/docker:/var/lib/docker:ro
       - /cgroup:/cgroup:ro # doesn't work on MacOS only for Linux
     ports:
-      - "3003:8080"
+      - "900:8080"
     labels:
       org.label-schema.group: "monitoring"

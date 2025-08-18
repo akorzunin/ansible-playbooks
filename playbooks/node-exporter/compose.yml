@@ -13,6 +13,6 @@ services:
       - /sys:/host/sys:ro
       - /:/rootfs:ro
     ports:
-      - "9100:9100"
+      - "901:9100"
     labels:
       org.label-schema.group: "monitoring"
