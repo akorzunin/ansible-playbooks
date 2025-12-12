@@ -1,8 +1,0 @@
-- name: Restart docker deamon
-  hosts: local_workstation
-  become: true
-  tasks:
-    - name: Restart Docker daemon
-      ansible.builtin.service:
-        name: docker
-        state: restarted

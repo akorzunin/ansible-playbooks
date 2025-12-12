@@ -1,9 +1,0 @@
-- name: Setup curl
-  hosts: local_workstation
-  become: true
-
-  tasks:
-    - name: Install curl
-      ansible.builtin.apt:
-        name: curl
-        state: present

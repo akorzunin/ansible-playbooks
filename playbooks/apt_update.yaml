@@ -1,8 +1,0 @@
-- name: Upgrade ubunu packages
-  hosts: local_workstation
-  become: true
-  tasks:
-    - name: Update and upgrade apt packages
-      ansible.builtin.apt:
-        update_cache: true
-        upgrade: true
