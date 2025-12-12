@@ -1,0 +1,18 @@
+---
+- name: Create deploy dir
+  ansible.builtin.include_role:
+    name: deploy_compose
+    tasks_from: mkdir
+
+- name: Copy Docker compose file
+  ansible.builtin.copy:
+    src: compose.yaml
+    dest: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/compose.yaml"
+    mode: "0644"
+
+- name: Run Docker container [{{ deploy_compose_service_name }}]
+  ansible.builtin.command:
+    cmd: docker compose up -d --force-recreate
+    chdir: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}"
+  register: deploy_compose_result
+  changed_when: deploy_compose_result.rc == 0

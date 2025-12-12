@@ -1,0 +1,19 @@
+- name: Create deploy dir
+  ansible.builtin.include_role:
+    name: deploy_compose
+    tasks_from: mkdir
+  vars:
+    deploy_compose_service_name: caddy
+
+- name: Copy Caddyfile to deploy dir
+  ansible.builtin.copy:
+    src: "{{ caddy_file }}"
+    dest: "{{ deploy_compose_dir }}/caddy/Caddyfile"
+    mode: "0644"
+
+- name: Run caddy in docker compose
+  ansible.builtin.import_role:
+    name: deploy_compose
+  vars:
+    deploy_compose_file: compose.yaml
+    deploy_compose_service_name: caddy

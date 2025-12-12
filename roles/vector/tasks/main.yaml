@@ -1,0 +1,26 @@
+- name: Create deploy dir
+  ansible.builtin.include_role:
+    name: deploy_compose
+    tasks_from: mkdir
+  vars:
+    deploy_compose_dir: "{{ vector_deploy_dir }}"
+    deploy_compose_service_name: vector
+
+- name: Copy vector config
+  ansible.builtin.copy:
+    src: vector.yaml
+    dest: "{{ vector_deploy_dir }}/vector/vector.yaml"
+    mode: "0644"
+
+- name: Run vector in docker compose
+  ansible.builtin.import_role:
+    name: deploy_compose
+  vars:
+    deploy_compose_dir: "{{ vector_deploy_dir }}"
+    deploy_compose_file: compose.yaml
+    deploy_compose_service_name: vector
+  environment:
+    VECTOR_VERSION: "{{ vector_version }}"
+    VECTOR_LOG_HOST: "{{ inventory_hostname }}"
+    LOGGING_LOKI_USER: "{{ AUTH_USER }}"
+    LOGGING_LOKI_PASS: "{{ AUTH_PASS }}"

@@ -1,0 +1,7 @@
+node_group:
+  hosts:
+    node:
+      ansible_port: 22
+      ansible_user: root
+      ansible_host: {{ NODE_IP }}
+      ansible_ssh_pass: {{ NODE_ROOT_PASS }}

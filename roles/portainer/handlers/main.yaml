@@ -1,0 +1,7 @@
+---
+- name: Remove Portainer container
+  ansible.builtin.command:
+    cmd: docker rm -f portainer
+  ignore_errors: true
+  register: portainer_remove_result
+  changed_when: portainer_remove_result.rc == 0

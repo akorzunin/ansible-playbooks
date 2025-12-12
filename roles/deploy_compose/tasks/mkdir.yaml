@@ -1,0 +1,9 @@
+---
+- name: Create deploy dir
+  ansible.builtin.file:
+    path: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    state: directory
+    recurse: true
+    mode: "0755"

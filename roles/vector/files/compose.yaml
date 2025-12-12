@@ -1,0 +1,23 @@
+services:
+  vector:
+    image: timberio/vector:${VECTOR_VERSION}
+    container_name: vector
+    environment:
+      - VECTOR_LOG_HOST=${VECTOR_LOG_HOST}
+      - LOGGING_LOKI_USER=${LOGGING_LOKI_USER}
+      - LOGGING_LOKI_PASS=${LOGGING_LOKI_PASS}
+    volumes:
+      - ./vector.yaml:/etc/vector/vector.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    deploy:
+      resources:
+        limits:
+          memory: 50M
+        reservations:
+          memory: 10M
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    external: true

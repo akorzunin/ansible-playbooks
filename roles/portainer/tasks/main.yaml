@@ -1,0 +1,24 @@
+---
+- name: Create deploy dir
+  ansible.builtin.file:
+    path: "{{ portainer_deploy_dir }}"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    state: directory
+    recurse: true
+    mode: "0755"
+
+- name: Copy Portainer compose file
+  ansible.builtin.copy:
+    src: compose.yaml
+    dest: "{{ portainer_deploy_dir }}/compose.yaml"
+    mode: "0644"
+
+- name: Create Portainer container
+  ansible.builtin.command:
+    cmd: docker compose up -d --force-recreate
+    chdir: "{{ portainer_deploy_dir }}"
+  environment:
+    PORTAINER_VERSION: "{{ portainer_version }}"
+  register: portainer_create_result
+  changed_when: portainer_create_result.rc == 0

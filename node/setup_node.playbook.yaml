@@ -1,0 +1,104 @@
+- name: Setup node
+  hosts: all
+  become: true
+  vars:
+    deploy_dir: /srv/deploy
+  vars_files:
+    - "{{ lookup('env', 'PWD') }}/node/node_config_vars.yml"
+
+  tasks:
+    - name: Disable ssh connect w/ root user
+      ansible.builtin.lineinfile:
+        path: /etc/ssh/sshd_config
+        regexp: "^PermitRootLogin"
+        line: "PermitRootLogin no"
+        state: present
+        mode: "0644"
+      notify: Restart ssh service
+
+    - name: Create deploy dir
+      ansible.builtin.file:
+        path: "{{ deploy_dir }}"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        state: directory
+        mode: "0755"
+
+    - name: Update and upgrade apt packages
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: dist
+        cache_valid_time: 3600
+
+    - name: Install prerequisite packages
+      ansible.builtin.apt:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - apt-transport-https
+        - ca-certificates
+        - curl
+        - software-properties-common
+        - python3-pip
+        - sshguard
+
+    - name: Add Docker GPG apt key
+      ansible.builtin.apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker apt repository
+      ansible.builtin.apt_repository:
+        repo: >-
+          deb [arch={{ ansible_facts["architecture"] | regex_replace('x86_64', 'amd64') | regex_replace('aarch64', 'arm64') }}]
+          https://download.docker.com/linux/ubuntu focal stable
+        state: present
+
+    - name: Install Docker packages
+      ansible.builtin.apt:
+        name: "{{ item }}"
+        state: present
+        force: true
+      loop:
+        - docker-ce
+        - docker-ce-cli
+        - containerd.io
+        - docker-compose-plugin
+
+    - name: Ensure Docker service is running and enabled
+      ansible.builtin.systemd_service:
+        name: docker
+        state: started
+        enabled: true
+
+    - name: Add specified user to the docker group
+      ansible.builtin.user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: true
+      notify: Update groups
+
+    - name: Create docker networks for monitoring
+      ansible.builtin.command:
+        cmd: docker network create --driver bridge monitoring
+      register: out
+      changed_when: out.rc != 1
+
+    - name: Create docker networks
+      ansible.builtin.command:
+        cmd: docker network create --driver bridge main
+      register: out
+      changed_when: out.rc != 1
+
+  handlers:
+    - name: Restart ssh service
+      ansible.builtin.service:
+        name: ssh.service
+        state: restarted
+
+    - name: Update groups
+      ansible.builtin.shell:
+        cmd: newgrp docker
+        executable: /bin/bash
+      register: out
+      changed_when: out.rc != 0

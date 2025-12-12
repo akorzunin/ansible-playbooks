@@ -1,0 +1,23 @@
+services:
+  portainer:
+    image: portainer/portainer-ce:${PORTAINER_VERSION}
+    container_name: portainer
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./portainer_data:/data
+    ports:
+      - 127.0.0.1:9000:9000
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 50M
+
+    networks:
+      - monitoring
+
+networks:
+  monitoring:
+    external: true

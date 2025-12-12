@@ -1,0 +1,35 @@
+sources:
+  docker_log_source:
+    type: docker_logs
+    include_labels:
+      - org.opencontainers.group=logging
+
+transforms:
+  docker_log_transform:
+    type: remap
+    inputs:
+      - docker_log_source
+    source: |-
+      .message = parse_json!(.message)
+      del(.label)
+
+sinks:
+  loki_sink_id:
+    type: loki
+    inputs:
+      - docker_log_transform
+    endpoint: https://loki.akorz.duckdns.org
+    auth:
+      strategy: basic
+      user: "$LOGGING_LOKI_USER"
+      password: "$LOGGING_LOKI_PASS"
+    encoding:
+      codec: "json"
+    labels:
+      service_name: "{{ .container_name }}"
+      host: "$VECTOR_LOG_HOST"
+      image: "{{ .image }}"
+      source: vector
+      level: "{{ .message.level }}"
+    structured_metadata:
+      "*": "{{ .message }}"

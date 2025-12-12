@@ -1,0 +1,17 @@
+- name: Init node
+  hosts: node
+  become: true
+  vars_files:
+    - "{{ lookup('env', 'PWD') }}/node/node_config_vars.yml"
+
+  tasks:
+    - name: Create new user
+      ansible.builtin.user:
+        name: "{{ NODE_USER }}"
+        comment: "Ansible user"
+        groups:
+          - sudo
+        shell: /bin/bash
+        uid: 1000
+        state: present
+        password: "{{ NODE_PASS | password_hash('sha512') }}"
