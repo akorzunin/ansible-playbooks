@@ -26,4 +26,10 @@ ansible-playbook --vault-password-file=.ansible_pass ./node/setup_node.playbook.
 
 ```sh
 ansible-playbook --vault-password-file=.ansible_pass ./node/{NODE_NAME}/services.deploy.yaml -i ./hosts -l nodename
-````
+```
+
+- deploy caddy separately
+
+```sh
+ansible-playbook --vault-password-file=.ansible_pass ./node/{NODE_NAME}/caddy/caddy.deploy.yaml -i ./hosts -l nodename
+```

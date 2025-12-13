@@ -1,0 +1,6 @@
+- name: Deploy caddy
+  hosts: nt1
+  become: true
+  roles:
+    - role: caddy
+      caddy_file: "{{ lookup('env', 'PWD') }}/node/nt1/caddy/Caddyfile"

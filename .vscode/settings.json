@@ -1,9 +1,11 @@
 {
-    "ansible.python.interpreterPath": "/bin/python3",
+    "ansible.python.interpreterPath": "/usr/bin/python",
     "files.associations": {
         "**/playbooks/**/deploy.yml": "ansible",
-        "**/playbooks/**/deploy.yaml": "ansible",
-        "**/playbooks/**/backup.yaml": "ansible"
+        "**/deploy.yaml": "ansible",
+        "**/*.deploy.yaml": "ansible",
+        "**/backup.yaml": "ansible",
+        "**/*.backup.yaml": "ansible",
     },
     "workbench.colorCustomizations": {
         "activityBar.activeBackground": "#fa1b49",

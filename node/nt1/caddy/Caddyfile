@@ -1,15 +1,15 @@
 akorz-nt1.duckdns.org {
     reverse_proxy portainer:9000
 }
-# portainer.akorz-nt1.duckdns.org {
-#   reverse_proxy portainer:9000
-# }
-3x-ui.akorz-nt1.duckdns.org {
-    reverse_proxy localhost:2053
+portainer.akorz-nt1.duckdns.org {
+    reverse_proxy portainer:9000
 }
-# dwman.akorz-nt1.duckdns.org {
-#   reverse_proxy localhost:8008
-# }
+3x-ui.akorz-nt1.duckdns.org {
+    reverse_proxy 3x-ui:2053
+}
+dwman.akorz-nt1.duckdns.org {
+    reverse_proxy dwman:8008
+}
 test-dwman.akorz-nt1.duckdns.org {
-    reverse_proxy localhost:8088
+    reverse_proxy dwman-test:8088
 }

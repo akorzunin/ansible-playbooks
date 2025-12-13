@@ -7,7 +7,7 @@
       portainer_version: "2.33.5"
     - role: monitoring_client
       monitoring_client_node_exporter_version: "v1.10.2"
-      monitoring_client_cadvizor_version: "v0.52.1"
+      monitoring_client_cadvizor_version: "0.54.1"
     - role: vector
       vector_version: "0.51.1-alpine"
   vars_files:

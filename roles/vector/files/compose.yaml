@@ -2,6 +2,7 @@ services:
   vector:
     image: timberio/vector:${VECTOR_VERSION}
     container_name: vector
+    restart: unless-stopped
     environment:
       - VECTOR_LOG_HOST=${VECTOR_LOG_HOST}
       - LOGGING_LOKI_USER=${LOGGING_LOKI_USER}
