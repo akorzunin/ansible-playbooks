@@ -2,33 +2,13 @@
   hosts: all
   become: false
   vars:
-    project_dir: ~/Documents/3x-ui
+    deploy_compose_service_name: 3x-ui
 
   tasks:
-    - name: Create project directory
-      ansible.builtin.file:
-        path: "{{ project_dir }}"
-        state: directory
-        mode: "0755"
-
-    - name: Copy files to service directory
-      ansible.builtin.copy:
-        src: "{{ item }}"
-        dest: "{{ project_dir }}/{{ item }}"
-        mode: "0755"
-      loop:
-        - compose.yaml
-
-    - name: Pull new image
-      ansible.builtin.command:
-        cmd: docker compose pull
-        chdir: "{{ project_dir }}"
-      register: out
-      changed_when: out.rc != 0
-
-    - name: Deploy 3x-ui
-      ansible.builtin.command:
-        cmd: docker compose up --force-recreate -d
-        chdir: ~/Documents/3x-ui
-      register: out
-      changed_when: out.rc != 0
+    - name: Docker compose up {{ deploy_compose_service_name }}
+      ansible.builtin.import_role:
+        name: deploy_compose
+      vars:
+        deploy_compose_file: compose.yaml
+      environment:
+        X_UI_VERSION: "v2.8.5"
