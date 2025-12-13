@@ -2,7 +2,7 @@
   ansible.builtin.import_role:
     name: deploy_compose
   vars:
-    deploy_compose_dir: "/src/monitoring"
+    deploy_compose_dir: "/srv/monitoring"
     deploy_compose_file: compose.yaml
     deploy_compose_service_name: monitoring_client
   environment:
