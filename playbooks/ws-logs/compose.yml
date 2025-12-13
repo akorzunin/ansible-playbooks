@@ -1,6 +1,6 @@
 services:
   prometheus:
-    image: prom/prometheus:v3.2.1
+    image: prom/prometheus:v3.8.0
     container_name: prometheus
     hostname: prometheus
     user: root
@@ -23,7 +23,7 @@ services:
       org.opencontainers.group: "monitoring"
 
   grafana:
-    image: grafana/grafana:11.6.1
+    image: grafana/grafana:12.3.0
     container_name: grafana
     hostname: grafana
     user: root
@@ -75,7 +75,7 @@ services:
       org.opencontainers.group: "monitoring"
 
   loki:
-    image: grafana/loki:3.4.3
+    image: grafana/loki:3.6.3
     container_name: loki
     restart: unless-stopped
     ports:
