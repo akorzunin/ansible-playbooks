@@ -3,9 +3,7 @@ services:
     image: caddy:2-alpine
     container_name: caddy
     restart: unless-stopped
-    ports:
-      - 80:80
-      - 443:443
+    network_mode: host
     volumes:
       - ./caddy_data:/data:rw
       - ./caddy_config:/config:rw
@@ -16,12 +14,3 @@ services:
           memory: 50M
         reservations:
           memory: 10M
-    networks:
-      - monitoring
-      - main
-
-networks:
-  monitoring:
-    external: true
-  main:
-    external: true
