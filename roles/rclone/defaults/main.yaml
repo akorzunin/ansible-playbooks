@@ -1,0 +1,2 @@
+rclone_remote_name: backup-remote
+rclone_remote_type: mega

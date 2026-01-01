@@ -30,8 +30,14 @@ Check connection to all hosts
 
     ansible-playbook --vault-password-file=.ansible_pass ./playbooks/playbook_name.yaml -i ./hosts -l host_name
 
+Run playbook locally
+
+    ```sh
+    ansible-playbook --vault-password-file=.ansible_pass ./playbooks/playbook_name.yaml -i localhost, -c local
+    ```
+
 Run all checks locally
 
-```sh
-pre-commit run --all-files
-```
+    ```sh
+    pre-commit run --all-files
+    ```

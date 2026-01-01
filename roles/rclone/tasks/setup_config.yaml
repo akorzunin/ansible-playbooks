@@ -1,0 +1,22 @@
+- name: Check if rclone remote exists
+  ansible.builtin.command:
+    argv:
+      - rclone
+      - listremotes
+  register: rclone_remotes_out
+  changed_when: rclone_remotes_out.rc != 0
+
+- name: Create rclone config
+  ansible.builtin.command:
+    argv:
+      - rclone
+      - config
+      - create
+      - "{{ rclone_remote_name }}"
+      - "{{ rclone_remote_type }}"
+      - user={{ rclone_user }}
+      - pass={{ rclone_pass }}
+      - --non-interactive
+  when: rclone_remote_name not in rclone_remotes_out.stdout_lines
+  register: rclone_config_out
+  changed_when: rclone_config_out.rc == 0

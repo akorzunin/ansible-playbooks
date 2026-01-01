@@ -1,0 +1,16 @@
+- name: Setup rclone
+  hosts: all
+  become: false
+  roles:
+    - rclone
+  vars_files:
+    - "{{ lookup('env', 'PWD') }}/external_vars.yml"
+
+  tasks:
+    - name: Create rclone config
+      ansible.builtin.include_role:
+        name: rclone
+        tasks_from: setup_config
+      vars:
+        rclone_user: "{{ BACKUP_USER }}"
+        rclone_pass: "{{ BACKUP_PASS }}"

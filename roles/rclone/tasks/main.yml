@@ -1,0 +1,33 @@
+- name: Check if rclone is already installed
+  ansible.builtin.command: which rclone
+  register: rclone_check
+  ignore_errors: true
+  changed_when: false
+  check_mode: false
+
+- name: Get current version
+  ansible.builtin.command:
+    cmd: rclone --version
+  register: rclone_version
+  changed_when: false
+
+- name: Debug current version
+  ansible.builtin.debug:
+    var: rclone_version.stdout
+  when: rclone_check is succeeded
+
+- name: Install rclone
+  when: rclone_check is failed
+  block:
+    - name: Download rclone install script
+      ansible.builtin.get_url:
+        url: https://rclone.org/install.sh
+        dest: /tmp/install_rclone.sh
+        mode: '0755'
+        timeout: 30
+
+    - name: Install rclone
+      ansible.builtin.shell: /tmp/install_rclone.sh
+      args:
+        executable: /bin/bash
+        creates: /usr/bin/rclone
