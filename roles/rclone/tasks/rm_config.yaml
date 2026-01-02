@@ -1,0 +1,9 @@
+- name: Remove rclone config
+  ansible.builtin.command:
+    argv:
+      - rclone
+      - config
+      - delete
+      - "{{ rclone_remote_name }}"
+  register: rclone_rm_config_out
+  changed_when: rclone_rm_config_out.rc == 0

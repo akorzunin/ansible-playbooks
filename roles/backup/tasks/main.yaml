@@ -29,10 +29,17 @@
           - "{{ backup_create_base_dir }}"
           - "{{ backup_dest_path }}"
           - "--config"
-          - "/home/{{ ansible_user }}/.config/rclone/rclone.conf"
+          - "{{ rclone_config_path }}"
       become: true
       register: backup_save_out
       changed_when: backup_save_out.rc != 0
+
+    - name: Fix rclone config permissions
+      ansible.builtin.file:
+        path: "{{ rclone_config_path }}"
+        mode: "0600"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
 
     - name: Start docker daemon
       ansible.builtin.systemd:
@@ -67,3 +74,8 @@
         chdir: "{{ backup_service_dir }}"
       register: backup_start_out
       changed_when: backup_start_out.rc != 0
+
+- name: Remove rclone config
+  ansible.builtin.include_role:
+    name: rclone
+    tasks_from: rm_config
