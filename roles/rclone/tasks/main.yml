@@ -10,6 +10,7 @@
     cmd: rclone --version
   register: rclone_version
   changed_when: false
+  when: rclone_check is succeeded
 
 - name: Debug current version
   ansible.builtin.debug:
@@ -28,6 +29,7 @@
 
     - name: Install rclone
       ansible.builtin.shell: /tmp/install_rclone.sh
+      become: true
       args:
         executable: /bin/bash
         creates: /usr/bin/rclone

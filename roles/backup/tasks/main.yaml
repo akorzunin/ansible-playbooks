@@ -1,0 +1,69 @@
+- name: Install rclone
+  ansible.builtin.import_role:
+    name: rclone
+
+- name: Create rclone config
+  ansible.builtin.include_role:
+    name: rclone
+    tasks_from: setup_config
+  vars:
+    rclone_user: "{{ BACKUP_USER }}"
+    rclone_pass: "{{ BACKUP_PASS }}"
+
+- name: Backup all services
+  when: backup_service == "all"
+  block:
+    - name: Stop docker daemon
+      ansible.builtin.systemd:
+        name: docker
+        state: stopped
+      become: true
+      timeout: 30
+
+    - name: Backup all services w/ rclone
+      ansible.builtin.command:
+        argv:
+          - rclone
+          - archive
+          - create
+          - "{{ backup_create_base_dir }}"
+          - "{{ backup_dest_path }}"
+          - "--config"
+          - "/home/{{ ansible_user }}/.config/rclone/rclone.conf"
+      become: true
+      register: backup_save_out
+      changed_when: backup_save_out.rc != 0
+
+    - name: Start docker daemon
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+      become: true
+
+- name: Backup single service
+  when: backup_service != "all"
+  block:
+    - name: Stop docker service {{ backup_service }}
+      ansible.builtin.command:
+        cmd: docker compose stop
+        chdir: "{{ backup_service_dir }}"
+      register: backup_stop_out
+      changed_when: backup_stop_out.rc != 0
+
+    - name: Backup service w/ rclone
+      ansible.builtin.command:
+        argv:
+          - rclone
+          - archive
+          - create
+          - "{{ backup_service_dir }}"
+          - "{{ backup_dest_path }}"
+      register: backup_save_out
+      changed_when: backup_save_out.rc != 0
+
+    - name: Start docker service {{ backup_service }}
+      ansible.builtin.command:
+        cmd: docker compose start
+        chdir: "{{ backup_service_dir }}"
+      register: backup_start_out
+      changed_when: backup_start_out.rc != 0

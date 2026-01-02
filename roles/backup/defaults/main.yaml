@@ -1,0 +1,5 @@
+backup_create_base_dir: /srv/deploy
+backup_service: all
+backup_service_dir: "{{ backup_create_base_dir }}/{{ backup_service }}"
+backup_file_name: "{{ backup_service }}-{{ ansible_facts['date_time']['iso8601'] }}.zip"
+backup_dest_path: "{{ rclone_remote_name }}:/backups/{{ inventory_hostname }}/{{ backup_service }}/{{ backup_file_name }}"

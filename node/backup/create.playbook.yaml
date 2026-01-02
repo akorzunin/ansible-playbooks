@@ -1,0 +1,9 @@
+- name: Create backup
+  hosts: all
+  become: false
+  roles:
+    - backup
+  vars_files:
+    - "{{ lookup('env', 'PWD') }}/external_vars.yml"
+  vars:
+    backup_service: "{{ bs | default('all') }}"
