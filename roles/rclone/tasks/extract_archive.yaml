@@ -1,0 +1,25 @@
+- name: Debug rclone extract archive
+  ansible.builtin.debug:
+    msg: "{{ rclone_extract_archive_path }} > {{ rclone_extract_base_dir }}"
+
+- name: Copy backup from rclone
+  ansible.builtin.command:
+    argv:
+      - rclone
+      - archive
+      - extract
+      - "{{ rclone_extract_archive_path }}"
+      - "{{ rclone_extract_base_dir }}"
+      - "--config"
+      - "{{ rclone_config_path }}"
+  become: true
+  register: rclone_extract_out
+  changed_when: rclone_extract_out.rc != 0
+
+- name: Fix rclone config permissions
+  ansible.builtin.file:
+    path: "{{ rclone_config_path }}"
+    mode: "0600"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+  become: true

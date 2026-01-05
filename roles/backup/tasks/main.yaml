@@ -40,6 +40,7 @@
         mode: "0600"
         owner: "{{ ansible_user }}"
         group: "{{ ansible_user }}"
+      become: true
 
     - name: Start docker daemon
       ansible.builtin.systemd:

@@ -1,0 +1,108 @@
+- name: Install rclone
+  ansible.builtin.import_role:
+    name: rclone
+
+- name: Create rclone config
+  ansible.builtin.include_role:
+    name: rclone
+    tasks_from: setup_config
+  vars:
+    rclone_user: "{{ BACKUP_USER }}"
+    rclone_pass: "{{ BACKUP_PASS }}"
+
+- name: Restore backup from all services
+  when: backup_restore_service == "all"
+  block:
+    - name: Stop docker daemon
+      ansible.builtin.systemd:
+        name: docker
+        state: stopped
+      become: true
+      timeout: 30
+
+    - name: Check if exists {{ backup_restore_base_dir }}
+      ansible.builtin.stat:
+        path: "{{ backup_restore_base_dir }}"
+      register: backup_restore_base_dir_stat
+
+    - name: Copy backup_restore_base_dir to {{ backup_restore_base_dir ~ '.bak' }}
+      ansible.builtin.copy:
+        src: "{{ backup_restore_base_dir }}/"
+        dest: "{{ backup_restore_base_dir }}.bak/deploy-{{ ansible_facts['date_time']['iso8601'] | regex_replace(':', '-') }}"
+        remote_src: true
+        mode: "0755"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+      when: backup_restore_base_dir_stat.stat.exists
+      become: true
+
+    - name: Copy backup from rclone
+      ansible.builtin.import_role:
+        name: rclone
+        tasks_from: extract_archive
+      vars:
+        rclone_extract_archive_path: "{{ backup_restore_archive_path }}"
+        rclone_extract_base_dir: "{{ backup_restore_base_dir }}"
+
+    - name: Start docker daemon
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+      become: true
+      timeout: 30
+
+- name: Restore backup from single service
+  when: backup_restore_service != "all"
+  block:
+    - name: Check if exists {{ backup_restore_service_dir }}
+      ansible.builtin.stat:
+        path: "{{ backup_restore_service_dir }}"
+      register: backup_restore_service_dir_stat
+
+    - name: Copy backup_restore_service_dir to {{ backup_restore_service_dir ~ '.bak' }}
+      ansible.builtin.copy:
+        src: "{{ backup_restore_service_dir }}/"
+        dest: "/srv/deploy.bak/{{ backup_restore_service }}-{{ ansible_facts['date_time']['iso8601'] | regex_replace(':', '-') }}"
+        remote_src: true
+        mode: "0755"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+      when: backup_restore_service_dir_stat.stat.exists
+      become: true
+
+    - name: Stop docker service {{ backup_restore_service }}
+      ansible.builtin.command:
+        cmd: docker compose stop
+        chdir: "{{ backup_restore_service_dir }}"
+      register: backup_restore_stop_out
+      changed_when: backup_restore_stop_out.rc != 0
+
+    - name: Rclone extract archive
+      ansible.builtin.import_role:
+        name: rclone
+        tasks_from: extract_archive
+      vars:
+        rclone_extract_archive_path: "{{ backup_restore_archive_path }}"
+        rclone_extract_base_dir: "{{ backup_restore_service_dir }}"
+      become: true
+
+    - name: Start docker service {{ backup_restore_service }}
+      ansible.builtin.command:
+        cmd: docker compose start
+        chdir: "{{ backup_restore_service_dir }}"
+      register: backup_restore_start_out
+      changed_when: backup_restore_start_out.rc != 0
+
+- name: Write to log file that backup is restored {{ backup_restore_archive_path }}
+  ansible.builtin.lineinfile:
+    path: ~/bak.log
+    line: "[{{ ansible_facts['date_time']['iso8601'] }}] Restored backup {{ backup_restore_archive_path }} service: {{ backup_restore_service }}"
+    create: true
+    mode: "0644"
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+
+- name: Remove rclone config
+  ansible.builtin.include_role:
+    name: rclone
+    tasks_from: rm_config

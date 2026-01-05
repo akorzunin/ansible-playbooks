@@ -1,0 +1,17 @@
+- name: Restore backup
+  hosts: all
+  become: false
+  vars_files:
+    - "{{ lookup('env', 'PWD') }}/external_vars.yml"
+  vars:
+    # path to backup file on cloud storage
+    # ex: /backups/nt1/all/backup_name
+    backup_name: "{{ bn }}"
+    # name of service (caddy, etc.) or all to replase on host fs
+    backup_restore_service: "{{ rs | default('all') }}"
+
+  tasks:
+    - name: Restore backup
+      ansible.builtin.import_role:
+        name: backup
+        tasks_from: restore
