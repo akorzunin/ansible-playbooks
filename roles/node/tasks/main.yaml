@@ -1,0 +1,3 @@
+- name: DEbug
+  ansible.builtin.debug:
+    msg: "{{ node_root_pass }}"

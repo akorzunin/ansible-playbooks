@@ -1,17 +1,39 @@
-- name: Init node
-  hosts: node
+- name: Prepare node
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    node_hostname: "{{ nn }}"
+  vars_prompt:
+    - name: node_root_pass
+      prompt: Enter node root password
+      private: true
+  tasks:
+    - name: Prepare node
+      ansible.builtin.import_role:
+        name: node
+        tasks_from: prepare_node
+
+- name: Configure node
+  hosts: "{{ nn | default('localhost') ~ '_root' }}"
   become: true
   vars_files:
-    - "{{ lookup('env', 'PWD') }}/node/node_config_vars.yml"
-
+    - "{{ lookup('env', 'PWD') }}/external_vars.yml"
   tasks:
-    - name: Create new user
-      ansible.builtin.user:
-        name: "{{ NODE_USER }}"
-        comment: "Ansible user"
-        groups:
-          - sudo
-        shell: /bin/bash
-        uid: 1000
-        state: present
-        password: "{{ NODE_PASS | password_hash('sha512') }}"
+    - name: Configure node
+      ansible.builtin.import_role:
+        name: node
+        tasks_from: configure_node
+      vars:
+        node_user: "{{ NODE_USER }}"
+        node_pass: "{{ NODE_PASS }}"
+
+- name: Setup node
+  hosts: "{{ nn | default('localhost') }}"
+  become: true
+  tasks:
+    - name: Setup node
+      ansible.builtin.import_role:
+        name: node
+        tasks_from: setup_node

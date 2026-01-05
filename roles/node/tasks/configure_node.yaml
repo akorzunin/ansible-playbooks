@@ -1,0 +1,20 @@
+- name: Create new user
+  ansible.builtin.user:
+    name: "{{ node_user }}"
+    comment: "Ansible user"
+    groups:
+      - sudo
+    shell: /bin/bash
+    uid: 1000
+    state: present
+    # NOTE: need to install python-passlib on local machine
+    password: "{{ node_pass | password_hash('sha512') }}"
+
+- name: Ensure /usr/bin/python symlink points to python3
+  ansible.builtin.file:
+    src: /usr/bin/python3
+    dest: /usr/bin/python
+    owner: root
+    group: root
+    state: link
+    force: true

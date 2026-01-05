@@ -1,0 +1,11 @@
+- name: Restart ssh service
+  ansible.builtin.service:
+    name: ssh.service
+    state: restarted
+
+- name: Update groups
+  ansible.builtin.shell:
+    cmd: newgrp docker
+    executable: /bin/bash
+  register: node_docker_group_out
+  changed_when: node_docker_group_out.rc != 0

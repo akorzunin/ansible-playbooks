@@ -1,0 +1,8 @@
+- name: Add temporary host to access node as root
+  ansible.builtin.add_host:
+    hostname: "{{ node_hostname ~ '_root' }}"
+    ansible_host: "{{ hostvars[node_hostname]['ansible_host'] }}"
+    ansible_port: "{{ hostvars[node_hostname]['ansible_port'] }}"
+    ansible_user: root
+    ansible_ssh_pass: "{{ node_root_pass }}"
+    ansible_python_interpreter: /usr/bin/python3
