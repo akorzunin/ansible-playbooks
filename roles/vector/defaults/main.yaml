@@ -1,1 +1,2 @@
 vector_deploy_dir: "/srv/monitoring"
+vector_version: "0.51.1-alpine"
