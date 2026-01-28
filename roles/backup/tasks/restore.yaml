@@ -59,6 +59,15 @@
         path: "{{ backup_restore_service_dir }}"
       register: backup_restore_service_dir_stat
 
+    - name: Create {{ backup_restore_base_dir ~ '.bak' }}
+      ansible.builtin.file:
+        path: "{{ backup_restore_base_dir ~ '.bak' }}"
+        state: directory
+        mode: "0755"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+      become: true
+
     - name: Copy backup_restore_service_dir to {{ backup_restore_service_dir ~ '.bak' }}
       ansible.builtin.copy:
         src: "{{ backup_restore_service_dir }}/"
