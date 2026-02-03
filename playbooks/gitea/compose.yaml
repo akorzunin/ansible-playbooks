@@ -1,0 +1,21 @@
+services:
+  server:
+    image: docker.gitea.com/gitea:1.25.4-rootless
+    container_name: gitea
+    restart: unless-stopped
+    volumes:
+      - ./data:/var/lib/gitea
+      - ./config:/etc/gitea
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "3301:3000"
+      - "3322:2222"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1000M
+        reservations:
+          cpus: "0.5"
+          memory: 500M

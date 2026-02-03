@@ -55,3 +55,6 @@ open-webui.akorz.duckdns.org {
 chat.akorz.duckdns.org {
     reverse_proxy 192.168.1.132:3333
 }
+git.akorz.duckdns.org {
+    reverse_proxy 192.168.1.132:3301
+}

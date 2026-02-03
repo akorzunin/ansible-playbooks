@@ -1,5 +1,6 @@
 ---
 - name: Create deploy dir
+  become: true
   ansible.builtin.file:
     path: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}"
     owner: "{{ ansible_user }}"
