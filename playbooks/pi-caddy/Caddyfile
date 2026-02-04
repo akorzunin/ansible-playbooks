@@ -58,3 +58,21 @@ chat.akorz.duckdns.org {
 git.akorz.duckdns.org {
     reverse_proxy 192.168.1.132:3301
 }
+m.akorz.duckdns.org {
+    # @websockets {
+    #   header -Connection
+    #   header -Upgrade
+    #   header -Sec-WebSocket-Accept
+    #   header -Sec-Websocket-Protocol
+    #   header -Sec-Websocket-Version
+    # }
+    reverse_proxy * https://mion.koa.gazprom-neft.ru {
+        @websockets {
+            header Connection *Upgrade*
+            header Upgrade websocket
+        }
+        header_up Host {http.reverse_proxy.upstream.hostport}
+        header_up Content-Security-Policy "default-src 'self'; script-src 'self' https://mion.koa.gazprom-neft.ru;"
+        header_down -Strict-Transport-Security
+    }
+}
