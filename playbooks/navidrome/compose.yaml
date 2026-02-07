@@ -1,0 +1,18 @@
+services:
+  navidrome:
+    image: deluan/navidrome:0.60.0
+    container_name: navidrome
+    restart: unless-stopped
+    ports:
+      - "4533:4533"
+    volumes:
+      - "./data:/data"
+      - "/mnt/storage/music/:/music:ro"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1.0G
+        reservations:
+          cpus: "0.5"
+          memory: 500M

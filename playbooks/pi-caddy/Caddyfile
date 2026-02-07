@@ -58,3 +58,9 @@ chat.akorz.duckdns.org {
 git.akorz.duckdns.org {
     reverse_proxy 192.168.1.132:3301
 }
+fs.akorz.duckdns.org {
+    reverse_proxy 192.168.1.132:4444
+}
+music.akorz.duckdns.org {
+    reverse_proxy 192.168.1.132:4533
+}
