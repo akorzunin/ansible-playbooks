@@ -64,3 +64,12 @@ fs.akorz.duckdns.org {
 music.akorz.duckdns.org {
     reverse_proxy 192.168.1.132:4533
 }
+richmond-s3-api.akorz.duckdns.org {
+    reverse_proxy 192.168.1.132:9900
+}
+richmond-s3.akorz.duckdns.org {
+    reverse_proxy 192.168.1.132:9901
+}
+richmond-api.akorz.duckdns.org {
+    reverse_proxy 192.168.1.132:9902
+}
