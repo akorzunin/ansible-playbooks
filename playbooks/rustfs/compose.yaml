@@ -1,0 +1,23 @@
+services:
+  rustfs:
+    image: rustfs/rustfs:1.0.0-alpha.83
+    container_name: rustfs
+    restart: unless-stopped
+    user: root
+    environment:
+      - RUSTFS_ACCESS_KEY=${AUTH_USER}
+      - RUSTFS_SECRET_KEY=${AUTH_PASS}
+    ports:
+      - "9900:9000"
+      - "9901:9001"
+    volumes:
+      - ./data:/data
+      - ./logs:/logs
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 256M
