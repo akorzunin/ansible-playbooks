@@ -1,0 +1,30 @@
+services:
+  ollama:
+    image: ollama/ollama:0.16.3
+    restart: on-failure:5
+    environment:
+      # GPU/Performance tuning for RTX 5000 (16GB VRAM)
+      - OLLAMA_FLASH_ATTENTION=1
+      # Keep models loaded in memory (default 5m, set to 24h for local use)
+      - OLLAMA_KEEP_ALIVE=24h
+      # Number of models to keep loaded simultaneously (RAM permitting)
+      - OLLAMA_MAX_LOADED_MODELS=1
+      # Concurrent request handling (tune based on model size)
+      - OLLAMA_NUM_PARALLEL=2
+      # Use all available VRAM
+      - OLLAMA_GPU_OVERHEAD=0
+    volumes:
+      - ollama:/root/.ollama
+      - models:/models
+    ports:
+      - "11434:11434"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+              count: all
+volumes:
+  ollama:
+  models:
