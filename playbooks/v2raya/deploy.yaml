@@ -1,0 +1,12 @@
+- name: Deploy v2raya
+  hosts: all
+  become: false
+  vars:
+    deploy_compose_service_name: v2raya
+
+  tasks:
+    - name: Docker compose up {{ deploy_compose_service_name }}
+      ansible.builtin.import_role:
+        name: deploy_compose
+      vars:
+        deploy_compose_file: compose.yaml
