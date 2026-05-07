@@ -1,0 +1,12 @@
+- name: Restore backup from cloud
+  hosts: all
+  become: true
+
+  tasks:
+    - name: Create backup dir
+      ansible.builtin.import_role:
+        name: backup
+        tasks_from: backup-restore
+      vars:
+        backup_node_name: "{{ NODE_NAME }}"
+        backup_dir: "{{ BACKUP_DIR }}"

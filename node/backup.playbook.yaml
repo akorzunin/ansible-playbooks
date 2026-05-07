@@ -1,0 +1,6 @@
+- name: Create backup of node files
+  hosts: all
+  become: true
+  roles:
+    - role: backup
+      backup_node_name: "{{ NODE_NAME }}"
