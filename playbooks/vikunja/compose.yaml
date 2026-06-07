@@ -1,0 +1,22 @@
+services:
+  vikunja:
+    image: vikunja/vikunja:2.3.0@sha256:f6b80393c1998cd5cd0dc38d24762c59ab4c10000a6f1032ef5b554e262cab93
+    container_name: vikunja
+    environment:
+      VIKUNJA_SERVICE_PUBLICURL: https://task-manager.akorz.duckdns.org/
+      VIKUNJA_SERVICE_SECRET: ${VIKUNJA_SERVICE_SECRET:-secret}
+      VIKUNJA_DATABASE_PATH: /db/vikunja.db
+    ports:
+      - 3456:3456
+    volumes:
+      - ./files:/app/vikunja/files
+      - ./db:/db
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 500M
+        reservations:
+          cpus: "0.5"
+          memory: 100M

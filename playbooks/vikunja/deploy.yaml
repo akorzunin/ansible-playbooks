@@ -1,0 +1,10 @@
+- name: Deploy vikunja
+  hosts: all
+  become: false
+  vars:
+    deploy_compose_service_name: vikunja
+
+  tasks:
+    - name: Docker compose up {{ deploy_compose_service_name }}
+      ansible.builtin.import_role:
+        name: deploy_compose
