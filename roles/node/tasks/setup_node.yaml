@@ -22,16 +22,29 @@
     - python3-pip
     - sshguard
 
+- name: Ensure apt keyrings directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Add Docker GPG apt key
-  ansible.builtin.apt_key:
+  ansible.builtin.get_url:
     url: https://download.docker.com/linux/ubuntu/gpg
-    state: present
+    dest: /etc/apt/keyrings/docker.asc
+    owner: root
+    group: root
+    mode: "0644"
 
 - name: Add Docker apt repository
   ansible.builtin.apt_repository:
     repo: >-
-      deb [arch={{ ansible_facts["architecture"] | regex_replace('x86_64', 'amd64') | regex_replace('aarch64', 'arm64') }}]
-      https://download.docker.com/linux/ubuntu focal stable
+      deb [arch={{
+        ansible_facts["architecture"] | regex_replace('x86_64', 'amd64') | regex_replace('aarch64', 'arm64')
+      }} signed-by=/etc/apt/keyrings/docker.asc]
+      https://download.docker.com/linux/ubuntu {{ ansible_facts["distribution_release"] }} stable
     state: present
 
 - name: Install Docker packages
@@ -58,14 +71,20 @@
     append: true
   notify: Update groups
 
-- name: Create docker networks for monitoring
+- name: Create docker network for monitoring
   ansible.builtin.command:
     cmd: docker network create --driver bridge monitoring
-  register: node_docker_networtk_monitoring_out
-  changed_when: node_docker_networtk_monitoring_out.rc != 1
+  register: node_docker_network_monitoring_out
+  changed_when: node_docker_network_monitoring_out.rc == 0
+  failed_when: >-
+    node_docker_network_monitoring_out.rc != 0 and
+    'already exists' not in node_docker_network_monitoring_out.stderr
 
-- name: Create docker networks
+- name: Create docker network main
   ansible.builtin.command:
     cmd: docker network create --driver bridge main
-  register: node_docker_networtk_main_out
-  changed_when: node_docker_networtk_main_out.rc != 1
+  register: node_docker_network_main_out
+  changed_when: node_docker_network_main_out.rc == 0
+  failed_when: >-
+    node_docker_network_main_out.rc != 0 and
+    'already exists' not in node_docker_network_main_out.stderr

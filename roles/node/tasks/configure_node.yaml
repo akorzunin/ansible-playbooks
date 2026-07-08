@@ -10,6 +10,15 @@
     # NOTE: need to install python-passlib on local machine
     password: "{{ node_pass | password_hash('sha512') }}"
 
+- name: Allow new user to run sudo without a password
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/{{ node_user }}"
+    content: "{{ node_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+
 - name: Ensure /usr/bin/python symlink points to python3
   ansible.builtin.file:
     src: /usr/bin/python3
