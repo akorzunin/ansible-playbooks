@@ -51,6 +51,14 @@ scrape_configs:
     static_configs:
       - targets: ["{{ HOST_KR1_IP }}:3003"]
 
+  - job_name: "nodeexporter-nk1"
+    static_configs:
+      - targets: ["{{ HOST_NK1_IP }}:9100"]
+
+  - job_name: "cadvisor-nk1"
+    static_configs:
+      - targets: ["{{ HOST_NK1_IP }}:3003"]
+
   - job_name: "nodeexporter-nt1"
     static_configs:
       - targets: ["{{ HOST_NT1_IP }}:901"]
