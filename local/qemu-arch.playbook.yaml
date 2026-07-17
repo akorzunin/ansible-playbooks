@@ -1,0 +1,510 @@
+---
+- name: Install and configure QEMU/KVM on Arch Linux
+  hosts: localhost
+  connection: local
+  become: true
+  vars:
+    # Override with: -e regular_user=your_user
+    regular_user: "{{ ansible_user | default(lookup('env', 'USER'), true) }}"
+    regular_home: "{{ lookup('env', 'HOME') if regular_user == lookup('env', 'USER') else '/home/' + regular_user }}"
+
+    # Restore is intentionally opt-in because it can overwrite lots of data.
+    # Run with: -e restore_backup=true
+    restore_backup: false
+    vm_backup_dir: /mnt/gay_store/vm.res/2026-07-16
+    vm_restore_dir: /mnt/gay_store/vm/gpn
+    vm_qcow_path: "{{ vm_restore_dir }}/archlinux.qcow2"
+    vm_libvirt_uri: qemu:///system
+    restore_raw_output_format: qcow2
+    restore_no_progress: true
+    restore_adjust_config: true
+    restore_define_vm: true
+    restore_vm_name: gpn
+    start_restored_vm: false
+    restart_restored_vm: false
+    # Use Intel virgl by default so GPU compositors such as niri can run.
+    # Set false to fall back to software rendering.
+    spice_gl_enabled: true
+    spice_gl_rendernode: /dev/dri/by-path/pci-0000:00:02.0-render
+    spice_gl_egl_vendor_file: /usr/share/glvnd/egl_vendor.d/50_mesa.json
+    verify_restored_image: false
+    restore_allow_home: false
+    restore_overwrite: false
+    restore_clear_target: false
+    aur_build_dir: /tmp/aur-virtnbdbackup
+
+    default_libvirt_network_xml: |
+      <network>
+        <name>default</name>
+        <forward mode='nat'/>
+        <bridge name='virbr0' stp='on' delay='0'/>
+        <ip address='192.168.122.1' netmask='255.255.255.0'>
+          <dhcp>
+            <range start='192.168.122.2' end='192.168.122.254'/>
+          </dhcp>
+        </ip>
+      </network>
+
+  tasks:
+    - name: Install official QEMU/libvirt packages and AUR build deps
+      community.general.pacman:
+        name:
+          # Documented restore/QEMU packages
+          - qemu-img
+          - qemu-system-x86
+          - qemu-desktop
+          - qemu-audio-spice
+          - virglrenderer
+          - mesa
+          - virt-manager
+          # Libvirt/default NAT network support
+          - libvirt
+          - virt-viewer
+          - dnsmasq
+          - iptables
+          - edk2-ovmf
+          # Needed by community.libvirt modules and virtnbdbackup
+          - libvirt-python
+          - python-lxml
+          - libnbd
+          - python-colorlog
+          - python-typing_extensions
+          - python-tqdm
+          - python-paramiko
+          - python-lz4
+          # Needed to build virtnbdbackup from AUR
+          - base-devel
+          - git
+          - python-build
+          - python-installer
+          - python-wheel
+          - python-setuptools
+        state: present
+        update_cache: true
+
+    - name: Ensure libvirt group exists
+      ansible.builtin.group:
+        name: libvirt
+        state: present
+
+    - name: Add user to libvirt group
+      ansible.builtin.user:
+        name: "{{ regular_user }}"
+        groups: libvirt
+        append: true
+
+    - name: Check whether virtnbdbackup is installed
+      ansible.builtin.command: pacman -Q virtnbdbackup
+      register: virtnbdbackup_query
+      changed_when: false
+      failed_when: false
+
+    - name: Build and install virtnbdbackup from AUR
+      when: virtnbdbackup_query.rc != 0
+      block:
+        - name: Remove old virtnbdbackup AUR build dir
+          ansible.builtin.file:
+            path: "{{ aur_build_dir }}"
+            state: absent
+
+        - name: Clone virtnbdbackup AUR package
+          become: true
+          become_user: "{{ regular_user }}"
+          ansible.builtin.git:
+            repo: https://aur.archlinux.org/virtnbdbackup.git
+            dest: "{{ aur_build_dir }}"
+            version: master
+
+        - name: Build virtnbdbackup package
+          become: true
+          become_user: "{{ regular_user }}"
+          ansible.builtin.command: makepkg --noconfirm
+          args:
+            chdir: "{{ aur_build_dir }}"
+          changed_when: true
+
+        - name: Install built virtnbdbackup package
+          ansible.builtin.shell: pacman -U --noconfirm {{ aur_build_dir }}/virtnbdbackup-*.pkg.tar.*
+          args:
+            executable: /bin/bash
+          changed_when: true
+
+    - name: Find libvirt daemon config files
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /etc/libvirt/libvirtd.conf
+        - /etc/libvirt/virtqemud.conf
+      register: libvirt_conf_files
+
+    - name: Configure libvirt socket access for libvirt group
+      ansible.builtin.lineinfile:
+        path: "{{ item.0.stat.path }}"
+        regexp: "^#?\\s*{{ item.1.key }}\\s*="
+        line: '{{ item.1.key }} = "{{ item.1.value }}"'
+      loop: "{{ libvirt_conf_files.results | selectattr('stat.exists') | list | product(libvirt_socket_settings) | list }}"
+      vars:
+        libvirt_socket_settings:
+          - key: unix_sock_group
+            value: libvirt
+          - key: unix_sock_rw_perms
+            value: "0770"
+
+    - name: Enable and start libvirt modular services
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: true
+        state: started
+      loop:
+        - virtqemud
+        - virtnetworkd
+        - virtlogd
+
+    - name: Ensure default libvirt network is defined
+      community.libvirt.virt_net:
+        uri: qemu:///system
+        name: default
+        state: present
+        xml: "{{ default_libvirt_network_xml }}"
+
+    - name: Ensure default libvirt network is active
+      community.libvirt.virt_net:
+        uri: qemu:///system
+        name: default
+        state: active
+
+    - name: Ensure default libvirt network autostarts
+      community.libvirt.virt_net:
+        uri: qemu:///system
+        name: default
+        autostart: true
+
+    # Docker's DROP FORWARD policy is evaluated before libvirt's nftables
+    # chain when both use the same hook priority. Keep the NAT bridge usable
+    # without weakening Docker's isolation for unrelated interfaces.
+    - name: Ensure Docker/libvirt forwarding hook directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop:
+        - /usr/local/libexec
+        - /etc/systemd/system/docker.service.d
+
+    - name: Install Docker/libvirt forwarding compatibility helper
+      ansible.builtin.copy:
+        dest: /usr/local/libexec/libvirt-allow-virbr0
+        owner: root
+        group: root
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          # Reapply libvirt bridge forwarding after Docker rebuilds its chains.
+          set -eu
+
+          iptables=/usr/bin/iptables
+          "$iptables" -w -nL DOCKER-USER >/dev/null 2>&1 || exit 0
+
+          "$iptables" -w -C DOCKER-USER -i virbr0 -j ACCEPT 2>/dev/null || \
+            "$iptables" -w -I DOCKER-USER 1 -i virbr0 -j ACCEPT
+          "$iptables" -w -C DOCKER-USER -o virbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
+            "$iptables" -w -I DOCKER-USER 2 -o virbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+
+    - name: Apply Docker/libvirt forwarding compatibility rules
+      ansible.builtin.command:
+        argv:
+          - /usr/local/libexec/libvirt-allow-virbr0
+      changed_when: false
+
+    - name: Configure Docker to restore libvirt forwarding on startup
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/docker.service.d/libvirt-virbr0.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Service]
+          # Docker recreates DOCKER-USER whenever its firewall is rebuilt.
+          ExecStartPost=/usr/local/libexec/libvirt-allow-virbr0
+
+    - name: Reload systemd after adding Docker/libvirt forwarding hook
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restore VM backup and fix qcow path
+      when: restore_backup | bool
+      block:
+        - name: Refuse to restore into home unless explicitly allowed
+          ansible.builtin.assert:
+            that:
+              - restore_allow_home | bool or not (vm_restore_dir is match('^' ~ regular_home ~ '(/|$)'))
+            fail_msg: >-
+              Refusing to restore into {{ regular_home }} because this machine's home filesystem does not have
+              enough space. Override with -e restore_allow_home=true only if you are sure.
+
+        - name: Check backup directory exists
+          ansible.builtin.stat:
+            path: "{{ vm_backup_dir }}"
+          register: vm_backup_dir_stat
+
+        - name: Fail if backup directory does not exist
+          ansible.builtin.fail:
+            msg: "Backup dir {{ vm_backup_dir }} does not exist. Copy backup there or override vm_backup_dir."
+          when: not vm_backup_dir_stat.stat.isdir | default(false)
+
+        - name: Find virtnbdbackup domain config files
+          ansible.builtin.find:
+            paths: "{{ vm_backup_dir }}"
+            patterns: "vmconfig*.xml"
+            recurse: false
+          register: vm_backup_config_files
+
+        - name: Find raw backup data files
+          ansible.builtin.find:
+            paths: "{{ vm_backup_dir }}"
+            patterns: "*.data"
+            recurse: false
+          register: vm_backup_data_files
+
+        - name: Fail if backup has neither config nor data files
+          ansible.builtin.fail:
+            msg: "Backup dir {{ vm_backup_dir }} has no vmconfig*.xml and no *.data files."
+          when:
+            - vm_backup_config_files.matched | int == 0
+            - vm_backup_data_files.matched | int == 0
+
+        - name: Check restore target directory
+          ansible.builtin.stat:
+            path: "{{ vm_restore_dir }}"
+          register: vm_restore_dir_stat
+
+        - name: Check whether restore target is empty
+          ansible.builtin.find:
+            paths: "{{ vm_restore_dir }}"
+            hidden: true
+            file_type: any
+            recurse: false
+          register: vm_restore_dir_existing_entries
+          when: vm_restore_dir_stat.stat.isdir | default(false)
+
+        - name: Fail if restore target already contains files
+          ansible.builtin.fail:
+            msg: "Restore target {{ vm_restore_dir }} is not empty. Use -e restore_overwrite=true to allow this."
+          when:
+            - not restore_overwrite | bool
+            - vm_restore_dir_existing_entries.matched | default(0) | int > 0
+
+        - name: Clear restore target when explicitly requested
+          ansible.builtin.file:
+            path: "{{ vm_restore_dir }}"
+            state: absent
+          when:
+            - restore_overwrite | bool
+            - restore_clear_target | bool
+            - vm_restore_dir_existing_entries.matched | default(0) | int > 0
+
+        - name: Ensure restore directory exists
+          ansible.builtin.file:
+            path: "{{ vm_restore_dir }}"
+            state: directory
+            owner: "{{ regular_user }}"
+            group: "{{ regular_user }}"
+            mode: "0755"
+
+        - name: Restore backup with virtnbdrestore
+          become: true
+          become_user: "{{ regular_user }}"
+          ansible.builtin.command:
+            argv: >-
+              {{
+                ['virtnbdrestore']
+                + ((restore_no_progress | bool) | ternary(['-n'], []))
+                + ((restore_adjust_config | bool) | ternary(['-c'], []))
+                + ((restore_vm_name | length > 0) | ternary(['--name', restore_vm_name], []))
+                + ['-U', vm_libvirt_uri, '-i', vm_backup_dir ~ '/', '-o', vm_restore_dir]
+              }}
+          changed_when: true
+          when: vm_backup_config_files.matched | int > 0
+
+        - name: Restore raw-only backup data to qcow2
+          become: true
+          become_user: "{{ regular_user }}"
+          ansible.builtin.command:
+            argv:
+              - qemu-img
+              - convert
+              - -f
+              - raw
+              - -O
+              - "{{ restore_raw_output_format }}"
+              - "{{ (vm_backup_data_files.files | sort(attribute='path') | first).path }}"
+              - "{{ vm_qcow_path }}"
+          changed_when: true
+          when: vm_backup_config_files.matched | int == 0
+
+        - name: Find restored libvirt XML files
+          ansible.builtin.find:
+            paths: "{{ vm_restore_dir }}"
+            patterns: "*.xml"
+            recurse: true
+          register: restored_xml_files
+
+        - name: Fix archlinux.qcow2 path in restored XML files
+          ansible.builtin.replace:
+            path: "{{ item.path }}"
+            regexp: "(<source\\s+file=['\"])(?:[^'\"]*/)?archlinux\\.qcow2(['\"])"
+            replace: "\\1{{ vm_qcow_path }}\\2"
+          loop: "{{ restored_xml_files.files }}"
+
+    - name: Check restored VM config file
+      ansible.builtin.stat:
+        path: "{{ vm_restore_dir }}/vmconfig.xml"
+      register: restored_vmconfig_stat
+
+    - name: Remove unsupported Parsec security label from restored VM config
+      ansible.builtin.replace:
+        path: "{{ vm_restore_dir }}/vmconfig.xml"
+        regexp: "(?ms)^\\s*<seclabel\\b[^>]*\\bmodel=['\"]parsec['\"][^>]*(?:/>|>.*?</seclabel>)\\s*\n?"
+        replace: ""
+      when: restored_vmconfig_stat.stat.exists | default(false)
+
+    - name: Check Intel render node for Spice OpenGL
+      ansible.builtin.stat:
+        path: "{{ spice_gl_rendernode }}"
+      register: spice_gl_rendernode_stat
+      when:
+        - spice_gl_enabled | bool
+        - restored_vmconfig_stat.stat.exists | default(false)
+
+    - name: Require configured Intel render node for Spice OpenGL
+      ansible.builtin.assert:
+        that: spice_gl_rendernode_stat.stat.exists | default(false)
+        fail_msg: "Configured Spice GL render node {{ spice_gl_rendernode }} does not exist."
+      when:
+        - spice_gl_enabled | bool
+        - restored_vmconfig_stat.stat.exists | default(false)
+
+    - name: Enable Spice OpenGL on Intel render node in restored VM config
+      ansible.builtin.lineinfile:
+        path: "{{ vm_restore_dir }}/vmconfig.xml"
+        regexp: "^\\s*<gl\\b.*$"
+        line: "      <gl enable=\"yes\" rendernode=\"{{ spice_gl_rendernode }}\"/>"
+        insertafter: "^\\s*<image\\b.*$"
+      when:
+        - spice_gl_enabled | bool
+        - restored_vmconfig_stat.stat.exists | default(false)
+
+    - name: Normalize virtio network model in restored VM config
+      ansible.builtin.replace:
+        path: "{{ vm_restore_dir }}/vmconfig.xml"
+        regexp: "(?ms)(<interface\\b.*?<model)\\s+type=['\"]virtio['\"][^>]*>"
+        replace: "\\1 type=\"virtio\"/>"
+      when: restored_vmconfig_stat.stat.exists | default(false)
+
+    # On a mixed NVIDIA/Intel host, QEMU otherwise selects NVIDIA's EGL
+    # vendor even though the Spice render node above is Intel. The resulting
+    # EGL_NOT_INITIALIZED prevents a virgl guest from starting.
+    - name: Add QEMU XML namespace for Mesa EGL override
+      ansible.builtin.replace:
+        path: "{{ vm_restore_dir }}/vmconfig.xml"
+        regexp: "(<domain\\b(?![^>]*\\bxmlns:qemu=)[^>]*)>"
+        replace: "\\1 xmlns:qemu=\"http://libvirt.org/schemas/domain/qemu/1.0\">"
+      when:
+        - spice_gl_enabled | bool
+        - restored_vmconfig_stat.stat.exists | default(false)
+
+    - name: Force Mesa EGL for the GL-enabled QEMU process
+      ansible.builtin.replace:
+        path: "{{ vm_restore_dir }}/vmconfig.xml"
+        regexp: "(?s)(</devices>)(?!.*<qemu:commandline>)"
+        replace: |-
+          \1
+          <qemu:commandline>
+            <qemu:env name="__EGL_VENDOR_LIBRARY_FILENAMES" value="{{ spice_gl_egl_vendor_file }}"/>
+          </qemu:commandline>
+      when:
+        - spice_gl_enabled | bool
+        - restored_vmconfig_stat.stat.exists | default(false)
+
+    - name: Enable virtio GL and 3D acceleration in restored VM video config
+      ansible.builtin.replace:
+        path: "{{ vm_restore_dir }}/vmconfig.xml"
+        regexp: "(?s)(<video>\\s*)<model\\b[^>]*>(?:\\s*<acceleration\\b[^>]*/>)?\\s*</model>"
+        replace: |-
+          \1      <model type="virtio" heads="1" primary="yes" device="virtio-vga-gl">
+            <acceleration accel3d="yes"/>
+          </model>
+      when:
+        - spice_gl_enabled | bool
+        - restored_vmconfig_stat.stat.exists | default(false)
+
+    - name: Disable Spice OpenGL in restored VM config when requested
+      ansible.builtin.replace:
+        path: "{{ vm_restore_dir }}/vmconfig.xml"
+        regexp: "(?m)^\\s*<(?:gl|acceleration)\\b[^>]*/>\\s*\n?"
+        replace: ""
+      when:
+        - not spice_gl_enabled | bool
+        - restored_vmconfig_stat.stat.exists | default(false)
+
+    - name: Change virtio GL video model to regular virtio when GL is disabled
+      ansible.builtin.replace:
+        path: "{{ vm_restore_dir }}/vmconfig.xml"
+        regexp: "\\s+device=['\"]virtio-vga-gl['\"]"
+        replace: " device=\"virtio-vga\""
+      when:
+        - not spice_gl_enabled | bool
+        - restored_vmconfig_stat.stat.exists | default(false)
+
+    - name: Define restored VM from sanitized config
+      community.libvirt.virt:
+        uri: "{{ vm_libvirt_uri }}"
+        command: define
+        xml: "{{ lookup('file', vm_restore_dir + '/vmconfig.xml') }}"
+      when:
+        - restore_define_vm | bool
+        - restored_vmconfig_stat.stat.exists | default(false)
+
+    - name: Shut down restored VM before restart when requested
+      community.libvirt.virt:
+        uri: "{{ vm_libvirt_uri }}"
+        name: "{{ restore_vm_name }}"
+        state: shutdown
+      when: restart_restored_vm | bool
+
+    - name: Wait for restored VM to shut off
+      ansible.builtin.command:
+        argv:
+          - virsh
+          - -c
+          - "{{ vm_libvirt_uri }}"
+          - domstate
+          - "{{ restore_vm_name }}"
+      register: restored_vm_domstate
+      changed_when: false
+      until: "'shut off' in restored_vm_domstate.stdout"
+      retries: 30
+      delay: 2
+      when: restart_restored_vm | bool
+
+    - name: Start restored VM when requested
+      community.libvirt.virt:
+        uri: "{{ vm_libvirt_uri }}"
+        name: "{{ restore_vm_name }}"
+        state: running
+      when: start_restored_vm | bool or restart_restored_vm | bool
+
+    - name: Verify restored qcow image
+      ansible.builtin.command:
+        argv:
+          - qemu-img
+          - check
+          - "{{ vm_qcow_path }}"
+      changed_when: false
+      when: verify_restored_image | bool
+
+    - name: Print post-run note
+      ansible.builtin.debug:
+        msg: "If this user was newly added to libvirt, log out/in or run: newgrp libvirt"
