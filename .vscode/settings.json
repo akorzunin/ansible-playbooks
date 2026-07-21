@@ -28,5 +28,14 @@
         "titleBar.inactiveForeground": "#e7e7e799"
     },
     "peacock.remoteColor": "#dd0531",
-    "peacock.color": "#dd0531"
+    "peacock.color": "#dd0531",
+    "yaml.disableSchemaDetection": [
+        "**/hermes-agent/config.yaml",
+        "**/.github/workflows/*.yml",
+        "**/.github/workflows/*.yaml",
+        "**/.gitea/workflows/*.yml",
+        "**/.gitea/workflows/*.yaml",
+        "**/.forgejo/workflows/*.yml",
+        "**/.forgejo/workflows/*.yaml"
+    ]
 }

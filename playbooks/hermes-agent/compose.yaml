@@ -1,0 +1,21 @@
+services:
+  hermes-agent:
+    image: nousresearch/hermes-agent:v2026.7.20@sha256:f7b35053268f532f98955195c909f15a230470fbcbdacaa9fdecb95707dad04a
+    container_name: hermes-agent
+    command: ["gateway", "run"]
+    restart: unless-stopped
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    environment:
+      HERMES_UID: ${HERMES_UID:-1000}
+      HERMES_GID: ${HERMES_GID:-1000}
+      HTTP_PROXY: http://host.docker.internal:20171
+      HTTPS_PROXY: http://host.docker.internal:20171
+      TELEGRAM_PROXY: http://host.docker.internal:20171
+    volumes:
+      - ./data:/opt/data
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2G

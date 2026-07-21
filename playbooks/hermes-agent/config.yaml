@@ -1,0 +1,9 @@
+model:
+  provider: openrouter
+  default: poolside/laguna-s-2.1:free
+
+tool_loop_guardrails:
+  hard_stop_enabled: true
+  hard_stop_after:
+    exact_failure: 5
+    idempotent_no_progress: 5

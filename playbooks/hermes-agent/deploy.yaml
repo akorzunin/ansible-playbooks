@@ -1,0 +1,78 @@
+---
+- name: Deploy Hermes Agent
+  hosts: all
+  become: false
+  vars:
+    deploy_compose_dir: /srv/deploy
+    deploy_compose_service_name: hermes-agent
+  vars_files:
+    - "{{ playbook_dir }}/../../external_vars.yml"
+
+  tasks:
+    - name: Check Hermes secrets are configured
+      ansible.builtin.assert:
+        that:
+          - HERMES_OPENROUTER_API_KEY is defined
+          - HERMES_TELEGRAM_BOT_TOKEN is defined
+          - HERMES_TELEGRAM_ALLOWED_USERS is defined
+        quiet: true
+      no_log: true
+
+    - name: Create Hermes deployment directory
+      ansible.builtin.include_role:
+        name: deploy_compose
+        tasks_from: mkdir
+
+    - name: Create Hermes data directory
+      ansible.builtin.file:
+        path: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/data"
+        state: directory
+        mode: "0700"
+
+    - name: Copy Hermes Compose file
+      ansible.builtin.copy:
+        src: compose.yaml
+        dest: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/compose.yaml"
+        mode: "0644"
+
+    - name: Set Hermes model configuration
+      ansible.builtin.copy:
+        src: config.yaml
+        dest: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/data/config.yaml"
+        mode: "0600"
+        force: true
+
+    - name: Write Hermes secrets
+      ansible.builtin.copy:
+        content: |
+          OPENROUTER_API_KEY={{ HERMES_OPENROUTER_API_KEY }}
+          TELEGRAM_BOT_TOKEN={{ HERMES_TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_ALLOWED_USERS={{ HERMES_TELEGRAM_ALLOWED_USERS }}
+        dest: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/data/.env"
+        mode: "0600"
+      no_log: true
+
+    - name: Stop Hermes Agent
+      ansible.builtin.command:
+        cmd: docker compose down
+        chdir: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}"
+      register: hermes_down
+      changed_when: hermes_down.rc == 0
+
+    - name: Set Hermes data ownership
+      become: true
+      ansible.builtin.file:
+        path: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/data"
+        owner: "{{ ansible_facts['user_uid'] }}"
+        group: "{{ ansible_facts['user_gid'] }}"
+        recurse: true
+
+    - name: Start Hermes Agent
+      ansible.builtin.command:
+        cmd: docker compose up -d --force-recreate
+        chdir: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}"
+      environment:
+        HERMES_UID: "{{ ansible_facts['user_uid'] }}"
+        HERMES_GID: "{{ ansible_facts['user_gid'] }}"
+      register: hermes_compose
+      changed_when: hermes_compose.rc == 0
