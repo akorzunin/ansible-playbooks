@@ -12,6 +12,10 @@ services:
       HTTP_PROXY: http://host.docker.internal:20171
       HTTPS_PROXY: http://host.docker.internal:20171
       TELEGRAM_PROXY: http://host.docker.internal:20171
+      HERMES_TELEGRAM_HTTP_CONNECT_TIMEOUT: 30
+      HERMES_TELEGRAM_HTTP_READ_TIMEOUT: 60
+      HERMES_TELEGRAM_HTTP_WRITE_TIMEOUT: 60
+      HERMES_TELEGRAM_HTTP_POOL_TIMEOUT: 30
     volumes:
       - ./data:/opt/data
     deploy:
