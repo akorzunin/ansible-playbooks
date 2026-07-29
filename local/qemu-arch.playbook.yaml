@@ -11,24 +11,30 @@
     # Restore is intentionally opt-in because it can overwrite lots of data.
     # Run with: -e restore_backup=true
     restore_backup: false
-    vm_backup_dir: /mnt/gay_store/vm.res/2026-07-16
-    vm_restore_dir: /mnt/gay_store/vm/gpn
+    # Keep machine-specific storage behind one overridable root. For example:
+    # -e vm_storage_root=/mnt/large-disk
+    vm_storage_root: "{{ regular_home }}"
+    vm_backup_dir: "{{ vm_storage_root }}/vm.bak"
+    vm_restore_dir: "{{ vm_storage_root }}/vm"
     vm_qcow_path: "{{ vm_restore_dir }}/archlinux.qcow2"
     vm_libvirt_uri: qemu:///system
     restore_raw_output_format: qcow2
     restore_no_progress: true
     restore_adjust_config: true
     restore_define_vm: true
-    restore_vm_name: gpn
+    restore_vm_name: archlinux-restored
     start_restored_vm: false
     restart_restored_vm: false
-    # Use Intel virgl by default so GPU compositors such as niri can run.
+    # Use this machine's AMD/Mesa render node so GPU compositors such as niri
+    # can run without QEMU selecting the NVIDIA EGL implementation.
     # Set false to fall back to software rendering.
     spice_gl_enabled: true
-    spice_gl_rendernode: /dev/dri/by-path/pci-0000:00:02.0-render
+    spice_gl_rendernode: /dev/dri/by-path/pci-0000:10:00.0-render
     spice_gl_egl_vendor_file: /usr/share/glvnd/egl_vendor.d/50_mesa.json
     verify_restored_image: false
-    restore_allow_home: false
+    # The portable default storage root is the current user's home. Restore is
+    # still protected by restore_backup/restore_overwrite/restore_clear_target.
+    restore_allow_home: true
     restore_overwrite: false
     restore_clear_target: false
     aur_build_dir: /tmp/aur-virtnbdbackup
@@ -370,7 +376,7 @@
         replace: ""
       when: restored_vmconfig_stat.stat.exists | default(false)
 
-    - name: Check Intel render node for Spice OpenGL
+    - name: Check configured render node for Spice OpenGL
       ansible.builtin.stat:
         path: "{{ spice_gl_rendernode }}"
       register: spice_gl_rendernode_stat
@@ -378,7 +384,7 @@
         - spice_gl_enabled | bool
         - restored_vmconfig_stat.stat.exists | default(false)
 
-    - name: Require configured Intel render node for Spice OpenGL
+    - name: Require configured render node for Spice OpenGL
       ansible.builtin.assert:
         that: spice_gl_rendernode_stat.stat.exists | default(false)
         fail_msg: "Configured Spice GL render node {{ spice_gl_rendernode }} does not exist."
@@ -386,7 +392,7 @@
         - spice_gl_enabled | bool
         - restored_vmconfig_stat.stat.exists | default(false)
 
-    - name: Enable Spice OpenGL on Intel render node in restored VM config
+    - name: Enable Spice OpenGL on configured render node in restored VM config
       ansible.builtin.lineinfile:
         path: "{{ vm_restore_dir }}/vmconfig.xml"
         regexp: "^\\s*<gl\\b.*$"
@@ -431,7 +437,7 @@
     - name: Enable virtio GL and 3D acceleration in restored VM video config
       ansible.builtin.replace:
         path: "{{ vm_restore_dir }}/vmconfig.xml"
-        regexp: "(?s)(<video>\\s*)<model\\b[^>]*>(?:\\s*<acceleration\\b[^>]*/>)?\\s*</model>"
+        regexp: "(?s)(<video>\\s*)<model\\b[^>]*(?:/>|>(?:\\s*<acceleration\\b[^>]*/>)?\\s*</model>)"
         replace: |-
           \1      <model type="virtio" heads="1" primary="yes" device="virtio-vga-gl">
             <acceleration accel3d="yes"/>

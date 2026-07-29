@@ -1,33 +1,88 @@
 # Local QEMU/KVM restore
 
-## Restore performed on 2026-07-16
+This playbook installs/configures QEMU and libvirt and can restore the archived
+Arch Linux VM.
 
-Backup source:
+## Portable storage paths
 
-```text
-/mnt/gay_store/vm.res/2026-07-16/
+Paths are derived from one variable instead of a machine-specific mount:
+
+```yaml
+vm_storage_root: "{{ regular_home }}"
+vm_backup_dir: "{{ vm_storage_root }}/vm.bak"
+vm_restore_dir: "{{ vm_storage_root }}/vm"
 ```
 
-Restore target:
+The defaults on this machine resolve to:
 
 ```text
-/mnt/gay_store/vm/gpn/
+Backup: ~/vm.bak
+VM:     ~/vm
+Disk:   ~/vm/archlinux.qcow2
 ```
 
-Important space note: do **not** restore this VM under `$HOME`. The home filesystem had ~98 GiB free, while the restored VM image uses ~95.5 GiB and needs working/output space. The playbook defaults restore output to `/mnt/gay_store/vm/gpn/`, where there was enough free space.
+To use another disk, override only the root:
 
-## Full restore command used
-
-The backup was updated to include the libvirt config:
-
-```text
-/mnt/gay_store/vm.res/2026-07-16/vmconfig.copy.xml
-/mnt/gay_store/vm.res/2026-07-16/vda.copy.data
-/mnt/gay_store/vm.res/2026-07-16/vda.copy.qcow.json
-/mnt/gay_store/vm.res/2026-07-16/vda.copy.data.chksum
+```sh
+ansible-playbook -i localhost, local/qemu-arch.playbook.yaml \
+  -e vm_storage_root=/path/on/large-disk
 ```
 
-The full VM restore was run only through the Ansible playbook:
+## Receive a QEMU backup over HTTP
+
+Starts a temporary copyparty upload server on port `8000` in
+`~/vm.bak/YYYY-MM-DD` and prints the exact source-machine backup/upload commands.
+If port `8000` is already occupied, the playbook exits with an error:
+
+```sh
+ansible-playbook -i localhost, local/qemu-backup-upload.playbook.yaml
+```
+
+Override storage/VM when needed:
+
+```sh
+ansible-playbook -i localhost, local/qemu-backup-upload.playbook.yaml \
+  -e vm_storage_root=/path/on/large-disk \
+  -e source_vm_name=archlinux
+```
+
+No SSH is needed from the source machine; upload with a browser or `curl` to the
+printed HTTP URL. Full automation is only possible if the source machine exposes
+the backup through HTTP too; then this host can fetch it with `get_url`/`curl`.
+
+## Restore today's uploaded backup
+
+Restores from `~/vm.bak/YYYY-MM-DD` into `~/vm` and defines
+`archlinux-restored` without starting it:
+
+```sh
+ansible-playbook -i localhost, local/qemu-backup-restore.playbook.yaml
+```
+
+The playbook refuses to overwrite a non-empty `~/vm`. To deliberately replace
+an existing restore:
+
+```sh
+ansible-playbook -i localhost, local/qemu-backup-restore.playbook.yaml \
+  -e restore_overwrite=true \
+  -e restore_clear_target=true
+```
+
+## Configure QEMU/libvirt and define an existing restore
+
+```sh
+ansible-playbook -i localhost, local/qemu-arch.playbook.yaml
+```
+
+When `vm/vmconfig.xml` exists, the playbook sanitizes it, points it at the
+portable disk path, and defines `archlinux-restored` in `qemu:///system`.
+It does not start the VM by default.
+
+## Restore the backup
+
+Restore is deliberately opt-in. The backup and restored image each occupy
+about 79 GiB, so check available space first. The target is not overwritten or
+cleared unless both options are explicitly enabled.
 
 ```sh
 ansible-playbook -i localhost, local/qemu-arch.playbook.yaml \
@@ -37,122 +92,46 @@ ansible-playbook -i localhost, local/qemu-arch.playbook.yaml \
   -e verify_restored_image=true
 ```
 
-What the playbook did:
+The expected backup files are `vmconfig*.xml`, `*.data`, and the associated
+virtnbdbackup metadata in `vm_backup_dir`.
 
-1. Installed/verified QEMU/libvirt/virtnbdbackup tooling.
-2. Refused restore into `$HOME`.
-3. Cleared `/mnt/gay_store/vm/gpn/` because `restore_clear_target=true` was explicitly set.
-4. Ran `virtnbdrestore` with adjusted config and libvirt define enabled.
-5. Fixed qcow path to `/mnt/gay_store/vm/gpn/archlinux.qcow2`.
-6. Removed the unsupported Astra/Parsec security label from the restored XML for Arch/libvirt compatibility.
-7. Defined the sanitized VM config.
-8. Verified the restored image with `qemu-img check`.
-
-## Starting the VM
-
-The restored backup contained this security label:
-
-```xml
-<seclabel type="dynamic" model="parsec" relabel="yes">
-```
-
-Arch libvirt does not provide the `parsec` security driver, so starting failed with:
-
-```text
-unsupported configuration: Security driver model 'parsec' is not available
-```
-
-The playbook now removes only the `parsec` seclabel from `/mnt/gay_store/vm/gpn/vmconfig.xml`, redefines the VM from the sanitized XML, and can start it with:
-
-```sh
-ansible-playbook -i localhost, local/qemu-arch.playbook.yaml -e start_restored_vm=true
-```
-
-## Spice display acceleration
-
-Hardware acceleration is disabled by default in the playbook (`spice_gl_enabled: false`). The active VM uses plain Spice with `virtio-vga`:
-
-```xml
-<graphics type="spice">
-  <listen type="none"/>
-</graphics>
-<video>
-  <model type="virtio" heads="1" primary="yes" device="virtio-vga"/>
-</video>
-```
-
-If GL is re-enabled, the explicit render node is important. This host has:
-
-```text
-Intel UHD 770:     /dev/dri/renderD128 (PCI 00:02.0)
-NVIDIA RTX 4070:   /dev/dri/renderD129 (PCI 01:00.0)
-```
-
-To enable the tested VirGL configuration, use the Intel render node:
+## Start the VM
 
 ```sh
 ansible-playbook -i localhost, local/qemu-arch.playbook.yaml \
-  -e spice_gl_enabled=true \
-  -e restart_restored_vm=true
+  -e start_restored_vm=true
 ```
 
-This starts QEMU with `virtio-vga-gl` and `rendernode=/dev/dri/by-path/pci-0000:00:02.0-render`.
+Or:
 
-On this hybrid Intel/NVIDIA host, launch the local SPICE client on the same Intel/Mesa GPU. The unqualified `virt-viewer` command uses NVIDIA and imports the Intel dma-buf as a black screen:
+```sh
+virsh -c qemu:///system start archlinux-restored
+```
+
+## Spice 3D acceleration
+
+This host uses the AMD/Mesa render node because the default desktop GPU is
+NVIDIA:
+
+```text
+/dev/dri/by-path/pci-0000:10:00.0-render
+```
+
+Disable GL for a portable software-rendered configuration with:
+
+```sh
+ansible-playbook -i localhost, local/qemu-arch.playbook.yaml \
+  -e spice_gl_enabled=false
+```
+
+With GL enabled, launch the viewer through Mesa to avoid a black window:
 
 ```sh
 env \
   __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json \
-  __GLX_VENDOR_LIBRARY_NAME=mesa \
-  DRI_PRIME=pci-0000_00_02_0 \
-  virt-viewer -c qemu:///system gpn --attach
+  MESA_VK_DEVICE_SELECT=1002:164e \
+  DRI_PRIME=1 \
+  virt-viewer -c qemu:///system archlinux-restored --attach
 ```
 
-The guest Ly login is on tty1. If the viewer opens a text login instead, switch back with `Ctrl+Alt+F1`.
-
-## Result
-
-Restored files:
-
-```text
-/mnt/gay_store/vm/gpn/archlinux.qcow2
-/mnt/gay_store/vm/gpn/vmconfig.xml
-```
-
-Defined libvirt VM:
-
-```text
-Name:  gpn
-State: running
-URI:   qemu:///system
-```
-
-Defined VM disk path:
-
-```text
-/mnt/gay_store/vm/gpn/archlinux.qcow2
-```
-
-Image verification:
-
-```text
-qemu-img check: No errors were found on the image.
-```
-
-Image info after full restore:
-
-```text
-file format: qcow2
-virtual size: 120 GiB
-actual file size: ~95.5 GiB
-```
-
-You can start it from `virt-manager` or with:
-
-```sh
-virsh -c qemu:///system start gpn
-```
-
-```sh
-env __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json __GLX_VENDOR_LIBRARY_NAME=mesa DRI_PRIME=pci-0000_00_02_0 virt-viewer -c qemu:///system gpn --attach
-```
+The guest login is on tty1; use `Ctrl+Alt+F1` if the viewer opens another TTY.

@@ -1,0 +1,127 @@
+---
+- name: Receive QEMU backup over HTTP
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  become: false
+  vars:
+    regular_user: "{{ ansible_user | default(lookup('env', 'USER'), true) }}"
+    regular_home: "{{ lookup('env', 'HOME') if regular_user == lookup('env', 'USER') else '/home/' + regular_user }}"
+    vm_storage_root: "{{ regular_home }}"
+    vm_backup_dir: "{{ vm_storage_root }}/vm.bak"
+    vm_backup_upload_dir: '{{ vm_backup_dir }}/{{ ansible_facts["date_time"]["date"] }}'
+    source_vm_name: archlinux
+    copyparty_bind: 0.0.0.0
+    copyparty_port: 8000
+    copyparty_wait_host: "{{ (copyparty_bind == '0.0.0.0') | ternary('127.0.0.1', copyparty_bind) }}"
+    copyparty_url: 'http://{{ ansible_facts["default_ipv4"]["address"] | default("127.0.0.1") }}:{{ copyparty_port }}/'
+
+  tasks:
+    - name: Install copyparty
+      become: true
+      community.general.pacman:
+        name: copyparty
+        state: present
+        update_cache: true
+
+    - name: Create dated backup upload directory
+      ansible.builtin.file:
+        path: "{{ vm_backup_upload_dir }}"
+        state: directory
+        owner: "{{ regular_user }}"
+        group: "{{ regular_user }}"
+        mode: "0700"
+
+    - name: Stop previous copyparty from this upload directory
+      ansible.builtin.shell: |
+        set -euo pipefail
+        if [ -f .copyparty.pid ]; then
+          pid="$(cat .copyparty.pid)"
+          if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid"
+            sleep 1
+            echo stopped
+          fi
+        fi
+      args:
+        chdir: "{{ vm_backup_upload_dir }}"
+        executable: /bin/bash
+      register: old_copyparty
+      changed_when: old_copyparty.stdout == "stopped"
+
+    - name: Check whether copyparty port is free
+      ansible.builtin.command:
+        argv:
+          - ss
+          - -H
+          - -ltn
+          - "sport = :{{ copyparty_port }}"
+      register: copyparty_port_listeners
+      changed_when: false
+      failed_when: false
+
+    - name: Fail if copyparty port is occupied
+      ansible.builtin.fail:
+        msg: "Port {{ copyparty_port }} is already occupied: {{ copyparty_port_listeners.stdout }}"
+      when: copyparty_port_listeners.stdout | length > 0
+
+    - name: Start copyparty upload server
+      ansible.builtin.shell: |
+        set -euo pipefail
+        nohup copyparty -i {{ copyparty_bind | quote }} -p {{ copyparty_port | quote }} -v .::w > copyparty.log 2>&1 &
+        pid=$!
+        echo "$pid" > .copyparty.pid
+        sleep 1
+        kill -0 "$pid"
+      args:
+        chdir: "{{ vm_backup_upload_dir }}"
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Wait for copyparty to accept HTTP connections
+      ansible.builtin.wait_for:
+        host: "{{ copyparty_wait_host }}"
+        port: "{{ copyparty_port }}"
+        timeout: 10
+
+    - name: Print source backup and upload steps
+      ansible.builtin.debug:
+        msg: |
+          Copyparty is running.
+
+          Upload URL: {{ copyparty_url }}
+          Upload dir: {{ vm_backup_upload_dir }}
+          Log file: {{ vm_backup_upload_dir }}/copyparty.log
+
+          On the QEMU source machine:
+            VM={{ source_vm_name }}
+            OUT=/tmp/${VM}-backup-$(date +%F)
+            mkdir -p "$OUT"
+            sudo virtnbdbackup -U qemu:///system -d "$VM" -l full -o "$OUT"
+
+          Before upload, make sure you upload these three backup file types:
+            *.data
+            *.json
+            *.xml
+
+          Upload over HTTP, no SSH needed:
+            Browser: open {{ copyparty_url }} and drop the .data, .json, and .xml files from "$OUT"
+            CLI: cd "$OUT" && for f in *; do [ -f "$f" ] && curl --fail --upload-file "$f" "{{ copyparty_url }}$f"; done
+
+          Restore from this dated backup later by adding this to your restore command:
+            -e vm_backup_dir={{ vm_backup_upload_dir }}
+
+    - name: Keep copyparty running until the upload is done
+      ansible.builtin.pause:
+        prompt: "Upload to {{ copyparty_url }}, then press Enter to stop copyparty"
+
+    - name: Stop copyparty
+      ansible.builtin.shell: |
+        set -euo pipefail
+        pid="$(cat .copyparty.pid)"
+        kill "$pid"
+        rm -f .copyparty.pid
+      args:
+        chdir: "{{ vm_backup_upload_dir }}"
+        executable: /bin/bash
+      changed_when: true

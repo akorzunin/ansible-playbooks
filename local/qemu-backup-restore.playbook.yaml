@@ -1,0 +1,7 @@
+---
+- name: Restore today's uploaded QEMU backup
+  ansible.builtin.import_playbook: qemu-arch.playbook.yaml
+  vars:
+    restore_backup: true
+    restore_overwrite: true
+    vm_backup_dir: '{{ vm_storage_root }}/vm.bak/{{ ansible_facts["date_time"]["date"] }}'
