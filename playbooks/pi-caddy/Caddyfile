@@ -79,3 +79,6 @@ task-manager.akorz.duckdns.org {
 demo.akorz.duckdns.org {
     reverse_proxy 192.168.1.132:8001
 }
+omniroute.akorz.duckdns.org {
+    reverse_proxy 192.168.1.132:20128
+}

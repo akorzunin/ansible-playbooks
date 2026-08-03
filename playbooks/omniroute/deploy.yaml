@@ -1,0 +1,62 @@
+---
+- name: Deploy OmniRoute
+  hosts: all
+  become: false
+  vars:
+    deploy_compose_dir: /srv/deploy
+    deploy_compose_service_name: omniroute
+  vars_files:
+    - "{{ playbook_dir }}/../../external_vars.yml"
+
+  tasks:
+    - name: Check OmniRoute password is configured
+      ansible.builtin.assert:
+        that:
+          - AUTH_PASS is defined
+          - AUTH_PASS | length > 0
+        quiet: true
+      no_log: true
+
+    - name: Create OmniRoute deployment directory
+      ansible.builtin.include_role:
+        name: deploy_compose
+        tasks_from: mkdir
+
+    - name: Copy OmniRoute Compose file
+      ansible.builtin.copy:
+        src: compose.yaml
+        dest: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/compose.yaml"
+        mode: "0644"
+
+    - name: Create OmniRoute secrets
+      ansible.builtin.copy:
+        content: |
+          OMNIROUTE_INITIAL_PASSWORD={{ AUTH_PASS }}
+          OMNIROUTE_JWT_SECRET={{ lookup('ansible.builtin.password', '/dev/null', length=64, chars=['ascii_letters', 'digits']) }}
+          OMNIROUTE_API_KEY_SECRET={{ lookup('ansible.builtin.password', '/dev/null', length=64, chars=['ascii_letters', 'digits']) }}
+          OMNIROUTE_WS_BRIDGE_SECRET={{ lookup('ansible.builtin.password', '/dev/null', length=64, chars=['ascii_letters', 'digits']) }}
+        dest: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/.env"
+        mode: "0600"
+        force: false
+      no_log: true
+
+    - name: Start OmniRoute
+      ansible.builtin.command:
+        cmd: docker compose up -d --force-recreate
+        chdir: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}"
+      register: omniroute_compose
+      changed_when: omniroute_compose.rc == 0
+
+    - name: Wait for OmniRoute health check
+      ansible.builtin.command:
+        argv:
+          - docker
+          - inspect
+          - --format
+          - "{{ '{{' }}.State.Health.Status{{ '}}' }}"
+          - omniroute
+      register: omniroute_health
+      changed_when: false
+      until: omniroute_health.stdout == 'healthy'
+      retries: 12
+      delay: 5

@@ -1,0 +1,30 @@
+services:
+  omniroute:
+    container_name: omniroute
+    image: diegosouzapw/omniroute:3.8.49@sha256:92c768c56e2de32c51a0621ef182835018b00b288c9bb235c5c5e4514658c1a1
+    restart: unless-stopped
+    ports:
+      - "192.168.1.132:20128:20128"
+    environment:
+      API_KEY_SECRET: ${OMNIROUTE_API_KEY_SECRET:?set in .env}
+      HOSTNAME: 0.0.0.0
+      INITIAL_PASSWORD: ${OMNIROUTE_INITIAL_PASSWORD:?set in .env}
+      JWT_SECRET: ${OMNIROUTE_JWT_SECRET:?set in .env}
+      NODE_OPTIONS: --max-old-space-size=1024
+      OMNIROUTE_MEMORY_MB: "1024"
+      OMNIROUTE_WS_BRIDGE_SECRET: ${OMNIROUTE_WS_BRIDGE_SECRET:?set in .env}
+      REQUIRE_API_KEY: "true"
+    volumes:
+      - omniroute-data:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 2G
+        reservations:
+          cpus: "0.25"
+          memory: 512M
+
+volumes:
+  omniroute-data:
+    name: omniroute-data
