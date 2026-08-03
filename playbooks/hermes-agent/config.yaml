@@ -2,6 +2,12 @@ model:
   provider: openrouter
   default: poolside/laguna-s-2.1:free
 
+stt:
+  enabled: true
+  provider: local      # local (free) | groq | openai | mistral | xai
+  local:
+    model: base        # tiny, base, small, medium, large-v3
+
 tool_loop_guardrails:
   hard_stop_enabled: true
   hard_stop_after:
