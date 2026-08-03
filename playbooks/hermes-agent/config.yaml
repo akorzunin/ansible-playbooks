@@ -1,12 +1,20 @@
+providers:
+  omniroute:
+    api: http://192.168.1.132:20128/v1
+    key_env: OMNIROUTE_API_KEY
+
 model:
-  provider: openrouter
-  default: poolside/laguna-s-2.1:free
+  provider: custom:omniroute
+  default: oc/deepseek-v4-flash-free
 
 stt:
   enabled: true
   provider: local      # local (free) | groq | openai | mistral | xai
   local:
     model: base        # tiny, base, small, medium, large-v3
+
+security:
+  allow_lazy_installs: true
 
 tool_loop_guardrails:
   hard_stop_enabled: true

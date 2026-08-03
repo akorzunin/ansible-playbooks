@@ -9,12 +9,10 @@
     - "{{ playbook_dir }}/../../external_vars.yml"
 
   tasks:
-    - name: Check Hermes secrets are configured
+    - name: Check Hermes OmniRoute key is configured
       ansible.builtin.assert:
         that:
-          - HERMES_OPENROUTER_API_KEY is defined
-          - HERMES_TELEGRAM_BOT_TOKEN is defined
-          - HERMES_TELEGRAM_ALLOWED_USERS is defined
+          - HERMES_OMNIROUTE_API_KEY is defined
         quiet: true
       no_log: true
 
@@ -42,13 +40,12 @@
         mode: "0600"
         force: true
 
-    - name: Write Hermes secrets
-      ansible.builtin.copy:
-        content: |
-          OPENROUTER_API_KEY={{ HERMES_OPENROUTER_API_KEY }}
-          TELEGRAM_BOT_TOKEN={{ HERMES_TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_ALLOWED_USERS={{ HERMES_TELEGRAM_ALLOWED_USERS }}
-        dest: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/data/.env"
+    - name: Write Hermes OmniRoute key
+      ansible.builtin.lineinfile:
+        path: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/data/.env"
+        regexp: "^OMNIROUTE_API_KEY="
+        line: "OMNIROUTE_API_KEY={{ HERMES_OMNIROUTE_API_KEY }}"
+        create: true
         mode: "0600"
       no_log: true
 
@@ -76,3 +73,46 @@
         HERMES_GID: "{{ ansible_facts['user_gid'] }}"
       register: hermes_compose
       changed_when: hermes_compose.rc == 0
+
+    - name: Check Hermes local STT dependency
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - exec
+          - -T
+          - --user
+          - "{{ ansible_facts['user_uid'] }}:{{ ansible_facts['user_gid'] }}"
+          - -e
+          - PYTHONPATH=/opt/data/lazy-packages
+          - hermes-agent
+          - /opt/hermes/.venv/bin/python
+          - -c
+          - from faster_whisper import WhisperModel
+        chdir: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}"
+      register: hermes_stt_installed
+      changed_when: false
+      failed_when: false
+
+    - name: Install Hermes local STT dependency
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - exec
+          - -T
+          - --user
+          - "{{ ansible_facts['user_uid'] }}:{{ ansible_facts['user_gid'] }}"
+          - hermes-agent
+          - /usr/local/bin/uv
+          - pip
+          - install
+          - --target
+          - /opt/data/lazy-packages
+          - faster-whisper==1.2.1
+          - sounddevice==0.5.5
+          - numpy==2.4.3
+        chdir: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}"
+      when: hermes_stt_installed.rc != 0
+      changed_when: true
+      no_log: true

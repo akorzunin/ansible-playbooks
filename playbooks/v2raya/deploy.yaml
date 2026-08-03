@@ -1,12 +1,199 @@
+---
 - name: Deploy v2raya
   hosts: all
   become: false
   vars:
+    deploy_compose_dir: /srv/deploy
     deploy_compose_service_name: v2raya
+    v2raya_ssh_host: "{{ V2RAYA_SSH_HOST | default(hostvars['nt1']['ansible_host']) }}"
+    v2raya_ssh_port: "{{ V2RAYA_SSH_PORT | default(22) }}"
+    v2raya_ssh_proxy_name: ssh-nt1
+  vars_files:
+    - "{{ playbook_dir }}/../../external_vars.yml"
 
   tasks:
-    - name: Docker compose up {{ deploy_compose_service_name }}
-      ansible.builtin.import_role:
+    - name: Check v2raya SSH and API credentials are configured
+      ansible.builtin.assert:
+        that:
+          - V2RAYA_ADMIN_USERNAME is defined
+          - V2RAYA_ADMIN_USERNAME | length > 0
+          - V2RAYA_ADMIN_PASSWORD is defined
+          - V2RAYA_ADMIN_PASSWORD | length > 0
+          - V2RAYA_SSH_USERNAME is defined
+          - V2RAYA_SSH_USERNAME | length > 0
+          - V2RAYA_SSH_PASSWORD is defined
+          - V2RAYA_SSH_PASSWORD | length > 0
+          - V2RAYA_SSH_KNOWN_HOSTS is defined
+          - V2RAYA_SSH_KNOWN_HOSTS | length > 0
+          - v2raya_ssh_host | length > 0
+          - v2raya_ssh_port | int > 0
+        quiet: true
+      no_log: true
+
+    - name: Create v2raya deployment directory
+      ansible.builtin.include_role:
         name: deploy_compose
-      vars:
-        deploy_compose_file: compose.yaml
+        tasks_from: mkdir
+
+    - name: Create v2raya SSH directory
+      ansible.builtin.file:
+        path: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/ssh"
+        state: directory
+        mode: "0700"
+
+    - name: Copy v2raya Compose file
+      ansible.builtin.copy:
+        src: compose.yaml
+        dest: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/compose.yaml"
+        mode: "0644"
+
+    - name: Copy SSH tunnel image definition
+      ansible.builtin.copy:
+        src: Dockerfile.ssh
+        dest: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/Dockerfile.ssh"
+        mode: "0644"
+
+    - name: Write SSH tunnel connection settings
+      ansible.builtin.copy:
+        content: |
+          V2RAYA_SSH_HOST={{ v2raya_ssh_host | quote }}
+          V2RAYA_SSH_PORT={{ v2raya_ssh_port }}
+          V2RAYA_SSH_USERNAME={{ V2RAYA_SSH_USERNAME | quote }}
+        dest: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/.env"
+        mode: "0600"
+      no_log: true
+
+    - name: Write SSH tunnel password
+      ansible.builtin.copy:
+        content: "{{ V2RAYA_SSH_PASSWORD }}\n"
+        dest: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/ssh-password"
+        mode: "0600"
+      no_log: true
+
+    - name: Write SSH host key
+      ansible.builtin.copy:
+        content: "{{ V2RAYA_SSH_KNOWN_HOSTS }}\n"
+        dest: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/ssh/known_hosts"
+        mode: "0644"
+
+    - name: Start v2raya and the SSH tunnel
+      ansible.builtin.command:
+        cmd: docker compose up -d --build --force-recreate
+        chdir: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}"
+      register: v2raya_compose
+      changed_when: v2raya_compose.rc == 0
+
+    - name: Wait for the SSH SOCKS tunnel
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 20173
+        state: started
+        timeout: 60
+
+    - name: Wait for v2raya
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 2017
+        state: started
+        timeout: 60
+
+    - name: Log in to v2raya
+      ansible.builtin.uri:
+        url: http://127.0.0.1:2017/api/login
+        method: POST
+        body_format: json
+        body:
+          username: "{{ V2RAYA_ADMIN_USERNAME }}"
+          password: "{{ V2RAYA_ADMIN_PASSWORD }}"
+        status_code: 200
+        use_proxy: false
+      register: v2raya_login
+      changed_when: false
+      failed_when: v2raya_login.json.code | default('FAIL') != 'SUCCESS'
+      no_log: true
+
+    - name: Read v2raya servers
+      ansible.builtin.uri:
+        url: http://127.0.0.1:2017/api/touch
+        headers:
+          Authorization: "{{ v2raya_login.json.data.token }}"
+        status_code: 200
+        use_proxy: false
+      register: v2raya_touch
+      changed_when: false
+      failed_when: v2raya_touch.json.code | default('FAIL') != 'SUCCESS'
+      no_log: true
+
+    - name: Find SSH SOCKS profile
+      ansible.builtin.set_fact:
+        v2raya_ssh_server: >-
+          {{ v2raya_touch.json.data.touch.servers
+             | selectattr('name', 'equalto', v2raya_ssh_proxy_name)
+             | list | first | default({}) }}
+
+    - name: Add SSH SOCKS profile
+      ansible.builtin.uri:
+        url: http://127.0.0.1:2017/api/import
+        method: POST
+        headers:
+          Authorization: "{{ v2raya_login.json.data.token }}"
+        body_format: json
+        body:
+          url: "socks5://127.0.0.1:20173#{{ v2raya_ssh_proxy_name }}"
+        status_code: 200
+        use_proxy: false
+      register: v2raya_import
+      when: v2raya_ssh_server.id is not defined
+      changed_when: true
+      failed_when: v2raya_import.json.code | default('FAIL') != 'SUCCESS'
+      no_log: true
+
+    - name: Read imported SSH SOCKS profile
+      ansible.builtin.set_fact:
+        v2raya_ssh_server: >-
+          {{ v2raya_import.json.data.touch.servers
+             | selectattr('name', 'equalto', v2raya_ssh_proxy_name)
+             | list | first }}
+      when: v2raya_ssh_server.id is not defined
+      no_log: true
+
+    - name: Select SSH SOCKS profile
+      ansible.builtin.uri:
+        url: http://127.0.0.1:2017/api/connection
+        method: POST
+        headers:
+          Authorization: "{{ v2raya_login.json.data.token }}"
+        body_format: json
+        body:
+          id: "{{ v2raya_ssh_server.id }}"
+          _type: server
+          outbound: proxy
+        status_code: 200
+        use_proxy: false
+      register: v2raya_connection
+      changed_when: true
+      failed_when: v2raya_connection.json.code | default('FAIL') != 'SUCCESS'
+      no_log: true
+
+    - name: Start v2raya proxy
+      ansible.builtin.uri:
+        url: http://127.0.0.1:2017/api/v2ray
+        method: POST
+        headers:
+          Authorization: "{{ v2raya_login.json.data.token }}"
+        status_code: 200
+        use_proxy: false
+      register: v2raya_start
+      changed_when: true
+      failed_when: v2raya_start.json.code | default('FAIL') != 'SUCCESS'
+      no_log: true
+
+    - name: Verify v2raya HTTP proxy through SSH
+      ansible.builtin.uri:
+        url: https://www.cloudflare.com/cdn-cgi/trace
+        status_code: 200
+        timeout: 30
+      environment:
+        HTTPS_PROXY: http://127.0.0.1:20171
+        HTTP_PROXY: http://127.0.0.1:20171
+        NO_PROXY: 127.0.0.1,localhost
