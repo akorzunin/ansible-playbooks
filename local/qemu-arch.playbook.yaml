@@ -23,6 +23,8 @@
     restore_adjust_config: true
     restore_define_vm: true
     restore_vm_name: archlinux-restored
+    # Human-readable size; override with e.g. -e restore_vm_memory=28G.
+    restore_vm_memory: 14G
     start_restored_vm: false
     restart_restored_vm: false
     # Use this machine's AMD/Mesa render node so GPU compositors such as niri
@@ -463,6 +465,13 @@
       when:
         - not spice_gl_enabled | bool
         - restored_vmconfig_stat.stat.exists | default(false)
+
+    - name: Set restored VM memory
+      ansible.builtin.replace:
+        path: "{{ vm_restore_dir }}/vmconfig.xml"
+        regexp: "(<(?:currentMemory|memory)\\s+unit=['\"]KiB['\"]>)[^<]*(</(?:currentMemory|memory)>)"
+        replace: "\\g<1>{{ ((restore_vm_memory | human_to_bytes) // 1024) | int }}\\g<2>"
+      when: restored_vmconfig_stat.stat.exists | default(false)
 
     - name: Define restored VM from sanitized config
       community.libvirt.virt:

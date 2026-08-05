@@ -96,6 +96,14 @@ ansible-playbook -i localhost, local/qemu-arch.playbook.yaml \
 The expected backup files are `vmconfig*.xml`, `*.data`, and the associated
 virtnbdbackup metadata in `vm_backup_dir`.
 
+The restored VM memory defaults to `14G`. Override it with a human-readable
+value such as `28G`:
+
+```sh
+ansible-playbook -i localhost, local/qemu-arch.playbook.yaml \
+  -e restore_vm_memory=28G
+```
+
 ## Start the VM
 
 ```sh
