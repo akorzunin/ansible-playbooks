@@ -4,4 +4,5 @@
   vars:
     restore_backup: true
     restore_overwrite: true
+    restore_clear_target: true
     vm_backup_dir: '{{ vm_storage_root }}/vm.bak/{{ ansible_facts["date_time"]["date"] }}'

@@ -297,9 +297,9 @@
 
         - name: Fail if restore target already contains files
           ansible.builtin.fail:
-            msg: "Restore target {{ vm_restore_dir }} is not empty. Use -e restore_overwrite=true to allow this."
+            msg: "Restore target {{ vm_restore_dir }} is not empty. Use -e restore_overwrite=true -e restore_clear_target=true to replace it."
           when:
-            - not restore_overwrite | bool
+            - not (restore_overwrite | bool and restore_clear_target | bool)
             - vm_restore_dir_existing_entries.matched | default(0) | int > 0
 
         - name: Clear restore target when explicitly requested
@@ -309,7 +309,7 @@
           when:
             - restore_overwrite | bool
             - restore_clear_target | bool
-            - vm_restore_dir_existing_entries.matched | default(0) | int > 0
+            - vm_restore_dir_stat.stat.exists | default(false)
 
         - name: Ensure restore directory exists
           ansible.builtin.file:
@@ -325,7 +325,7 @@
           ansible.builtin.command:
             argv: >-
               {{
-                ['virtnbdrestore']
+                ['virtnbdrestore', '--nocolor']
                 + ((restore_no_progress | bool) | ternary(['-n'], []))
                 + ((restore_adjust_config | bool) | ternary(['-c'], []))
                 + ((restore_vm_name | length > 0) | ternary(['--name', restore_vm_name], []))

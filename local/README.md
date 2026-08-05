@@ -52,18 +52,19 @@ the backup through HTTP too; then this host can fetch it with `get_url`/`curl`.
 
 ## Restore today's uploaded backup
 
-Restores from `~/vm.bak/YYYY-MM-DD` into `~/vm` and defines
-`archlinux-restored` without starting it:
+Restores from `~/vm.bak/YYYY-MM-DD` into `~/vm`, replacing the previous
+restore target, and defines `archlinux-restored` without starting it:
 
 ```sh
 ansible-playbook -i localhost, local/qemu-backup-restore.playbook.yaml
 ```
 
-The playbook refuses to overwrite a non-empty `~/vm`. To deliberately replace
-an existing restore:
+To explicitly replace an existing target with the main playbook, pass both
+options:
 
 ```sh
-ansible-playbook -i localhost, local/qemu-backup-restore.playbook.yaml \
+ansible-playbook -i localhost, local/qemu-arch.playbook.yaml \
+  -e restore_backup=true \
   -e restore_overwrite=true \
   -e restore_clear_target=true
 ```
