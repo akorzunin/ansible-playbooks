@@ -5,7 +5,7 @@ providers:
 
 model:
   provider: custom:omniroute
-  default: oc/deepseek-v4-flash-free
+  default: cx/gpt-5.6-luna-high
 
 web:
   backend: firecrawl

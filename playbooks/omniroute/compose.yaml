@@ -3,11 +3,16 @@ services:
     container_name: omniroute
     image: diegosouzapw/omniroute:3.8.49@sha256:92c768c56e2de32c51a0621ef182835018b00b288c9bb235c5c5e4514658c1a1
     restart: unless-stopped
+    extra_hosts:
+      - host.docker.internal:host-gateway
     ports:
       - "192.168.1.132:20128:20128"
     environment:
       API_KEY_SECRET: ${OMNIROUTE_API_KEY_SECRET:?set in .env}
       HOSTNAME: 0.0.0.0
+      HTTP_PROXY: http://host.docker.internal:20171
+      HTTPS_PROXY: http://host.docker.internal:20171
+      NO_PROXY: 127.0.0.1,localhost,host.docker.internal,192.168.1.132
       INITIAL_PASSWORD: ${OMNIROUTE_INITIAL_PASSWORD:?set in .env}
       JWT_SECRET: ${OMNIROUTE_JWT_SECRET:?set in .env}
       NODE_OPTIONS: --max-old-space-size=1024

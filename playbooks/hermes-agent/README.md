@@ -25,6 +25,18 @@ ansible-vault encrypt_string --vault-password-file .ansible_pass 'value' --name 
 ansible-vault encrypt_string --vault-password-file .ansible_pass 'value' --name HERMES_FIRECRAWL_API_KEY
 ```
 
+## Use through OmniRoute
+
+OmniRoute is configured to send outbound traffic through the host v2rayA HTTP
+proxy at `host.docker.internal:20171`.
+
+Deploy/redeploy OmniRoute so the proxy settings are applied:
+
+   ```sh
+   ansible-playbook --vault-password-file=.ansible_pass \
+     playbooks/omniroute/deploy.yaml -i hosts -l remote_workstation
+   ```
+
 Deploy to a chosen host:
 
 ```sh
