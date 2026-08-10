@@ -7,6 +7,9 @@ model:
   provider: custom:omniroute
   default: oc/deepseek-v4-flash-free
 
+web:
+  backend: firecrawl
+
 stt:
   enabled: true
   provider: local      # local (free) | groq | openai | mistral | xai

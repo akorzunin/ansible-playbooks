@@ -9,10 +9,11 @@
     - "{{ playbook_dir }}/../../external_vars.yml"
 
   tasks:
-    - name: Check Hermes OmniRoute key is configured
+    - name: Check Hermes API keys are configured
       ansible.builtin.assert:
         that:
           - HERMES_OMNIROUTE_API_KEY is defined
+          - HERMES_FIRECRAWL_API_KEY is defined
         quiet: true
       no_log: true
 
@@ -45,6 +46,15 @@
         path: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/data/.env"
         regexp: "^OMNIROUTE_API_KEY="
         line: "OMNIROUTE_API_KEY={{ HERMES_OMNIROUTE_API_KEY }}"
+        create: true
+        mode: "0600"
+      no_log: true
+
+    - name: Write Hermes Firecrawl key
+      ansible.builtin.lineinfile:
+        path: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/data/.env"
+        regexp: "^FIRECRAWL_API_KEY="
+        line: "FIRECRAWL_API_KEY={{ HERMES_FIRECRAWL_API_KEY }}"
         create: true
         mode: "0600"
       no_log: true
