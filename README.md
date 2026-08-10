@@ -2,15 +2,12 @@
 
 ## Setup
 
-Sync files from Dropbox
+Link `hosts` and `external_vars.yml` from Dropbox:
 
-    ln -s ~/Dropbox/ssh/hosts ./hosts
-    ln -s ~/Dropbox/ssh/external_vars.yml ./external_vars.yml
+    ./install.sh
 
-On Termux(Android)
-
-    ln -s ~/storage/shared/Dropbox/ssh/hosts ./hosts
-    ln -s ~/storage/shared/Dropbox/ssh/external_vars.yml ./external_vars.yml
+The script checks `~/Dropbox/ssh` and the Termux path
+`~/storage/shared/Dropbox/ssh`. Set `DROPBOX_SSH_DIR` to use another path.
 
 Create password file
 
