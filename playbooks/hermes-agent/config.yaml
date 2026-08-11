@@ -7,6 +7,10 @@ model:
   provider: custom:omniroute
   default: cx/gpt-5.6-luna-high
 
+fallback_providers:
+  - provider: custom:omniroute
+    model: deepseek/deepseek-v4-flash
+
 web:
   backend: firecrawl
 
