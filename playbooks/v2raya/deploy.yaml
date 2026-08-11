@@ -1,105 +1,111 @@
 ---
-- name: Deploy v2raya
+- name: Deploy v2rayA
   hosts: all
   become: false
   vars:
     deploy_compose_dir: /srv/deploy
     deploy_compose_service_name: v2raya
-    v2raya_ssh_host: "{{ V2RAYA_SSH_HOST | default(hostvars['nt1']['ansible_host']) }}"
-    v2raya_ssh_port: "{{ V2RAYA_SSH_PORT | default(22) }}"
-    v2raya_ssh_proxy_name: ssh-nt1
+    network_name: v2raya-proxy
+    v2raya_api: http://127.0.0.1:2017
+    v2raya_node_address: 3x-ui.akorz-nt1.duckdns.org:16001
   vars_files:
     - "{{ playbook_dir }}/../../external_vars.yml"
 
   tasks:
-    - name: Check v2raya SSH and API credentials are configured
+    - name: Validate v2rayA bootstrap variables
       ansible.builtin.assert:
         that:
           - V2RAYA_ADMIN_USERNAME is defined
           - V2RAYA_ADMIN_USERNAME | length > 0
           - V2RAYA_ADMIN_PASSWORD is defined
           - V2RAYA_ADMIN_PASSWORD | length > 0
-          - V2RAYA_SSH_USERNAME is defined
-          - V2RAYA_SSH_USERNAME | length > 0
-          - V2RAYA_SSH_PASSWORD is defined
-          - V2RAYA_SSH_PASSWORD | length > 0
-          - V2RAYA_SSH_KNOWN_HOSTS is defined
-          - V2RAYA_SSH_KNOWN_HOSTS | length > 0
-          - v2raya_ssh_host | length > 0
-          - v2raya_ssh_port | int > 0
+          - V2RAYA_NODE_URL is defined
+          - V2RAYA_NODE_URL is match('^vless://')
         quiet: true
       no_log: true
 
-    - name: Create v2raya deployment directory
+    - name: Create v2rayA deployment directory
       ansible.builtin.include_role:
         name: deploy_compose
         tasks_from: mkdir
 
-    - name: Create v2raya SSH directory
+    - name: Create v2rayA data directory
       ansible.builtin.file:
-        path: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/ssh"
+        path: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/data"
         state: directory
         mode: "0700"
 
-    - name: Copy v2raya Compose file
-      ansible.builtin.copy:
-        src: compose.yaml
-        dest: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/compose.yaml"
-        mode: "0644"
+    - name: Remove obsolete SSH tunnel files
+      ansible.builtin.file:
+        path: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/{{ item }}"
+        state: absent
+      loop:
+        - Dockerfile.ssh
+        - .env
+        - ssh-password
+        - ssh
 
-    - name: Copy SSH tunnel image definition
-      ansible.builtin.copy:
-        src: Dockerfile.ssh
-        dest: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/Dockerfile.ssh"
-        mode: "0644"
-
-    - name: Write SSH tunnel connection settings
-      ansible.builtin.copy:
-        content: |
-          V2RAYA_SSH_HOST={{ v2raya_ssh_host | quote }}
-          V2RAYA_SSH_PORT={{ v2raya_ssh_port }}
-          V2RAYA_SSH_USERNAME={{ V2RAYA_SSH_USERNAME | quote }}
-        dest: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/.env"
-        mode: "0600"
-      no_log: true
-
-    - name: Write SSH tunnel password
-      ansible.builtin.copy:
-        content: "{{ V2RAYA_SSH_PASSWORD }}\n"
-        dest: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/ssh-password"
-        mode: "0600"
-      no_log: true
-
-    - name: Write SSH host key
-      ansible.builtin.copy:
-        content: "{{ V2RAYA_SSH_KNOWN_HOSTS }}\n"
-        dest: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/ssh/known_hosts"
-        mode: "0644"
-
-    - name: Start v2raya and the SSH tunnel
+    - name: Check shared Docker network
       ansible.builtin.command:
-        cmd: docker compose up -d --build --force-recreate
-        chdir: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}"
-      register: v2raya_compose
-      changed_when: v2raya_compose.rc == 0
+        argv:
+          - docker
+          - network
+          - inspect
+          - "{{ network_name }}"
+      register: network_inspect
+      changed_when: false
+      failed_when: false
 
-    - name: Wait for the SSH SOCKS tunnel
-      ansible.builtin.wait_for:
-        host: 127.0.0.1
-        port: 20173
-        state: started
-        timeout: 60
+    - name: Create shared Docker network
+      ansible.builtin.command:
+        argv:
+          - docker
+          - network
+          - create
+          - "{{ network_name }}"
+      when: network_inspect.rc != 0
+      changed_when: true
 
-    - name: Wait for v2raya
-      ansible.builtin.wait_for:
-        host: 127.0.0.1
-        port: 2017
-        state: started
-        timeout: 60
+    - name: Deploy v2rayA Compose service
+      ansible.builtin.import_role:
+        name: deploy_compose
 
-    - name: Log in to v2raya
+    - name: Wait for v2rayA API
       ansible.builtin.uri:
-        url: http://127.0.0.1:2017/api/login
+        url: "{{ v2raya_api }}/api/version"
+        method: GET
+        status_code: 200
+        use_proxy: false
+      register: v2raya_ready
+      until: v2raya_ready.status == 200
+      retries: 30
+      delay: 2
+
+    - name: Check v2rayA account
+      ansible.builtin.uri:
+        url: "{{ v2raya_api }}/api/account"
+        method: GET
+        status_code: 200
+        use_proxy: false
+      register: v2raya_account
+      changed_when: false
+
+    - name: Create v2rayA account
+      ansible.builtin.uri:
+        url: "{{ v2raya_api }}/api/account"
+        method: POST
+        body_format: json
+        body:
+          username: "{{ V2RAYA_ADMIN_USERNAME }}"
+          password: "{{ V2RAYA_ADMIN_PASSWORD }}"
+        status_code: 200
+        use_proxy: false
+      when: not v2raya_account.json.data.hasAnyAccounts
+      no_log: true
+
+    - name: Log in to v2rayA
+      ansible.builtin.uri:
+        url: "{{ v2raya_api }}/api/login"
         method: POST
         body_format: json
         body:
@@ -112,11 +118,12 @@
       failed_when: v2raya_login.json.code | default('FAIL') != 'SUCCESS'
       no_log: true
 
-    - name: Read v2raya servers
+    - name: Read configured v2rayA nodes
       ansible.builtin.uri:
-        url: http://127.0.0.1:2017/api/touch
+        url: "{{ v2raya_api }}/api/touch"
+        method: GET
         headers:
-          Authorization: "{{ v2raya_login.json.data.token }}"
+          Authorization: "Bearer {{ v2raya_login.json.data.token }}"
         status_code: 200
         use_proxy: false
       register: v2raya_touch
@@ -124,49 +131,103 @@
       failed_when: v2raya_touch.json.code | default('FAIL') != 'SUCCESS'
       no_log: true
 
-    - name: Find SSH SOCKS profile
+    - name: Find existing VLESS node
       ansible.builtin.set_fact:
-        v2raya_ssh_server: >-
-          {{ v2raya_touch.json.data.touch.servers
-             | selectattr('name', 'equalto', v2raya_ssh_proxy_name)
-             | list | first | default({}) }}
+        v2raya_existing_id: >-
+          {{
+            v2raya_touch.json.data.touch.servers
+            | selectattr('address', 'equalto', v2raya_node_address)
+            | map(attribute='id')
+            | list
+            | first
+            | default(0, true)
+          }}
 
-    - name: Add SSH SOCKS profile
+    - name: Import or update VLESS node
       ansible.builtin.uri:
-        url: http://127.0.0.1:2017/api/import
+        url: "{{ v2raya_api }}/api/import"
         method: POST
         headers:
-          Authorization: "{{ v2raya_login.json.data.token }}"
+          Authorization: "Bearer {{ v2raya_login.json.data.token }}"
         body_format: json
-        body:
-          url: "socks5://127.0.0.1:20173#{{ v2raya_ssh_proxy_name }}"
+        body: >-
+          {{
+            {'url': V2RAYA_NODE_URL}
+            | combine(
+                ({'which': {'_type': 'server', 'id': v2raya_existing_id | int}}
+                if (v2raya_existing_id | int > 0) else {})
+              )
+          }}
         status_code: 200
         use_proxy: false
       register: v2raya_import
-      when: v2raya_ssh_server.id is not defined
+      no_log: true
       changed_when: true
       failed_when: v2raya_import.json.code | default('FAIL') != 'SUCCESS'
-      no_log: true
 
-    - name: Read imported SSH SOCKS profile
-      ansible.builtin.set_fact:
-        v2raya_ssh_server: >-
-          {{ v2raya_import.json.data.touch.servers
-             | selectattr('name', 'equalto', v2raya_ssh_proxy_name)
-             | list | first }}
-      when: v2raya_ssh_server.id is not defined
-      no_log: true
-
-    - name: Select SSH SOCKS profile
+    - name: Read imported v2rayA node
       ansible.builtin.uri:
-        url: http://127.0.0.1:2017/api/connection
+        url: "{{ v2raya_api }}/api/touch"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ v2raya_login.json.data.token }}"
+        status_code: 200
+        use_proxy: false
+      register: v2raya_touch_after_import
+      changed_when: false
+      failed_when: v2raya_touch_after_import.json.code | default('FAIL') != 'SUCCESS'
+      no_log: true
+
+    - name: Select VLESS node
+      ansible.builtin.set_fact:
+        v2raya_node_id: >-
+          {{
+            v2raya_touch_after_import.json.data.touch.servers
+            | selectattr('address', 'equalto', v2raya_node_address)
+            | map(attribute='id')
+            | list
+            | first
+          }}
+
+    - name: Read v2rayA settings
+      ansible.builtin.uri:
+        url: "{{ v2raya_api }}/api/setting"
+        method: GET
+        headers:
+          Authorization: "Bearer {{ v2raya_login.json.data.token }}"
+        status_code: 200
+        use_proxy: false
+      register: v2raya_setting
+      changed_when: false
+      failed_when: v2raya_setting.json.code | default('FAIL') != 'SUCCESS'
+      no_log: true
+
+    - name: Allow proxy access from the Docker network
+      ansible.builtin.uri:
+        url: "{{ v2raya_api }}/api/setting"
+        method: PUT
+        headers:
+          Authorization: "Bearer {{ v2raya_login.json.data.token }}"
+        body_format: json
+        body: "{{ v2raya_setting.json.data.setting | combine({'portSharing': true}) }}"
+        status_code: 200
+        use_proxy: false
+      when: not v2raya_setting.json.data.setting.portSharing
+      no_log: true
+      changed_when: true
+      failed_when: v2raya_port_sharing.json.code | default('FAIL') != 'SUCCESS'
+      register: v2raya_port_sharing
+
+    - name: Connect VLESS node
+      ansible.builtin.uri:
+        url: "{{ v2raya_api }}/api/connection"
         method: POST
         headers:
-          Authorization: "{{ v2raya_login.json.data.token }}"
+          Authorization: "Bearer {{ v2raya_login.json.data.token }}"
         body_format: json
         body:
-          id: "{{ v2raya_ssh_server.id }}"
           _type: server
+          id: "{{ v2raya_node_id | int }}"
           outbound: proxy
         status_code: 200
         use_proxy: false
@@ -175,25 +236,15 @@
       failed_when: v2raya_connection.json.code | default('FAIL') != 'SUCCESS'
       no_log: true
 
-    - name: Start v2raya proxy
+    - name: Start v2ray core
       ansible.builtin.uri:
-        url: http://127.0.0.1:2017/api/v2ray
+        url: "{{ v2raya_api }}/api/v2ray"
         method: POST
         headers:
-          Authorization: "{{ v2raya_login.json.data.token }}"
+          Authorization: "Bearer {{ v2raya_login.json.data.token }}"
         status_code: 200
         use_proxy: false
       register: v2raya_start
       changed_when: true
       failed_when: v2raya_start.json.code | default('FAIL') != 'SUCCESS'
       no_log: true
-
-    - name: Verify v2raya HTTP proxy through SSH
-      ansible.builtin.uri:
-        url: https://www.cloudflare.com/cdn-cgi/trace
-        status_code: 200
-        timeout: 30
-      environment:
-        HTTPS_PROXY: http://127.0.0.1:20171
-        HTTP_PROXY: http://127.0.0.1:20171
-        NO_PROXY: 127.0.0.1,localhost

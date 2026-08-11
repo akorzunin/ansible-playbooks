@@ -1,64 +1,28 @@
 services:
-  ssh-socks:
-    build:
-      context: .
-      dockerfile: Dockerfile.ssh
-    image: local/v2raya-ssh-socks
-    container_name: v2raya-ssh-socks
-    restart: unless-stopped
-    network_mode: host
-    environment:
-      V2RAYA_SSH_HOST: ${V2RAYA_SSH_HOST:-}
-      V2RAYA_SSH_PORT: ${V2RAYA_SSH_PORT:-22}
-      V2RAYA_SSH_USERNAME: ${V2RAYA_SSH_USERNAME:-}
-    volumes:
-      - ./ssh/known_hosts:/root/.ssh/known_hosts:ro
-      - ./ssh-password:/run/secrets/ssh-password:ro
-    command:
-      - /bin/sh
-      - -ec
-      - |
-        exec sshpass -f /run/secrets/ssh-password ssh -NT \
-          -D 127.0.0.1:20173 \
-          -o BatchMode=no \
-          -o ConnectTimeout=15 \
-          -o ExitOnForwardFailure=yes \
-          -o KbdInteractiveAuthentication=no \
-          -o NumberOfPasswordPrompts=1 \
-          -o PasswordAuthentication=yes \
-          -o PreferredAuthentications=password \
-          -o ServerAliveInterval=30 \
-          -o ServerAliveCountMax=3 \
-          -o StrictHostKeyChecking=yes \
-          -o UserKnownHostsFile=/root/.ssh/known_hosts \
-          -p "$$V2RAYA_SSH_PORT" \
-          "$$V2RAYA_SSH_USERNAME@$$V2RAYA_SSH_HOST"
-    deploy:
-      resources:
-        limits:
-          cpus: "0.05"
-          memory: 32M
-
   v2raya:
-    image: mzz2017/v2raya:v2.2.7.5@sha256:06abe4f4f16876a6695dec1f92d4c02a3ac724253a62b94702502c331993d59e
+    image: mzz2017/v2raya:v2.4.9@sha256:47f9acf99b23f19d804ab15303e8a7df7f66913d14c5ce0b39936d036dbb8500
     container_name: v2raya
     restart: unless-stopped
-    depends_on:
-      ssh-socks:
-        condition: service_started
-    privileged: true
-    network_mode: host
     environment:
-      - V2RAYA_V2RAY_BIN=/usr/local/bin/xray
+      V2RAYA_V2RAY_BIN: /usr/bin/v2raya_core
+      V2RAYA_LOG_FILE: /tmp/v2raya.log
+    ports:
+      - "127.0.0.1:2017:2017"
+      - "20171:20171"
     volumes:
-      - /lib/modules:/lib/modules:ro
-      - /etc/resolv.conf:/etc/resolv.conf
-      - /etc/v2raya:/etc/v2raya
+      - ./data:/etc/v2raya
+    networks:
+      - v2raya-proxy
     deploy:
       resources:
         limits:
-          cpus: "0.30"
-          memory: 128M
+          cpus: "1.0"
+          memory: 256M
         reservations:
-          cpus: "0.15"
+          cpus: "0.10"
           memory: 64M
+
+networks:
+  v2raya-proxy:
+    external: true
+    name: v2raya-proxy

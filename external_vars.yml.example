@@ -7,3 +7,6 @@ HOST_SW1_IP: 0.0.0.0
 HOST_PL1_IP: 0.0.0.0
 AUTH_USER: example
 AUTH_PASS: example
+V2RAYA_ADMIN_USERNAME: example
+V2RAYA_ADMIN_PASSWORD: example
+V2RAYA_NODE_URL: "vless://uuid@example.com:443?type=tcp&security=reality&pbk=public-key&sni=example.com&fp=chrome&sid=short-id#node"
