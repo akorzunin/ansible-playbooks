@@ -1,3 +1,5 @@
+_config_version: 37
+
 providers:
   omniroute:
     api: http://192.168.1.132:20128/v1
@@ -16,9 +18,12 @@ web:
 
 stt:
   enabled: true
-  provider: local      # local (free) | groq | openai | mistral | xai
-  local:
-    model: base        # tiny, base, small, medium, large-v3
+  provider: openai
+  openai:
+    model: Systran/faster-whisper-large-v3
+    base_url: http://speaches:8000/v1
+    api_key: not-needed
+    language: ""
 
 security:
   allow_lazy_installs: true

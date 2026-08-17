@@ -9,11 +9,22 @@
     - "{{ playbook_dir }}/../../external_vars.yml"
 
   tasks:
+    - name: Check existing Hermes API keys
+      ansible.builtin.shell:
+        cmd: >-
+          grep -q '^OMNIROUTE_API_KEY=.' {{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/data/.env
+          && grep -q '^FIRECRAWL_API_KEY=.' {{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/data/.env
+      register: hermes_existing_keys
+      changed_when: false
+      failed_when: false
+      no_log: true
+
     - name: Check Hermes API keys are configured
       ansible.builtin.assert:
         that:
-          - HERMES_OMNIROUTE_API_KEY is defined
-          - HERMES_FIRECRAWL_API_KEY is defined
+          - >-
+            (HERMES_OMNIROUTE_API_KEY is defined and HERMES_FIRECRAWL_API_KEY is defined)
+            or hermes_existing_keys.rc == 0
         quiet: true
       no_log: true
 
@@ -48,6 +59,7 @@
         line: "OMNIROUTE_API_KEY={{ HERMES_OMNIROUTE_API_KEY }}"
         create: true
         mode: "0600"
+      when: HERMES_OMNIROUTE_API_KEY is defined
       no_log: true
 
     - name: Write Hermes Firecrawl key
@@ -57,14 +69,8 @@
         line: "FIRECRAWL_API_KEY={{ HERMES_FIRECRAWL_API_KEY }}"
         create: true
         mode: "0600"
+      when: HERMES_FIRECRAWL_API_KEY is defined
       no_log: true
-
-    - name: Stop Hermes Agent
-      ansible.builtin.command:
-        cmd: docker compose down
-        chdir: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}"
-      register: hermes_down
-      changed_when: hermes_down.rc == 0
 
     - name: Set Hermes data ownership
       become: true
@@ -76,53 +82,10 @@
 
     - name: Start Hermes Agent
       ansible.builtin.command:
-        cmd: docker compose up -d --force-recreate
+        cmd: docker compose up -d --force-recreate --remove-orphans --wait --wait-timeout 1200
         chdir: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}"
       environment:
         HERMES_UID: "{{ ansible_facts['user_uid'] }}"
         HERMES_GID: "{{ ansible_facts['user_gid'] }}"
       register: hermes_compose
       changed_when: hermes_compose.rc == 0
-
-    - name: Check Hermes local STT dependency
-      ansible.builtin.command:
-        argv:
-          - docker
-          - compose
-          - exec
-          - -T
-          - --user
-          - "{{ ansible_facts['user_uid'] }}:{{ ansible_facts['user_gid'] }}"
-          - -e
-          - PYTHONPATH=/opt/data/lazy-packages
-          - hermes-agent
-          - /opt/hermes/.venv/bin/python
-          - -c
-          - from faster_whisper import WhisperModel
-        chdir: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}"
-      register: hermes_stt_installed
-      changed_when: false
-      failed_when: false
-
-    - name: Install Hermes local STT dependency
-      ansible.builtin.command:
-        argv:
-          - docker
-          - compose
-          - exec
-          - -T
-          - --user
-          - "{{ ansible_facts['user_uid'] }}:{{ ansible_facts['user_gid'] }}"
-          - hermes-agent
-          - /usr/local/bin/uv
-          - pip
-          - install
-          - --target
-          - /opt/data/lazy-packages
-          - faster-whisper==1.2.1
-          - sounddevice==0.5.5
-          - numpy==2.4.3
-        chdir: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}"
-      when: hermes_stt_installed.rc != 0
-      changed_when: true
-      no_log: true

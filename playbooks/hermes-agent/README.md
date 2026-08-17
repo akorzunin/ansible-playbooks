@@ -46,6 +46,7 @@ ansible-playbook --vault-password-file=.ansible_pass \
 
 The OmniRoute and Firecrawl keys are written only to
 `/srv/deploy/hermes-agent/data/.env` on the target, mode `0600`; existing
-Telegram configuration is retained. The playbook also installs the pinned
-local STT runtime in `data/lazy-packages`. Re-running the playbook updates
-`data/config.yaml` and recreates Hermes, including model changes.
+Telegram configuration is retained. STT runs in the `hermes-stt` GPU container
+using faster-whisper/CTranslate2 and the multilingual `large-v3` model. The
+model is cached in the `whisper-models` Docker volume. Re-running the playbook
+updates `data/config.yaml` and recreates both services.

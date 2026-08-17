@@ -1,6 +1,38 @@
 services:
+  speaches:
+    image: ghcr.io/speaches-ai/speaches:0.9.0-rc.3-cuda-12.6.3@sha256:5c6206a349e90b9a6782342917e72f84fc7cb60e8afd540f6aa625831ac1fd0f
+    container_name: hermes-stt
+    restart: unless-stopped
+    environment:
+      ENABLE_UI: "false"
+      LOG_LEVEL: info
+      PRELOAD_MODELS: '["Systran/faster-whisper-large-v3"]'
+      STT_MODEL_TTL: -1
+      WHISPER__COMPUTE_TYPE: int8_float32
+      WHISPER__INFERENCE_DEVICE: cuda
+    volumes:
+      - whisper-models:/home/ubuntu/.cache/huggingface/hub
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5m
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 6G
+        reservations:
+          cpus: "1.0"
+          memory: 3G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
   hermes-agent:
-    image: nousresearch/hermes-agent:v2026.8.3@sha256:16788311e2fa3035456bdc1bafb8ec2b1777db64ebf020af9bb7eb73c3712c9e
+    image: nousresearch/hermes-agent:v2026.8.16@sha256:f8f548d87d16634d1ad9e3777280f3f577ba2358703f04e18e74007ffd3621bf
     container_name: hermes-agent
     command: ["gateway", "run"]
     restart: unless-stopped
@@ -11,7 +43,7 @@ services:
       HERMES_GID: ${HERMES_GID:-1000}
       HTTP_PROXY: http://host.docker.internal:20171
       HTTPS_PROXY: http://host.docker.internal:20171
-      NO_PROXY: 127.0.0.1,localhost,host.docker.internal,192.168.1.132
+      NO_PROXY: 127.0.0.1,localhost,speaches,host.docker.internal,192.168.1.132
       TELEGRAM_PROXY: http://host.docker.internal:20171
       HERMES_TELEGRAM_HTTP_CONNECT_TIMEOUT: 30
       HERMES_TELEGRAM_HTTP_READ_TIMEOUT: 60
@@ -19,8 +51,14 @@ services:
       HERMES_TELEGRAM_HTTP_POOL_TIMEOUT: 30
     volumes:
       - ./data:/opt/data
+    depends_on:
+      speaches:
+        condition: service_healthy
     deploy:
       resources:
         limits:
           cpus: "1.0"
           memory: 2G
+
+volumes:
+  whisper-models:
