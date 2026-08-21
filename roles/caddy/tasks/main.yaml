@@ -5,11 +5,53 @@
   vars:
     deploy_compose_service_name: caddy
 
-- name: Copy Caddyfile to deploy dir
+- name: Copy Caddy files to deploy dir
   ansible.builtin.copy:
-    src: "{{ caddy_file }}"
-    dest: "{{ deploy_compose_dir }}/caddy/Caddyfile"
+    src: "{{ item }}"
+    dest: "{{ deploy_compose_dir }}/caddy/{{ item | basename }}"
     mode: "0644"
+  loop:
+    - "{{ caddy_file }}"
+    - Dockerfile
+
+- name: Check for MTProxy secret
+  ansible.builtin.stat:
+    path: "{{ deploy_compose_dir }}/caddy/mtg-secret"
+  register: mtg_secret_file
+
+- name: Generate MTProxy secret
+  ansible.builtin.command:
+    cmd: docker run --rm nineseconds/mtg:2.2.8 generate-secret --hex tg.akorz-nt1.duckdns.org
+  register: mtg_generated_secret
+  when: not mtg_secret_file.stat.exists
+  changed_when: true
+  no_log: true
+
+- name: Save MTProxy secret
+  ansible.builtin.copy:
+    content: "{{ mtg_generated_secret.stdout }}\n"
+    dest: "{{ deploy_compose_dir }}/caddy/mtg-secret"
+    mode: "0600"
+  when: not mtg_secret_file.stat.exists
+  no_log: true
+
+- name: Read MTProxy secret
+  ansible.builtin.slurp:
+    src: "{{ deploy_compose_dir }}/caddy/mtg-secret"
+  register: mtg_secret
+  no_log: true
+
+- name: Write MTProxy config
+  ansible.builtin.copy:
+    content: |
+      secret = "{{ mtg_secret.content | b64decode | trim }}"
+      bind-to = "127.0.0.1:3128"
+      [domain-fronting]
+      ip = "127.0.0.1"
+      port = 8443
+    dest: "{{ deploy_compose_dir }}/caddy/mtg.toml"
+    mode: "0600"
+  no_log: true
 
 - name: Run caddy in docker compose
   ansible.builtin.import_role:

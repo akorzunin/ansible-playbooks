@@ -1,15 +1,34 @@
+{
+	servers :443 {
+		listener_wrappers {
+			layer4 {
+				@mtproto tls sni tg.akorz-nt1.duckdns.org
+				route @mtproto {
+					proxy 127.0.0.1:3128
+				}
+			}
+			tls
+		}
+	}
+}
+
+https://tg.akorz-nt1.duckdns.org:8443 {
+	bind 127.0.0.1
+	respond "Nothing to see here" 200
+}
+
 akorz-nt1.duckdns.org {
-    reverse_proxy localhost:9000
+	reverse_proxy localhost:9000
 }
 portainer.akorz-nt1.duckdns.org {
-    reverse_proxy localhost:9000
+	reverse_proxy localhost:9000
 }
 3x-ui.akorz-nt1.duckdns.org {
-    reverse_proxy localhost:2053
+	reverse_proxy localhost:2053
 }
 dwman.akorz-nt1.duckdns.org {
-    reverse_proxy localhost:8008
+	reverse_proxy localhost:8008
 }
 test-dwman.akorz-nt1.duckdns.org {
-    reverse_proxy localhost:8088
+	reverse_proxy localhost:8088
 }

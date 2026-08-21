@@ -1,6 +1,6 @@
 services:
   caddy:
-    image: caddy:2-alpine
+    image: caddy-l4-nt1:2.11.4
     container_name: caddy
     restart: unless-stopped
     network_mode: host
@@ -8,6 +8,22 @@ services:
       - ./caddy_data:/data:rw
       - ./caddy_config:/config:rw
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - mtg
+    deploy:
+      resources:
+        limits:
+          memory: 50M
+        reservations:
+          memory: 10M
+
+  mtg:
+    image: nineseconds/mtg:2.2.8
+    container_name: mtg
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./mtg.toml:/config.toml:ro
     deploy:
       resources:
         limits:
