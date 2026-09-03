@@ -50,3 +50,19 @@ Telegram configuration is retained. STT runs in the `hermes-stt` GPU container
 using faster-whisper/CTranslate2 and the multilingual `large-v3` model. The
 model is cached in the `whisper-models` Docker volume. Re-running the playbook
 updates `data/config.yaml` and recreates both services.
+
+## Arch Linux coding VM
+
+Deploy the 4-vCPU, 6 GiB RAM, 128 GiB LXD VM on `/mnt/storage`:
+
+```sh
+ansible-playbook playbooks/hermes-agent/deploy-arch-vm.yaml \
+  -i hosts -l remote_workstation
+```
+
+The playbook generates a VM-only SSH key under the mounted Hermes data
+directory and exposes SSH only on Docker's host-gateway address. From Hermes:
+
+```sh
+ssh archlinux
+```

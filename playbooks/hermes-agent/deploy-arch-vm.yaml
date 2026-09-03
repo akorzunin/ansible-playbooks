@@ -1,0 +1,393 @@
+---
+- name: Deploy Arch Linux coding VM for Hermes
+  hosts: all
+  become: false
+  vars:
+    hermes_data_dir: /srv/deploy/hermes-agent/data
+    hermes_vm_name: hermes-arch
+    hermes_vm_image: images:archlinux
+    hermes_vm_storage_pool: hermes
+    hermes_vm_storage_path: /mnt/storage/lxd
+    hermes_vm_network: hermesbr0
+    hermes_vm_network_cidr: 10.210.0.1/24
+    hermes_vm_ip: 10.210.0.2
+    hermes_vm_proxy: http://10.210.0.1:20171
+    hermes_vm_disk_size: 128GiB
+    hermes_vm_memory: 6GiB
+    hermes_vm_cpus: "4"
+    hermes_vm_ssh_port: 2222
+    lxd_proxy: http://127.0.0.1:20171
+    lxc: /snap/bin/lxc
+    lxd: /snap/bin/lxd
+
+  tasks:
+    - name: Require Ubuntu host
+      ansible.builtin.assert:
+        that: ansible_facts.distribution == "Ubuntu"
+        fail_msg: "This playbook supports Ubuntu hosts only."
+
+    - name: Verify storage mount
+      become: true
+      ansible.builtin.command: mountpoint -q /mnt/storage
+      changed_when: false
+
+    - name: Install snapd
+      become: true
+      ansible.builtin.apt:
+        name: snapd
+        state: present
+        update_cache: true
+
+    - name: Install LXD
+      become: true
+      community.general.snap:
+        name: lxd
+        state: present
+
+    - name: Wait for LXD
+      become: true
+      ansible.builtin.command: "{{ lxd }} waitready"
+      changed_when: false
+
+    - name: Check LXD storage pools
+      become: true
+      ansible.builtin.command: "{{ lxc }} storage list --format csv"
+      register: lxd_storage_pools
+      changed_when: false
+
+    - name: Initialize LXD
+      become: true
+      ansible.builtin.command: "{{ lxd }} init --minimal"
+      when: not lxd_storage_pools.stdout | trim
+      changed_when: true
+
+    - name: Configure LXD outbound proxy
+      become: true
+      ansible.builtin.command:
+        argv:
+          - "{{ lxc }}"
+          - config
+          - set
+          - "{{ item }}"
+          - "{{ lxd_proxy }}"
+      loop:
+        - core.proxy_http
+        - core.proxy_https
+      changed_when: false
+
+    - name: Create LXD storage directory
+      become: true
+      ansible.builtin.file:
+        path: "{{ hermes_vm_storage_path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0711"
+
+    - name: Check Hermes storage pool
+      become: true
+      ansible.builtin.command: "{{ lxc }} storage show {{ hermes_vm_storage_pool }}"
+      register: hermes_storage_pool
+      changed_when: false
+      failed_when: false
+
+    - name: Create Hermes storage pool
+      become: true
+      ansible.builtin.command:
+        argv:
+          - "{{ lxc }}"
+          - storage
+          - create
+          - "{{ hermes_vm_storage_pool }}"
+          - dir
+          - "source={{ hermes_vm_storage_path }}"
+      when: hermes_storage_pool.rc != 0
+      changed_when: true
+
+    - name: Check Hermes LXD bridge
+      become: true
+      ansible.builtin.command: "{{ lxc }} network show {{ hermes_vm_network }}"
+      register: hermes_lxd_bridge
+      changed_when: false
+      failed_when: false
+
+    - name: Create Hermes LXD bridge
+      become: true
+      ansible.builtin.command:
+        argv:
+          - "{{ lxc }}"
+          - network
+          - create
+          - "{{ hermes_vm_network }}"
+          - "ipv4.address={{ hermes_vm_network_cidr }}"
+          - ipv4.nat=true
+          - ipv6.address=none
+      when: hermes_lxd_bridge.rc != 0
+      changed_when: true
+
+    - name: Create Hermes SSH directory
+      become: true
+      ansible.builtin.file:
+        path: "{{ hermes_data_dir }}/.ssh"
+        state: directory
+        owner: "{{ ansible_facts.user_id }}"
+        group: "{{ ansible_facts.user_gid }}"
+        mode: "0700"
+
+    - name: Generate dedicated Hermes VM key
+      ansible.builtin.command:
+        argv:
+          - ssh-keygen
+          - -q
+          - -t
+          - ed25519
+          - -N
+          - ""
+          - -C
+          - hermes-arch
+          - -f
+          - "{{ hermes_data_dir }}/.ssh/archlinux_ed25519"
+        creates: "{{ hermes_data_dir }}/.ssh/archlinux_ed25519"
+
+    - name: Read Hermes VM public key
+      ansible.builtin.slurp:
+        src: "{{ hermes_data_dir }}/.ssh/archlinux_ed25519.pub"
+      register: hermes_vm_public_key_file
+
+    - name: Check Hermes VM
+      become: true
+      ansible.builtin.command: "{{ lxc }} info {{ hermes_vm_name }}"
+      register: hermes_vm
+      changed_when: false
+      failed_when: false
+
+    - name: Create Hermes VM
+      become: true
+      ansible.builtin.command:
+        argv:
+          - "{{ lxc }}"
+          - init
+          - "{{ hermes_vm_image }}"
+          - "{{ hermes_vm_name }}"
+          - --vm
+          - --storage
+          - "{{ hermes_vm_storage_pool }}"
+          - --network
+          - "{{ hermes_vm_network }}"
+          - --config
+          - "limits.cpu={{ hermes_vm_cpus }}"
+          - --config
+          - "limits.memory={{ hermes_vm_memory }}"
+          - --config
+          - security.secureboot=false
+          - --device
+          - "root,size={{ hermes_vm_disk_size }}"
+      when: hermes_vm.rc != 0
+      changed_when: true
+      async: 3600
+      poll: 10
+
+    - name: Set Hermes VM resources
+      become: true
+      ansible.builtin.command:
+        argv:
+          - "{{ lxc }}"
+          - config
+          - set
+          - "{{ hermes_vm_name }}"
+          - "limits.cpu={{ hermes_vm_cpus }}"
+          - "limits.memory={{ hermes_vm_memory }}"
+      changed_when: false
+
+    - name: Set Hermes VM disk size
+      become: true
+      ansible.builtin.command:
+        argv:
+          - "{{ lxc }}"
+          - config
+          - device
+          - set
+          - "{{ hermes_vm_name }}"
+          - root
+          - "size={{ hermes_vm_disk_size }}"
+      changed_when: false
+
+    - name: Set Hermes VM static address
+      become: true
+      ansible.builtin.command:
+        argv:
+          - "{{ lxc }}"
+          - config
+          - device
+          - set
+          - "{{ hermes_vm_name }}"
+          - eth0
+          - "ipv4.address={{ hermes_vm_ip }}"
+      changed_when: false
+
+    - name: Start Hermes VM
+      become: true
+      ansible.builtin.command: "{{ lxc }} start {{ hermes_vm_name }}"
+      register: hermes_vm_start
+      changed_when: hermes_vm_start.rc == 0
+      failed_when:
+        - hermes_vm_start.rc != 0
+        - "'already running' not in hermes_vm_start.stderr"
+
+    - name: Wait for LXD agent in VM
+      become: true
+      ansible.builtin.command: "{{ lxc }} exec {{ hermes_vm_name }} -- true"
+      register: hermes_vm_agent
+      changed_when: false
+      until: hermes_vm_agent.rc == 0
+      retries: 60
+      delay: 2
+
+    - name: Configure SSH access in VM
+      become: true
+      ansible.builtin.command:
+        argv:
+          - "{{ lxc }}"
+          - exec
+          - "{{ hermes_vm_name }}"
+          - --
+          - bash
+          - -s
+        stdin: |
+          set -eu
+          changed=
+          export http_proxy={{ hermes_vm_proxy }} https_proxy={{ hermes_vm_proxy }}
+          export HTTP_PROXY=$http_proxy HTTPS_PROXY=$https_proxy
+          environment=$(mktemp)
+          cat >"$environment" <<'EOF'
+          http_proxy={{ hermes_vm_proxy }}
+          https_proxy={{ hermes_vm_proxy }}
+          HTTP_PROXY={{ hermes_vm_proxy }}
+          HTTPS_PROXY={{ hermes_vm_proxy }}
+          no_proxy=127.0.0.1,localhost,10.210.0.0/24
+          NO_PROXY=127.0.0.1,localhost,10.210.0.0/24
+          EOF
+          if ! cmp -s "$environment" /etc/environment; then changed=1; fi
+          install -m 0644 "$environment" /etc/environment
+          rm "$environment"
+          mirrorlist=$(mktemp)
+          printf '%s\n' 'Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch' >"$mirrorlist"
+          if ! cmp -s "$mirrorlist" /etc/pacman.d/mirrorlist; then changed=1; fi
+          install -m 0644 "$mirrorlist" /etc/pacman.d/mirrorlist
+          rm "$mirrorlist"
+          if ! pacman -Q openssh sudo >/dev/null 2>&1; then
+            pacman -Syu --needed --noconfirm openssh sudo
+            changed=1
+          fi
+          if ! id hermes >/dev/null 2>&1; then
+            useradd --create-home --groups wheel --shell /bin/bash hermes
+            changed=1
+          fi
+          install -d -m 0700 -o hermes -g hermes /home/hermes/.ssh
+          key=$(mktemp)
+          cat >"$key" <<'EOF'
+          {{ hermes_vm_public_key_file.content | b64decode | trim }}
+          EOF
+          if ! cmp -s "$key" /home/hermes/.ssh/authorized_keys; then changed=1; fi
+          install -m 0600 -o hermes -g hermes "$key" /home/hermes/.ssh/authorized_keys
+          rm "$key"
+          cat >/etc/sudoers.d/hermes <<'EOF'
+          Defaults:hermes env_keep += "http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY"
+          hermes ALL=(ALL:ALL) NOPASSWD: ALL
+          EOF
+          chmod 0440 /etc/sudoers.d/hermes
+          visudo -cf /etc/sudoers.d/hermes >/dev/null
+          if ! systemctl is-enabled --quiet sshd || ! systemctl is-active --quiet sshd; then changed=1; fi
+          systemctl enable --now sshd
+          test -x /usr/bin/ssh && sudo -l -U hermes | grep -q NOPASSWD
+          if [ -n "$changed" ]; then echo CHANGED; fi
+      register: hermes_vm_ssh_config
+      changed_when: "'CHANGED' in hermes_vm_ssh_config.stdout"
+
+    - name: Read Docker bridge
+      become: true
+      ansible.builtin.command: docker network inspect bridge
+      register: docker_bridge
+      changed_when: false
+
+    - name: Set Docker host gateway
+      ansible.builtin.set_fact:
+        docker_host_gateway: "{{ (docker_bridge.stdout | from_json | first).IPAM.Config[0].Gateway }}"
+
+    - name: Check VM SSH proxy
+      become: true
+      ansible.builtin.command: >-
+        {{ lxc }} config device get {{ hermes_vm_name }} hermes-ssh type
+      register: hermes_vm_ssh_proxy
+      changed_when: false
+      failed_when: false
+
+    - name: Add VM SSH proxy
+      become: true
+      ansible.builtin.command:
+        argv:
+          - "{{ lxc }}"
+          - config
+          - device
+          - add
+          - "{{ hermes_vm_name }}"
+          - hermes-ssh
+          - proxy
+          - "listen=tcp:{{ docker_host_gateway }}:{{ hermes_vm_ssh_port }}"
+          - connect=tcp:0.0.0.0:22
+          - nat=true
+      when: hermes_vm_ssh_proxy.rc != 0
+      changed_when: true
+
+    - name: Update VM SSH proxy
+      become: true
+      ansible.builtin.command:
+        argv:
+          - "{{ lxc }}"
+          - config
+          - device
+          - set
+          - "{{ hermes_vm_name }}"
+          - hermes-ssh
+          - "listen=tcp:{{ docker_host_gateway }}:{{ hermes_vm_ssh_port }}"
+          - connect=tcp:0.0.0.0:22
+          - nat=true
+      changed_when: false
+
+    - name: Wait for VM SSH proxy
+      ansible.builtin.wait_for:
+        host: "{{ docker_host_gateway }}"
+        port: "{{ hermes_vm_ssh_port }}"
+        timeout: 60
+
+    - name: Configure Hermes SSH alias
+      ansible.builtin.copy:
+        dest: "{{ hermes_data_dir }}/.ssh/config"
+        mode: "0600"
+        content: |
+          Host archlinux
+            HostName host.docker.internal
+            Port {{ hermes_vm_ssh_port }}
+            User hermes
+            IdentityFile /opt/data/.ssh/archlinux_ed25519
+            IdentitiesOnly yes
+            StrictHostKeyChecking accept-new
+
+    - name: Check Hermes container
+      become: true
+      ansible.builtin.command: docker inspect --format={% raw %}'{{.State.Running}}'{% endraw %} hermes-agent
+      register: hermes_container
+      changed_when: false
+      failed_when: false
+
+    - name: Verify SSH from Hermes container
+      become: true
+      ansible.builtin.command: >-
+        docker exec --user hermes hermes-agent
+        ssh -F /opt/data/.ssh/config -o BatchMode=yes archlinux true
+      register: hermes_vm_ssh_check
+      when: hermes_container.stdout == "true"
+      changed_when: false
+      until: hermes_vm_ssh_check.rc == 0
+      retries: 10
+      delay: 2
