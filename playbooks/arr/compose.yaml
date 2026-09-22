@@ -1,0 +1,131 @@
+services:
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    environment: &arr_environment
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Etc/UTC}
+      HTTP_PROXY: http://host.docker.internal:20171
+      HTTPS_PROXY: http://host.docker.internal:20171
+      NO_PROXY: localhost,127.0.0.1,radarr,sonarr,prowlarr,bazarr,flaresolverr,host.docker.internal
+    volumes:
+      - ./config/radarr:/config
+      - /mnt/storage/jellyfin_media:/downloads
+    ports:
+      - "${ARR_BIND_IP:-127.0.0.1}:7878:7878"
+    extra_hosts: &host_gateway
+      - host.docker.internal:host-gateway
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+        limits:
+          cpus: "2.0"
+          memory: 2G
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    environment: *arr_environment
+    volumes:
+      - ./config/sonarr:/config
+      - /mnt/storage/jellyfin_media:/downloads
+    ports:
+      - "${ARR_BIND_IP:-127.0.0.1}:8989:8989"
+    extra_hosts: *host_gateway
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+        limits:
+          cpus: "2.0"
+          memory: 2G
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    environment: *arr_environment
+    volumes:
+      - ./config/prowlarr:/config
+    ports:
+      - "${ARR_BIND_IP:-127.0.0.1}:9696:9696"
+    extra_hosts: *host_gateway
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    environment:
+      LOG_LEVEL: warning
+      TZ: ${TZ:-Etc/UTC}
+    extra_hosts: *host_gateway
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          cpus: "0.10"
+          memory: 256M
+        limits:
+          cpus: "2.0"
+          memory: 1G
+
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    environment: *arr_environment
+    volumes:
+      - ./config/bazarr:/config
+      - /mnt/storage/jellyfin_media:/downloads
+    ports:
+      - "${ARR_BIND_IP:-127.0.0.1}:6767:6767"
+    extra_hosts: *host_gateway
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  bot:
+    profiles: [bot]
+    build: ./bot
+    user: "${BOT_UID:-1000}:${BOT_GID:-1000}"
+    env_file: bot.env
+    environment:
+      RADARR_URL: http://radarr:7878
+      SONARR_URL: http://sonarr:8989
+      RADARR_ROOT: /downloads/complete/films
+      SONARR_ROOT: /downloads/complete/shows
+      HTTP_PROXY: http://host.docker.internal:20171
+      HTTPS_PROXY: http://host.docker.internal:20171
+      NO_PROXY: localhost,127.0.0.1,radarr,sonarr,prowlarr,bazarr,flaresolverr,host.docker.internal
+    extra_hosts: *host_gateway
+    volumes:
+      - ./config/bot:/state
+    depends_on:
+      - radarr
+      - sonarr
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          cpus: "0.05"
+          memory: 32M
+        limits:
+          cpus: "0.50"
+          memory: 256M
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true

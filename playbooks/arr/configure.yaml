@@ -1,0 +1,44 @@
+---
+- name: Configure running ARR apps and enable Telegram bot
+  hosts: local_workstation,remote_workstation
+  become: false
+  vars:
+    arr_dir: /srv/deploy/arr
+  vars_files:
+    - "{{ playbook_dir }}/../../external_vars.yml"
+
+  tasks:
+    - name: Require RuTracker credentials
+      ansible.builtin.assert:
+        that:
+          - RUTRACKER_USER | default('') | length > 0
+          - RUTRACKER_PASS | default('') | length > 0
+      no_log: true
+
+    - name: Copy app configuration script
+      ansible.builtin.copy:
+        src: configure.py
+        dest: "{{ arr_dir }}/configure.py"
+        mode: "0644"
+
+    - name: Configure apps using their local API keys
+      ansible.builtin.command:
+        cmd: python3 configure.py
+        chdir: "{{ arr_dir }}"
+      environment:
+        RUTRACKER_USER: "{{ RUTRACKER_USER }}"
+        RUTRACKER_PASS: "{{ RUTRACKER_PASS }}"
+      register: arr_configuration
+      changed_when: arr_configuration.rc == 0
+      no_log: true
+
+    - name: Show credential-free configuration summary
+      ansible.builtin.debug:
+        var: arr_configuration.stdout_lines
+
+    - name: Start configured Telegram bot
+      ansible.builtin.command:
+        cmd: docker compose --profile bot up -d --build bot
+        chdir: "{{ arr_dir }}"
+      register: arr_bot_start
+      changed_when: arr_bot_start.rc == 0

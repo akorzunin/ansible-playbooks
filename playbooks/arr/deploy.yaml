@@ -1,0 +1,122 @@
+---
+- name: Prepare or deploy ARR stack
+  hosts: local_workstation,remote_workstation
+  become: false
+  vars:
+    deploy_compose_dir: /srv/deploy
+    deploy_compose_service_name: arr
+    arr_dir: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}"
+    arr_start: false
+    arr_bot_enabled: false
+  vars_files:
+    - "{{ playbook_dir }}/../../external_vars.yml"
+
+  tasks:
+    - name: Check existing media directory
+      ansible.builtin.stat:
+        path: /mnt/storage/jellyfin_media
+      register: arr_media
+
+    - name: Require existing storage before creating media folders
+      ansible.builtin.assert:
+        that:
+          - arr_media.stat.exists
+          - arr_media.stat.isdir
+        fail_msg: Verify the media disk is mounted at /mnt/storage before deploying.
+
+    - name: Check media filesystem is not the root filesystem
+      ansible.builtin.command:
+        argv:
+          - findmnt
+          - --noheadings
+          - --output
+          - TARGET
+          - --target
+          - /mnt/storage/jellyfin_media
+      register: arr_mount
+      changed_when: false
+
+    - name: Refuse to download onto the root filesystem
+      ansible.builtin.assert:
+        that:
+          - arr_mount.stdout | trim != '/'
+          - arr_mount.stdout | trim | length > 0
+        fail_msg: Mount the media filesystem before deploying this stack.
+
+    - name: Create deployment directory without recursively changing secret permissions
+      become: true
+      ansible.builtin.file:
+        path: "{{ arr_dir }}"
+        state: directory
+        owner: "{{ ansible_facts['user_uid'] }}"
+        group: "{{ ansible_facts['user_gid'] }}"
+        mode: "0755"
+
+    - name: Create app config directories
+      ansible.builtin.file:
+        path: "{{ arr_dir }}/config/{{ item }}"
+        state: directory
+        mode: "0700"
+      loop:
+        - radarr
+        - sonarr
+        - prowlarr
+        - bazarr
+        - bot
+
+    - name: Create media library directories without changing existing ownership
+      ansible.builtin.file:
+        path: "/mnt/storage/jellyfin_media/{{ item }}"
+        state: directory
+        mode: "0775"
+      loop:
+        - complete/films
+        - complete/shows
+        - incoming/radarr
+        - incoming/sonarr
+
+    - name: Copy stack files
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ arr_dir }}/"
+        mode: preserve
+      loop:
+        - compose.yaml
+        - bot
+
+    - name: Seed Compose environment without overwriting local settings
+      ansible.builtin.copy:
+        dest: "{{ arr_dir }}/.env"
+        content: |
+          PUID={{ ansible_facts['user_uid'] }}
+          PGID={{ ansible_facts['user_gid'] }}
+          TZ=Etc/UTC
+          ARR_BIND_IP=127.0.0.1
+          BOT_UID={{ ansible_facts['user_uid'] }}
+          BOT_GID={{ ansible_facts['user_gid'] }}
+        force: false
+        mode: "0600"
+
+    - name: Seed bot environment without overwriting secrets
+      ansible.builtin.copy:
+        src: bot.env.example
+        dest: "{{ arr_dir }}/bot.env"
+        force: false
+        mode: "0600"
+
+    - name: Set Telegram token from external vars
+      ansible.builtin.lineinfile:
+        path: "{{ arr_dir }}/bot.env"
+        regexp: "^TELEGRAM_BOT_TOKEN="
+        line: "TELEGRAM_BOT_TOKEN={{ ARR_TELEGRAM_BOT_TOKEN }}"
+        mode: "0600"
+      when: ARR_TELEGRAM_BOT_TOKEN is defined
+      no_log: true
+
+    - name: Start stack when explicitly requested
+      ansible.builtin.command:
+        cmd: "docker compose {{ '--profile bot' if arr_bot_enabled | bool else '' }} up -d --build"
+        chdir: "{{ arr_dir }}"
+      when: arr_start | bool
+      register: arr_compose
+      changed_when: arr_compose.rc == 0

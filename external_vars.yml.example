@@ -10,3 +10,6 @@ AUTH_PASS: example
 V2RAYA_ADMIN_USERNAME: example
 V2RAYA_ADMIN_PASSWORD: example
 V2RAYA_NODE_URL: "vless://uuid@example.com:443?type=tcp&security=reality&pbk=public-key&sni=example.com&fp=chrome&sid=short-id#node"
+ARR_TELEGRAM_BOT_TOKEN: ""
+RUTRACKER_USER: ""
+RUTRACKER_PASS: ""
