@@ -32,7 +32,7 @@ services:
               capabilities: [gpu]
 
   hermes-agent:
-    image: nousresearch/hermes-agent:v2026.8.16@sha256:f8f548d87d16634d1ad9e3777280f3f577ba2358703f04e18e74007ffd3621bf
+    image: nousresearch/hermes-agent:v2026.9.21@sha256:6bece0644e29a347e5ae17db43c36938c86f171c6f5e0cef18aa2075d331f3a3
     container_name: hermes-agent
     command: ["gateway", "run"]
     restart: unless-stopped
