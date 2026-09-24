@@ -1,5 +1,5 @@
 ---
-- name: Configure running ARR apps and enable Telegram bot
+- name: Configure running ARR apps
   hosts: local_workstation,remote_workstation
   become: false
   vars:
@@ -36,9 +36,10 @@
       ansible.builtin.debug:
         var: arr_configuration.stdout_lines
 
-    - name: Start configured Telegram bot
+    - name: Start configured Go Telegram bot from GHCR
       ansible.builtin.command:
-        cmd: docker compose --profile bot up -d --build bot
+        cmd: docker compose --profile bot up -d --pull always bot
         chdir: "{{ arr_dir }}"
       register: arr_bot_start
       changed_when: arr_bot_start.rc == 0
+      no_log: true
