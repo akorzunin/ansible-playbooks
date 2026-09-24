@@ -1,0 +1,76 @@
+---
+- name: Deploy standalone Go ARR Telegram bot
+  hosts: local_workstation,remote_workstation
+  become: false
+  vars:
+    arr_bot_dir: /srv/deploy/arr-telegram-bot
+    arr_bot_repo: https://github.com/akorzunin/arr-telegram-bot.git
+  tasks:
+    - name: Verify ARR bot secrets are configured
+      ansible.builtin.stat:
+        path: /srv/deploy/arr/bot.env
+      register: arr_bot_env
+
+    - name: Require bot environment and state directory
+      ansible.builtin.assert:
+        that:
+          - arr_bot_env.stat.exists
+        fail_msg: Run the ARR deploy and configure playbooks first.
+
+    - name: Check shared ARR Docker network
+      ansible.builtin.command:
+        argv: [docker, network, inspect, arr_shared]
+      changed_when: false
+      register: arr_bot_network
+      failed_when: arr_bot_network.rc != 0
+      no_log: true
+
+    - name: Create standalone deployment directory
+      become: true
+      ansible.builtin.file:
+        path: "{{ arr_bot_dir }}"
+        state: directory
+        owner: "{{ ansible_facts['user_uid'] }}"
+        group: "{{ ansible_facts['user_gid'] }}"
+        mode: "0755"
+
+    - name: Fetch the standalone bot repository
+      ansible.builtin.git:
+        repo: "{{ arr_bot_repo }}"
+        dest: "{{ arr_bot_dir }}"
+        version: master
+        update: true
+
+    - name: Configure bot container identity
+      ansible.builtin.copy:
+        dest: "{{ arr_bot_dir }}/.env"
+        content: |
+          BOT_UID={{ ansible_facts['user_uid'] }}
+          BOT_GID={{ ansible_facts['user_gid'] }}
+        mode: "0600"
+
+    - name: Find legacy Python bot by Compose labels
+      ansible.builtin.command:
+        argv:
+          - docker
+          - ps
+          - -aq
+          - --filter
+          - label=com.docker.compose.project=arr
+          - --filter
+          - label=com.docker.compose.service=bot
+      register: old_arr_bot
+      changed_when: false
+
+    - name: Stop legacy Python bot before starting Go bot
+      ansible.builtin.command:
+        argv: "{{ ['docker', 'rm', '-f'] + old_arr_bot.stdout_lines }}"
+      when: old_arr_bot.stdout_lines | length > 0
+
+    - name: Build and start standalone bot
+      ansible.builtin.command:
+        cmd: docker compose up -d --build
+        chdir: "{{ arr_bot_dir }}"
+      register: arr_bot_compose
+      changed_when: arr_bot_compose.rc == 0
+      no_log: true

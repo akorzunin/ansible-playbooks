@@ -97,35 +97,6 @@ services:
           cpus: "1.0"
           memory: 1G
 
-  bot:
-    profiles: [bot]
-    build: ./bot
-    user: "${BOT_UID:-1000}:${BOT_GID:-1000}"
-    env_file: bot.env
-    environment:
-      RADARR_URL: http://radarr:7878
-      SONARR_URL: http://sonarr:8989
-      RADARR_ROOT: /downloads/complete/films
-      SONARR_ROOT: /downloads/complete/shows
-      HTTP_PROXY: http://host.docker.internal:20171
-      HTTPS_PROXY: http://host.docker.internal:20171
-      NO_PROXY: localhost,127.0.0.1,radarr,sonarr,prowlarr,bazarr,flaresolverr,host.docker.internal
-    extra_hosts: *host_gateway
-    volumes:
-      - ./config/bot:/state
-    depends_on:
-      - radarr
-      - sonarr
-    restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          cpus: "0.05"
-          memory: 32M
-        limits:
-          cpus: "0.50"
-          memory: 256M
-    read_only: true
-    cap_drop: [ALL]
-    security_opt:
-      - no-new-privileges:true
+networks:
+  default:
+    name: arr_shared

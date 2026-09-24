@@ -7,7 +7,6 @@
     deploy_compose_service_name: arr
     arr_dir: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}"
     arr_start: false
-    arr_bot_enabled: false
   vars_files:
     - "{{ playbook_dir }}/../../external_vars.yml"
 
@@ -62,7 +61,6 @@
         - sonarr
         - prowlarr
         - bazarr
-        - bot
 
     - name: Create media library directories without changing existing ownership
       ansible.builtin.file:
@@ -82,7 +80,6 @@
         mode: preserve
       loop:
         - compose.yaml
-        - bot
 
     - name: Seed Compose environment without overwriting local settings
       ansible.builtin.copy:
@@ -113,9 +110,30 @@
       when: ARR_TELEGRAM_BOT_TOKEN is defined
       no_log: true
 
-    - name: Start stack when explicitly requested
+    - name: Find legacy Python bot before starting the standalone service
       ansible.builtin.command:
-        cmd: "docker compose {{ '--profile bot' if arr_bot_enabled | bool else '' }} up -d --build"
+        argv:
+          - docker
+          - ps
+          - -aq
+          - --filter
+          - label=com.docker.compose.project=arr
+          - --filter
+          - label=com.docker.compose.service=bot
+      when: arr_start | bool
+      register: old_arr_bot
+      changed_when: false
+
+    - name: Remove old Python bot before starting standalone bot
+      ansible.builtin.command:
+        argv: "{{ ['docker', 'rm', '-f'] + old_arr_bot.stdout_lines }}"
+      when:
+        - arr_start | bool
+        - old_arr_bot.stdout_lines | length > 0
+
+    - name: Start ARR stack when explicitly requested
+      ansible.builtin.command:
+        cmd: docker compose up -d
         chdir: "{{ arr_dir }}"
       when: arr_start | bool
       register: arr_compose
