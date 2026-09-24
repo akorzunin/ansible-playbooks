@@ -120,6 +120,8 @@ This clones `akorzunin/arr-telegram-bot` at `/srv/deploy/arr-telegram-bot`,
 builds the Go image, and stops an old Python bot before starting it. The state
 volume retains the existing polling offset. Check that `bot.env` has the token,
 API keys and profile IDs before running it; do not run two pollers with one token.
+The bot repository is private; configure GitHub read access on the target host
+before running `deploy_bot.yaml`. The playbook does not copy GitHub credentials.
 
 Deployment directory: `/srv/deploy/arr`.
 
