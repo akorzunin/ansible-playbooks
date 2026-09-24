@@ -127,6 +127,7 @@
     - name: Remove old Python bot before starting standalone bot
       ansible.builtin.command:
         argv: "{{ ['docker', 'rm', '-f'] + old_arr_bot.stdout_lines }}"
+      changed_when: true
       when:
         - arr_start | bool
         - old_arr_bot.stdout_lines | length > 0

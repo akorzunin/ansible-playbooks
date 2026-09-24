@@ -65,6 +65,7 @@
     - name: Stop legacy Python bot before starting Go bot
       ansible.builtin.command:
         argv: "{{ ['docker', 'rm', '-f'] + old_arr_bot.stdout_lines }}"
+      changed_when: true
       when: old_arr_bot.stdout_lines | length > 0
 
     - name: Build and start standalone bot
