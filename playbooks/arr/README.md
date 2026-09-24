@@ -92,36 +92,24 @@ RUTRACKER_PASS: "..."
 Run from the repository root, selecting **one** workstation inventory alias:
 
 ```sh
-# Start infrastructure; this stack no longer starts the bot.
+# Start infrastructure; the bot stays off until configuration writes its API keys.
 ansible-playbook playbooks/arr/deploy.yaml -i hosts -l remote_workstation \
   --vault-password-file=.ansible_pass -e arr_start=true
 
-# Configure running apps and write bot.env for the separate Go service.
+# Configure running apps, write bot.env, and start the Go bot.
 ansible-playbook playbooks/arr/configure.yaml -i hosts -l remote_workstation \
   --vault-password-file=.ansible_pass
 ```
 
 Without `-e arr_start=true`, the deployment playbook only prepares files/directories.
-The deployment removes a legacy Compose-managed Python bot if present when
-`arr_start=true`; it does not start the replacement. Deploy the Go bot from its
-separate repository after configuring ARR. Both stacks use the `arr_shared` Docker
-network. The bot reads `/srv/deploy/arr/bot.env` and reuses the old
-`/srv/deploy/arr/config/bot` state directory (including its Telegram offset).
-Ensure only one polling process uses the token during migration. Keep `bot.env`
-and the state directory when updating either stack.
-
-Deploy the standalone repository with:
-
-```sh
-ansible-playbook playbooks/arr/deploy_bot.yaml -i hosts -l remote_workstation
-```
-
-This clones `akorzunin/arr-telegram-bot` at `/srv/deploy/arr-telegram-bot`,
-builds the Go image, and stops an old Python bot before starting it. The state
-volume retains the existing polling offset. Check that `bot.env` has the token,
-API keys and profile IDs before running it; do not run two pollers with one token.
-The bot repository is private; configure GitHub read access on the target host
-before running `deploy_bot.yaml`. The playbook does not copy GitHub credentials.
+The bot is built and published to GHCR by its separate source repository, but runs
+as a service in this ARR Compose stack. `configure.yaml` starts the bot after
+writing its API keys and profile IDs to `bot.env`. For subsequent image updates,
+run `deploy.yaml` with `-e arr_start=true -e arr_bot_enabled=true`, or rerun
+`configure.yaml`. The existing `config/bot/offset` is retained; no second Telegram
+poller should run with the same token. Keep `bot.env` and `config/bot` across
+upgrades. GHCR images from private repositories may require a target-host
+`docker login ghcr.io` with read:packages access before deployment.
 
 Deployment directory: `/srv/deploy/arr`.
 
@@ -162,6 +150,7 @@ bind to a LAN address instead, but requires appropriate firewall restrictions.
 | Prowlarr | 0.10 / 128M | 1 / 1G |
 | Bazarr | 0.10 / 128M | 1 / 1G |
 | FlareSolverr | 0.10 / 256M | 2 / 1G |
+| Bot | 0.05 / 32M | 0.5 / 256M |
 
 Memory reservations are soft targets, not preallocated RAM. CPU reservations are
 Swarm scheduler hints, not guaranteed CPU shares under standalone Compose.
@@ -174,19 +163,20 @@ Bazarr's in-app auto-update is disabled in favor of container image updates.
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s playbooks/arr -p 'test_configure.py'
 ```
 
-Validate with `docker compose config --quiet` without printing resolved Compose
-configs from ws: they may contain secrets. Check `docker compose ps` on ws.
+Validate with `docker compose --profile bot config --quiet` without printing
+resolved Compose configs from ws: they may contain secrets. Check
+`docker compose --profile bot ps` on ws.
 Third-party app logs can contain credentials, so inspect/redact them before sharing.
 Check ARR before retrying after any timeout. Existing movie requests do not trigger
 another search. Series requests search only the selected season; previously enabled
-seasons are not silently disabled. See the standalone bot repository for its checks,
-notification semantics and deployment commands.
+seasons are not silently disabled. See the standalone bot source repository for
+its checks and notification semantics.
 
 Connection tests and metadata lookups do not test the full download/import path.
 Confirm a real title through Telegram, then verify Transmission, ARR import,
 Jellyfin visibility, and subtitle availability. No sample movie/series is downloaded
 by the configuration playbook.
 
-Back up `config/`, `.env`, and `bot.env` securely. Stop the bot from its standalone
-Compose project, not from this ARR stack. `docker compose down` here removes only
-ARR containers but leaves bind-mounted configuration and media intact.
+Back up `config/`, `.env`, and `bot.env` securely. Stop only the bot with
+`docker compose --profile bot stop bot`. `docker compose --profile bot down`
+removes containers but leaves bind-mounted configuration and media intact.
