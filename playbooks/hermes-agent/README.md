@@ -61,7 +61,11 @@ ansible-playbook playbooks/hermes-agent/deploy-arch-vm.yaml \
 ```
 
 The playbook generates a VM-only SSH key under the mounted Hermes data
-directory and exposes SSH only on Docker's host-gateway address. From Hermes:
+directory and exposes SSH only on Docker's host-gateway address. It also installs
+`hermes-vm-forward.service` to allow VM outbound traffic through Docker's
+`DOCKER-USER` firewall chain (including SSH to external hosts). To apply only
+the firewall fix on an existing VM, add `--tags hermes_vm_firewall` to the
+playbook command above. From Hermes:
 
 ```sh
 ssh archlinux

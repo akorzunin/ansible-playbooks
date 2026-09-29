@@ -314,6 +314,54 @@
       ansible.builtin.set_fact:
         docker_host_gateway: "{{ (docker_bridge.stdout | from_json | first).IPAM.Config[0].Gateway }}"
 
+    - name: Allow Hermes VM outbound traffic through Docker firewall
+      become: true
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/hermes-vm-forward.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Allow Hermes VM outbound traffic through Docker firewall
+          Requires=docker.service
+          After=docker.service
+          PartOf=docker.service
+
+          [Service]
+          Type=oneshot
+          RemainAfterExit=yes
+          ExecStart=/bin/sh -c '/usr/sbin/iptables -C DOCKER-USER \
+            -i {{ hermes_vm_network }} \
+            -o {{ ansible_facts.default_ipv4.interface }} \
+            -j ACCEPT || \
+            /usr/sbin/iptables -I DOCKER-USER 1 \
+            -i {{ hermes_vm_network }} \
+            -o {{ ansible_facts.default_ipv4.interface }} \
+            -j ACCEPT'
+          ExecStart=/bin/sh -c '/usr/sbin/iptables -C DOCKER-USER \
+            -i {{ ansible_facts.default_ipv4.interface }} \
+            -o {{ hermes_vm_network }} \
+            -m conntrack --ctstate ESTABLISHED,RELATED \
+            -j ACCEPT || \
+            /usr/sbin/iptables -I DOCKER-USER 1 \
+            -i {{ ansible_facts.default_ipv4.interface }} \
+            -o {{ hermes_vm_network }} \
+            -m conntrack --ctstate ESTABLISHED,RELATED \
+            -j ACCEPT'
+
+          [Install]
+          WantedBy=docker.service
+      register: hermes_vm_forward_unit
+      tags: hermes_vm_firewall
+
+    - name: Enable Hermes VM outbound forwarding
+      become: true
+      ansible.builtin.systemd_service:
+        name: hermes-vm-forward.service
+        daemon_reload: true
+        enabled: true
+        state: "{{ hermes_vm_forward_unit.changed | ternary('restarted', 'started') }}"
+      tags: hermes_vm_firewall
+
     - name: Check VM SSH proxy
       become: true
       ansible.builtin.command: >-
