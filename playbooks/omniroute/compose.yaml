@@ -1,7 +1,7 @@
 services:
   omniroute:
     container_name: omniroute
-    image: diegosouzapw/omniroute:3.8.49@sha256:92c768c56e2de32c51a0621ef182835018b00b288c9bb235c5c5e4514658c1a1
+    image: diegosouzapw/omniroute:next@sha256:90358c971b44e9f135edac557352658ddbdb5b6d11fc5e42f732688e5dbac981
     restart: unless-stopped
     extra_hosts:
       - host.docker.internal:host-gateway
