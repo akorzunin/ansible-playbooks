@@ -2,6 +2,10 @@
     servers :443 {
         listener_wrappers {
             layer4 {
+                @naive tls sni naive.akorz-nt1.duckdns.org
+                route @naive {
+                    proxy 127.0.0.1:8444
+                }
                 @mtproto tls sni tg.akorz-nt1.duckdns.org
                 route @mtproto {
                     proxy 127.0.0.1:3128

@@ -1,0 +1,30 @@
+[Unit]
+Description=NaiveProxy authenticated HTTP/2 proxy
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+User=naiveproxy
+Group=naiveproxy
+ExecStart=/usr/local/bin/caddy-naive run --config /etc/naiveproxy/Caddyfile --adapter caddyfile
+Restart=on-failure
+RestartSec=5
+Environment=XDG_DATA_HOME=/var/lib/naiveproxy
+Environment=XDG_CONFIG_HOME=/var/lib/naiveproxy
+Environment=GOMEMLIMIT=40MiB
+Environment=GOGC=50
+Environment=GOMAXPROCS=2
+StateDirectory=naiveproxy
+StateDirectoryMode=0700
+MemoryHigh=48M
+MemoryMax=64M
+TasksMax=64
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

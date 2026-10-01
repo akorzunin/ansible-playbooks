@@ -1,0 +1,199 @@
+---
+- name: Deploy NaiveProxy on nt1 without server-side builds
+  hosts: nt1
+  become: true
+  vars_files:
+    - "{{ playbook_dir }}/../../external_vars.yml"
+  vars:
+    naiveproxy_domain: naive.akorz-nt1.duckdns.org
+    naiveproxy_cache: "{{ lookup('env', 'HOME') }}/.cache/ansible-naiveproxy"
+    naiveproxy_client_dir: "{{ lookup('env', 'HOME') }}/.local/share"
+    naiveproxy_username: "{{ NAIVEPROXY_USER | default('naive') }}"
+    naiveproxy_password: >-
+      {{ NAIVEPROXY_PASSWORD | default(lookup('ansible.builtin.password',
+      naiveproxy_client_dir + '/nt1-naiveproxy-password', length=32,
+      chars=['ascii_letters', 'digits'])) }}
+    naiveproxy_router: "{{ playbook_dir }}/../../node/nt1/caddy/Caddyfile"
+
+  tasks:
+    - name: Check supported server architecture
+      ansible.builtin.assert:
+        that: ansible_facts['architecture'] == 'x86_64'
+        fail_msg: The pinned upstream server binary is Linux amd64.
+
+    - name: Create controller cache and private config directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0700"
+      loop:
+        - "{{ naiveproxy_cache }}"
+        - "{{ naiveproxy_client_dir }}"
+      delegate_to: localhost
+      become: false
+
+    - name: Download pinned upstream server archive on the controller
+      ansible.builtin.get_url:
+        url: https://github.com/klzgrad/forwardproxy/releases/download/v2.11.2-naive/caddy-forwardproxy-naive.tar.xz
+        dest: "{{ naiveproxy_cache }}/caddy-forwardproxy-naive-v2.11.2.tar.xz"
+        checksum: sha256:19eccb7321dd877a5fb4a3dba6ef1b745185188b616c96cc6201f1a1fc0380a8
+        mode: "0644"
+      delegate_to: localhost
+      become: false
+
+    - name: Extract server binary on the controller
+      ansible.builtin.unarchive:
+        src: "{{ naiveproxy_cache }}/caddy-forwardproxy-naive-v2.11.2.tar.xz"
+        dest: "{{ naiveproxy_cache }}"
+        remote_src: true
+      delegate_to: localhost
+      become: false
+
+    - name: Validate credentials before writing Caddy configuration
+      ansible.builtin.assert:
+        that:
+          - naiveproxy_username is match('^[a-zA-Z0-9_-]+$')
+          - naiveproxy_password is match('^[a-zA-Z0-9_-]{24,}$')
+        fail_msg: Use a simple username and a random password of at least 24 URL-safe characters.
+      no_log: true
+
+    - name: Create unprivileged proxy account
+      ansible.builtin.user:
+        name: naiveproxy
+        system: true
+        create_home: false
+        home: /var/lib/naiveproxy
+        shell: /usr/sbin/nologin
+
+    - name: Install prebuilt server binary
+      ansible.builtin.copy:
+        src: "{{ naiveproxy_cache }}/caddy-forwardproxy-naive/caddy"
+        dest: /usr/local/bin/caddy-naive
+        owner: root
+        group: root
+        mode: "0755"
+      notify: Restart naiveproxy
+
+    - name: Create private server configuration directory
+      ansible.builtin.file:
+        path: /etc/naiveproxy
+        state: directory
+        owner: root
+        group: naiveproxy
+        mode: "0750"
+
+    - name: Install and validate authenticated proxy configuration
+      ansible.builtin.template:
+        src: Caddyfile.j2
+        dest: /etc/naiveproxy/Caddyfile
+        owner: root
+        group: naiveproxy
+        mode: "0640"
+        validate: /usr/local/bin/caddy-naive validate --config %s --adapter caddyfile
+      no_log: true
+      notify: Restart naiveproxy
+
+    - name: Install memory-limited systemd unit
+      ansible.builtin.copy:
+        src: naiveproxy.service
+        dest: /etc/systemd/system/naiveproxy.service
+        mode: "0644"
+      notify: Restart naiveproxy
+
+    - name: Stage nt1 TLS routing configuration
+      ansible.builtin.copy:
+        src: "{{ naiveproxy_router }}"
+        dest: /srv/deploy/caddy/Caddyfile.naive-candidate
+        mode: "0644"
+      register: naiveproxy_router_candidate
+
+    - name: Validate TLS routing with the running Caddy's modules
+      ansible.builtin.command:
+        argv: [docker, exec, -i, caddy, caddy, adapt, --config, '-', --adapter, caddyfile, --validate]
+        stdin: "{{ lookup('ansible.builtin.file', naiveproxy_router) }}"
+      changed_when: false
+
+    - name: Inspect current TLS routing configuration
+      ansible.builtin.stat:
+        path: /srv/deploy/caddy/Caddyfile
+        checksum_algorithm: sha1
+      register: naiveproxy_current_router
+
+    - name: Install TLS routing with rollback on reload failure
+      when: naiveproxy_current_router.stat.checksum != naiveproxy_router_candidate.checksum
+      block:
+        - name: Save previous TLS routing configuration
+          ansible.builtin.copy:
+            src: /srv/deploy/caddy/Caddyfile
+            dest: /srv/deploy/caddy/Caddyfile.before-naive
+            remote_src: true
+            mode: "0644"
+
+        # Preserve the inode of the Docker bind-mounted file; atomic rename leaves
+        # the container reading the old config until its next recreation.
+        - name: Update the bind-mounted Caddyfile in place
+          ansible.builtin.command:
+            argv: [cp, /srv/deploy/caddy/Caddyfile.naive-candidate, /srv/deploy/caddy/Caddyfile]
+          changed_when: true
+
+        - name: Reload TLS router without recreating existing containers
+          ansible.builtin.command:
+            argv: [docker, exec, caddy, caddy, reload, --config, /etc/caddy/Caddyfile, --adapter, caddyfile]
+          changed_when: true
+      rescue:
+        - name: Restore previous bind-mounted Caddyfile
+          ansible.builtin.command:
+            argv: [cp, /srv/deploy/caddy/Caddyfile.before-naive, /srv/deploy/caddy/Caddyfile]
+          changed_when: true
+
+        - name: Reload restored TLS router
+          ansible.builtin.command:
+            argv: [docker, exec, caddy, caddy, reload, --config, /etc/caddy/Caddyfile, --adapter, caddyfile]
+          changed_when: true
+
+        - name: Report failed deployment
+          ansible.builtin.fail:
+            msg: TLS routing update failed; previous configuration was restored.
+
+    - name: Enable proxy service
+      ansible.builtin.systemd_service:
+        name: naiveproxy
+        enabled: true
+        daemon_reload: true
+
+    - name: Apply proxy service changes
+      ansible.builtin.meta: flush_handlers
+
+    - name: Ensure proxy service is running
+      ansible.builtin.systemd_service:
+        name: naiveproxy
+        state: started
+
+    - name: Wait for internal proxy listener
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 8444
+        timeout: 30
+
+    - name: Write private sing-box config on the controller
+      ansible.builtin.copy:
+        content: |
+          {{ {'outbounds': [{
+            'type': 'naive', 'tag': 'nt1-Naive',
+            'server': naiveproxy_domain, 'server_port': 443,
+            'username': naiveproxy_username, 'password': naiveproxy_password,
+            'quic': false,
+            'tls': {'enabled': true, 'server_name': naiveproxy_domain}
+          }]} | to_nice_json }}
+        dest: "{{ naiveproxy_client_dir }}/nt1-naive.json"
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+  handlers:
+    - name: Restart naiveproxy
+      ansible.builtin.systemd_service:
+        name: naiveproxy
+        state: restarted
+        daemon_reload: true

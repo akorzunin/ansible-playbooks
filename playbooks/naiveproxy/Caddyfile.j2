@@ -1,0 +1,30 @@
+{
+    admin off
+    https_port 8444
+    auto_https disable_redirects
+    order forward_proxy before respond
+    servers {
+        protocols h1 h2
+    }
+    log {
+        exclude http.log.error
+    }
+}
+
+# Public TCP/443 is passed through by nt1's existing Caddy layer4 listener.
+# The catch-all address must precede the hostname for CONNECT requests.
+:8444, {{ naiveproxy_domain }}:8444 {
+    bind 127.0.0.1
+    tls {
+        issuer acme {
+            disable_http_challenge
+        }
+    }
+    forward_proxy {
+        basic_auth {{ naiveproxy_username }} {{ naiveproxy_password }}
+        hide_ip
+        hide_via
+        probe_resistance
+    }
+    respond "Nothing to see here" 200
+}
