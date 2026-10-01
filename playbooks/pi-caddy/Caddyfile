@@ -1,3 +1,18 @@
+# BEGIN sing-box profile log redaction
+{
+    # Profile enrollment URLs are credentials, including in reverse-proxy errors.
+    log {
+        format filter {
+            wrap json
+            fields {
+                request>uri delete
+                request>headers delete
+            }
+        }
+    }
+}
+# END sing-box profile log redaction
+
 ws-portainer.akorz.duckdns.org {
     reverse_proxy 192.168.1.132:9000
 }
@@ -82,3 +97,8 @@ demo.akorz.duckdns.org {
 omniroute.akorz.duckdns.org {
     reverse_proxy 192.168.1.132:20128
 }
+# BEGIN sing-box remote profiles
+configs.akorz.duckdns.org {
+    reverse_proxy 192.168.1.132:18085
+}
+# END sing-box remote profiles

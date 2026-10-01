@@ -1,0 +1,11 @@
+[Unit]
+Description=Check the remote sing-box profile hourly
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+RandomizedDelaySec=5min
+Unit=sing-box-profile-update.service
+
+[Install]
+WantedBy=timers.target

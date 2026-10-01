@@ -9,3 +9,8 @@ external_vars.yml
 .ansible
 **_vars.yaml
 **_host.yaml
+# Private input profiles supplied by the user (contain proxy credentials).
+/playbooks/sing-box-configs/android.json
+/playbooks/sing-box-configs/win-all-proxy.json
+/playbooks/sing-box-configs/private/
+/playbooks/sing-box-configs/__pycache__/

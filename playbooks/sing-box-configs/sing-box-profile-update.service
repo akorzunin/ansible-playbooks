@@ -1,0 +1,12 @@
+[Unit]
+Description=Update the private remote sing-box profile
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/sing-box-profile-update
+UMask=0077
+TimeoutStartSec=90
+PrivateTmp=true
+NoNewPrivileges=true

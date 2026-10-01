@@ -1,0 +1,61 @@
+{
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "experimental": {
+    "cache_file": {
+      "enabled": true,
+      "path": "cache.db",
+      "cache_id": "desktop"
+    },
+    "clash_api": {
+      "external_controller": "127.0.0.1:9091"
+    }
+  },
+  "inbounds": [
+    {
+      "type": "mixed",
+      "tag": "mixed-in",
+      "listen": "127.0.0.1",
+      "listen_port": 12334
+    }
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "rules": [
+      {
+        "network": "udp",
+        "action": "route",
+        "outbound": "proxy"
+      },
+      {
+        "action": "sniff"
+      },
+      {
+        "domain_suffix": [
+          ".ru",
+          ".su",
+          ".xn--p1ai"
+        ],
+        "action": "route",
+        "outbound": "direct"
+      },
+      {
+        "rule_set": "geoip-ru",
+        "action": "route",
+        "outbound": "direct"
+      }
+    ],
+    "rule_set": [
+      {
+        "type": "remote",
+        "tag": "geoip-ru",
+        "format": "binary",
+        "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs",
+        "update_interval": "1d"
+      }
+    ],
+    "final": "proxy"
+  }
+}

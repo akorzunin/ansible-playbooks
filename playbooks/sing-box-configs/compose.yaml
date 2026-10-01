@@ -1,0 +1,23 @@
+services:
+  profiles:
+    image: caddy:2.11.4-alpine
+    container_name: sing-box-configs
+    restart: unless-stopped
+    ports:
+      # LAN only; public TLS is terminated on the Pi. Do not forward this port.
+      - "192.168.1.132:18085:8080"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./profiles:/profiles:ro
+    read_only: true
+    cap_drop:
+      - ALL
+    # The upstream Caddy binary has this file capability; dropping it prevents exec.
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 64m
+    pids_limit: 64
+    logging:
+      driver: "none"

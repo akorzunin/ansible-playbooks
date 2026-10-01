@@ -1,0 +1,80 @@
+---
+- name: Enroll the current Linux machine in remote profile updates
+  hosts: localhost
+  connection: local
+  become: true
+  gather_facts: false
+  vars:
+    config_urls: "{{ lookup('ansible.builtin.file', playbook_dir + '/private/urls.json') | from_json }}"
+  tasks:
+    - name: Ensure an installed Linux profile exists before enrolling
+      ansible.builtin.stat:
+        path: /etc/sing-box/config.json
+      register: installed_profile
+
+    - name: Require an existing configuration for rollback
+      ansible.builtin.assert:
+        that: installed_profile.stat.exists
+        fail_msg: Install an initial sing-box config before enrolling this machine.
+
+    - name: Create updater installation directory
+      ansible.builtin.file:
+        path: /usr/local/libexec
+        state: directory
+        mode: "0755"
+
+    - name: Install Linux updater
+      ansible.builtin.copy:
+        src: update-linux.py
+        dest: /usr/local/libexec/sing-box-profile-update
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Save original Linux config once for unenrollment
+      ansible.builtin.copy:
+        src: /etc/sing-box/config.json
+        dest: /etc/sing-box/config.before-remote
+        remote_src: true
+        force: false
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+      diff: false
+
+    - name: Install private remote enrollment URL
+      ansible.builtin.copy:
+        content: "{{ {'url': config_urls.linux} | to_nice_json }}\n"
+        dest: /etc/sing-box-profile.json
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+      diff: false
+
+    - name: Install update service and timer
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "/etc/systemd/system/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - sing-box-profile-update.service
+        - sing-box-profile-update.timer
+
+    - name: Reload update service definitions
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+
+    - name: Fetch the initial profile and wait for any in-progress update
+      ansible.builtin.command:
+        argv: [systemctl, start, sing-box-profile-update.service]
+      changed_when: false
+
+    - name: Enable hourly updates after successful enrollment
+      ansible.builtin.systemd_service:
+        name: sing-box-profile-update.timer
+        enabled: true
+        state: started

@@ -1,0 +1,230 @@
+---
+- name: Generate and validate remote profiles on the controller
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Render profiles from private controller outbounds
+      ansible.builtin.command:
+        argv: [python3, "{{ playbook_dir }}/generate.py"]
+      changed_when: true
+
+- name: Host private profiles on the workstation
+  hosts: remote_workstation
+  become: true
+  vars:
+    config_dir: /srv/deploy/sing-box-configs
+    config_tokens: "{{ lookup('ansible.builtin.file', playbook_dir + '/private/tokens.json') | from_json }}"
+  tasks:
+    - name: Create private hosting directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+      loop:
+        - "{{ config_dir }}"
+        - "{{ config_dir }}/profiles"
+
+    - name: Publish validated platform profiles atomically
+      ansible.builtin.copy:
+        src: "private/{{ item }}.json"
+        dest: "{{ config_dir }}/profiles/{{ item }}.json"
+        owner: root
+        group: root
+        mode: "0600"
+      loop: [android, windows, linux]
+      no_log: true
+      diff: false
+
+    - name: Render token-protected static hosting
+      ansible.builtin.template:
+        src: Caddyfile.j2
+        dest: "{{ config_dir }}/Caddyfile"
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+      diff: false
+      register: hosting_config
+
+    - name: Copy hosting Compose configuration
+      ansible.builtin.copy:
+        src: compose.yaml
+        dest: "{{ config_dir }}/compose.yaml"
+        mode: "0600"
+      register: hosting_compose
+
+    - name: Validate static hosting before starting
+      ansible.builtin.command:
+        cmd: docker compose run --rm --no-deps profiles caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+        chdir: "{{ config_dir }}"
+      changed_when: false
+      no_log: true
+
+    - name: Start private hosting
+      ansible.builtin.command:
+        cmd: "docker compose up -d {{ '--force-recreate' if hosting_config.changed or hosting_compose.changed else '' }}"
+        chdir: "{{ config_dir }}"
+      changed_when: hosting_config.changed or hosting_compose.changed
+
+    - name: Check hosting denies unauthenticated requests
+      ansible.builtin.uri:
+        url: http://192.168.1.132:18085/
+        status_code: 404
+        use_proxy: false
+      register: hosting_ready
+      until: hosting_ready.status == 404
+      retries: 10
+      delay: 2
+
+- name: Add HTTPS routing on the Pi
+  hosts: remote_pi
+  become: false
+  vars:
+    router_dir: /home/akorz/deploy/pi-caddy
+    router_path: "{{ router_dir }}/Caddyfile"
+  tasks:
+    - name: Stage existing live router configuration
+      ansible.builtin.copy:
+        src: "{{ router_path }}"
+        dest: "{{ router_path }}.configs-candidate"
+        remote_src: true
+        mode: "0600"
+      changed_when: false
+
+    - name: Add credential-safe logging to the candidate
+      ansible.builtin.blockinfile:
+        path: "{{ router_path }}.configs-candidate"
+        insertbefore: BOF
+        marker: "# {mark} sing-box profile log redaction"
+        block: |
+          {
+              log {
+                  format filter {
+                      wrap json
+                      fields {
+                          request>uri delete
+                          request>headers delete
+                      }
+                  }
+              }
+          }
+      changed_when: false
+
+    - name: Add profile endpoint to the candidate
+      ansible.builtin.blockinfile:
+        path: "{{ router_path }}.configs-candidate"
+        marker: "# {mark} sing-box remote profiles"
+        block: |
+          configs.akorz.duckdns.org {
+              reverse_proxy 192.168.1.132:18085
+          }
+      changed_when: false
+
+    - name: Read staged router configuration
+      ansible.builtin.slurp:
+        src: "{{ router_path }}.configs-candidate"
+      register: staged_router
+
+    - name: Validate the staged router
+      ansible.builtin.command:
+        argv: [docker, exec, -i, caddy, caddy, validate, --config, /dev/stdin, --adapter, caddyfile]
+        stdin: "{{ staged_router.content | b64decode }}"
+      changed_when: false
+
+    - name: Compare router files
+      ansible.builtin.command:
+        argv: [cmp, -s, "{{ router_path }}", "{{ router_path }}.configs-candidate"]
+      register: router_comparison
+      failed_when: router_comparison.rc not in [0, 1]
+      changed_when: false
+
+    - name: Detect pre-existing stale Docker file mounts
+      ansible.builtin.shell:
+        executable: /bin/bash
+        cmd: |
+          set -e -o pipefail
+          host_checksum=$(sha256sum {{ router_path }} | cut -d' ' -f1) || exit 2
+          container_checksum=$(docker exec caddy sha256sum /etc/caddy/Caddyfile | cut -d' ' -f1) || exit 2
+          test "$host_checksum" = "$container_checksum"
+      register: router_mount_comparison
+      failed_when: router_mount_comparison.rc not in [0, 1]
+      changed_when: false
+
+    - name: Activate validated route with rollback on reload failure
+      when: router_comparison.rc == 1 or router_mount_comparison.rc == 1
+      block:
+        - name: Back up the live router
+          ansible.builtin.copy:
+            src: "{{ router_path }}"
+            dest: "{{ router_path }}.before-configs"
+            remote_src: true
+            mode: "0600"
+
+        - name: Update router in place to preserve its Docker bind mount
+          ansible.builtin.command:
+            argv: [cp, "{{ router_path }}.configs-candidate", "{{ router_path }}"]
+          changed_when: true
+
+        - name: Refresh a pre-existing stale bind mount if necessary
+          ansible.builtin.command:
+            cmd: docker compose up -d --force-recreate
+            chdir: "{{ router_dir }}"
+          when: router_mount_comparison.rc == 1
+          changed_when: true
+
+        - name: Reload the live router
+          ansible.builtin.command:
+            argv: [docker, exec, caddy, caddy, reload, --config, /etc/caddy/Caddyfile, --adapter, caddyfile]
+          changed_when: true
+      rescue:
+        - name: Restore the previous router in place
+          ansible.builtin.command:
+            argv: [cp, "{{ router_path }}.before-configs", "{{ router_path }}"]
+          changed_when: true
+        - name: Reload restored router
+          ansible.builtin.command:
+            argv: [docker, exec, caddy, caddy, reload, --config, /etc/caddy/Caddyfile, --adapter, caddyfile]
+          changed_when: true
+        - name: Report router activation failure
+          ansible.builtin.fail:
+            msg: Profile route reload failed; previous router was restored.
+
+- name: Verify public enrollment endpoints directly
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    config_urls: "{{ lookup('ansible.builtin.file', playbook_dir + '/private/urls.json') | from_json }}"
+  tasks:
+    - name: Verify authenticated HTTPS responses without the VPN proxy
+      ansible.builtin.uri:
+        url: "{{ config_urls[item] }}"
+        return_content: true
+        use_proxy: false
+        timeout: 10
+        status_code: 200
+      loop: [android, windows, linux]
+      register: public_profile
+      until: public_profile.status == 200
+      retries: 6
+      delay: 5
+      no_log: true
+      failed_when: >-
+        public_profile.status != 200 or
+        public_profile.json.route.final != 'proxy' or
+        public_profile.cache_control != 'no-store'
+
+    - name: Verify missing tokens are rejected
+      ansible.builtin.uri:
+        url: https://configs.akorz.duckdns.org/android.json
+        use_proxy: false
+        status_code: 404
+
+    - name: Report private enrollment file locations
+      ansible.builtin.debug:
+        msg: "URLs: {{ playbook_dir }}/private/urls.json; client import links: {{ playbook_dir }}/private/import-links.json"

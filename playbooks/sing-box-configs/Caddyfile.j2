@@ -1,0 +1,30 @@
+{
+    admin off
+    auto_https off
+    # Enrollment paths contain credentials. Never log requests or errors here.
+    log {
+        output discard
+    }
+}
+
+:8080 {
+    header {
+        Cache-Control "no-store"
+        X-Content-Type-Options "nosniff"
+        -Server
+    }
+{% for platform in ['android', 'windows', 'linux'] %}
+    @{{ platform }} {
+        method GET HEAD
+        path /{{ config_tokens[platform] }}/{{ platform }}.json
+    }
+    handle @{{ platform }} {
+        rewrite * /{{ platform }}.json
+        root * /profiles
+        file_server
+    }
+{% endfor %}
+    handle {
+        respond "Not found" 404
+    }
+}
