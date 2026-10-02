@@ -1,0 +1,47 @@
+---
+- name: Choose a unique Grafana backup path
+  ansible.builtin.set_fact:
+    monitoring_backup_archive: "{{ remote_install_path }}/backups/grafana-{{ now(utc=true, fmt='%Y%m%dT%H%M%S%fZ') }}.tar.gz"
+
+- name: Create private backup directory
+  ansible.builtin.file:
+    path: "{{ remote_install_path }}/backups"
+    state: directory
+    mode: "0700"
+
+- name: Take a consistent backup of the Grafana database and old configuration
+  block:
+    - name: Stop Grafana before copying its SQLite database
+      ansible.builtin.command:
+        cmd: docker compose stop grafana
+        chdir: "{{ remote_install_path }}"
+      register: monitoring_stop_result
+      changed_when: monitoring_stop_result.rc == 0
+
+    - name: Archive Grafana data and deployment configuration
+      become: true
+      ansible.builtin.command:
+        argv: >-
+          {{ ['tar', '-czf', monitoring_backup_archive, '-C', remote_install_path,
+              'grafana_data', '.env', 'compose.yml', 'prometheus.yml',
+              'loki-config.yaml', 'vector.yaml'] +
+             (['grafana'] if monitoring_existing_provisioning.stat.exists else []) }}
+      register: monitoring_archive_result
+      changed_when: monitoring_archive_result.rc == 0
+
+    - name: Protect backup containing credentials
+      become: true
+      ansible.builtin.file:
+        path: "{{ monitoring_backup_archive }}"
+        mode: "0600"
+  always:
+    - name: Start Grafana again using the old configuration
+      ansible.builtin.command:
+        cmd: docker compose start grafana
+        chdir: "{{ remote_install_path }}"
+      register: monitoring_start_result
+      changed_when: monitoring_start_result.rc == 0
+
+- name: Report Grafana backup location
+  ansible.builtin.debug:
+    msg: "Grafana backup: {{ monitoring_backup_archive }}. Copy it off the workstation before retiring the old installation."

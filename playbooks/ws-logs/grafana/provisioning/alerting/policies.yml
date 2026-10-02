@@ -1,0 +1,10 @@
+apiVersion: 1
+
+# Own the entire org-1 notification-policy tree, including NoData/Error alerts.
+policies:
+  - orgId: 1
+    receiver: Monitoring Telegram
+    group_by: [grafana_folder, alertname, node]
+    group_wait: 30s
+    group_interval: 5m
+    repeat_interval: 4h

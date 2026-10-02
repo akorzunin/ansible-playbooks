@@ -1,0 +1,15 @@
+---
+- name: Deploy exporters using the same inventory as Prometheus
+  hosts: monitored_nodes:!monitoring_servers:!retired_nodes
+  become: true
+  tasks:
+    - name: Create the monitoring network
+      community.docker.docker_network:
+        name: monitoring
+        state: present
+      when: monitoring_enabled | default(true) | bool
+
+    - name: Deploy node exporter and cAdvisor
+      ansible.builtin.include_role:
+        name: monitoring_client
+      when: monitoring_enabled | default(true) | bool

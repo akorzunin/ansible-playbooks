@@ -1,0 +1,13 @@
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: Monitoring Telegram
+    receivers:
+      - uid: monitoring-telegram
+        type: telegram
+        disableResolveMessage: false
+        settings:
+          # Grafana expands $ENV in provisioning files; double $ to keep literals.
+          bottoken: {{ monitoring_telegram_bot_token | replace('$', '$$') | to_json }}
+          chatid: {{ monitoring_telegram_chat_id | string | to_json }}

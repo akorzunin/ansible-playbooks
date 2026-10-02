@@ -1,5 +1,11 @@
 # My collection of ansible playbooks
 
+## Monitoring as code
+
+See [the monitoring migration and deployment guide](playbooks/ws-logs/README.md).
+Load `monitoring.inventory.yml` alongside the private `hosts` inventory to generate
+scrape targets, provision shared dashboards/alerts, and configure Telegram routing.
+
 ## Setup
 
 Link `hosts` and `external_vars.yml` from Dropbox:

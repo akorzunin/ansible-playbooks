@@ -31,6 +31,8 @@ services:
     env_file: .env
     volumes:
       - ./grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/etc/grafana/dashboards:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:

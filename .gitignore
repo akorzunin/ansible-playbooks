@@ -14,3 +14,4 @@ external_vars.yml
 /playbooks/sing-box-configs/win-all-proxy.json
 /playbooks/sing-box-configs/private/
 /playbooks/sing-box-configs/__pycache__/
+/playbooks/ws-logs/tests/__pycache__/

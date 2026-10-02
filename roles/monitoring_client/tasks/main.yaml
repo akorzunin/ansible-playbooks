@@ -8,3 +8,5 @@
   environment:
     CADVISOR_VERSION: "{{ monitoring_client_cadvizor_version }}"
     NODEEXPORTER_VERSION: "{{ monitoring_client_node_exporter_version }}"
+    NODEEXPORTER_PORT: "{{ monitoring_client_node_exporter_port }}"
+    CADVISOR_PORT: "{{ monitoring_client_cadvisor_port }}"

@@ -1,35 +1,191 @@
-- name: Deploy ws-logs
-  hosts: all
+---
+- name: Deploy inventory-managed monitoring
+  hosts: monitoring_servers
   become: false
   vars:
-    local_path: "{{ lookup('env', 'PWD') }}/playbooks/ws-logs/"
-    remote_install_path: ~/deploy/ws-logs/
+    remote_install_path: "{{ ansible_env.HOME }}/deploy/ws-logs"
+    monitoring_env_file: "{{ playbook_dir }}/.env"
+    monitoring_replace_ui: false
+    monitoring_telegram_bot_token: "{{ MONITORING_TELEGRAM_BOT_TOKEN | default('') }}"
+    monitoring_telegram_chat_id: "{{ MONITORING_TELEGRAM_CHAT_ID | default('') }}"
+    monitoring_grafana_admin_user: "{{ MONITORING_GRAFANA_ADMIN_USER | default('') }}"
+    monitoring_grafana_admin_password: "{{ MONITORING_GRAFANA_ADMIN_PASSWORD | default('') }}"
+    monitoring_dashboard_files: "{{ query('fileglob', playbook_dir ~ '/grafana/dashboards/*.json') }}"
   vars_files:
-    - "{{ lookup('env', 'PWD') }}/external_vars.yml"
+    - "{{ playbook_dir }}/../../external_vars.yml"
 
   tasks:
-    - name: Copy files to service directory
+    - name: Validate monitoring inventory
+      ansible.builtin.assert:
+        that:
+          - groups.get('monitoring_servers', []) | length == 1
+          - groups.get('monitored_nodes', []) | length > 0
+          - inventory_hostname in groups.get('monitored_nodes', [])
+          - monitoring_dashboard_files | length > 0
+        fail_msg: Use both -i ./hosts and -i ./monitoring.inventory.yml.
+
+    - name: Validate exporter addresses and ports
+      ansible.builtin.assert:
+        that:
+          - >-
+            hostvars[item].monitoring_address is defined or
+            hostvars[item].ansible_host is defined or
+            (hostvars[item].monitoring_node_exporter_target is defined and
+             hostvars[item].monitoring_cadvisor_target is defined)
+          - hostvars[item].monitoring_client_node_exporter_port | int > 0
+          - hostvars[item].monitoring_client_cadvisor_port | int > 0
+        fail_msg: "Missing connection/monitoring settings for {{ item }}; load ./hosts as well as the overlay."
+      loop: "{{ groups['monitored_nodes'] | difference(groups.get('retired_nodes', [])) }}"
+      when: hostvars[item].monitoring_enabled | default(true) | bool
+
+    - name: Validate Telegram settings
+      ansible.builtin.assert:
+        that:
+          - monitoring_telegram_bot_token | length > 0
+          - monitoring_telegram_chat_id | string is match('^-?[0-9]+$')
+        fail_msg: Set MONITORING_TELEGRAM_BOT_TOKEN and MONITORING_TELEGRAM_CHAT_ID in external_vars.yml (Vault).
+      no_log: true
+
+    - name: Validate credentials for destructive migration
+      ansible.builtin.assert:
+        that:
+          - monitoring_grafana_admin_user | length > 0
+          - monitoring_grafana_admin_password | length > 0
+        fail_msg: Set the current Grafana org-1 admin credentials in external_vars.yml before replacing UI objects.
+      when: monitoring_replace_ui | bool
+      no_log: true
+
+    - name: Check local environment file
+      ansible.builtin.stat:
+        path: "{{ monitoring_env_file }}"
+      delegate_to: localhost
+      register: monitoring_env_stat
+
+    - name: Require an environment file
+      ansible.builtin.assert:
+        that: monitoring_env_stat.stat.exists
+        fail_msg: Copy playbooks/ws-logs/.env.example to .env and configure it, or set monitoring_env_file to your existing file.
+
+    - name: Check existing Grafana data
+      ansible.builtin.stat:
+        path: "{{ remote_install_path }}/grafana_data"
+      register: monitoring_existing_data
+
+    - name: Check whether provisioning has already been installed
+      ansible.builtin.stat:
+        path: "{{ remote_install_path }}/grafana/provisioning/alerting/contact-points.yml"
+      register: monitoring_existing_provisioning
+
+    # Cold backup on the first managed deployment, or before any UI cleanup.
+    - name: Back up existing Grafana
+      ansible.builtin.include_tasks: backup.yml
+      when:
+        - not ansible_check_mode
+        - monitoring_existing_data.stat.exists
+        - monitoring_replace_ui | bool or not monitoring_existing_provisioning.stat.exists
+
+    - name: Replace old UI objects only when explicitly requested
+      ansible.builtin.include_tasks: replace-ui.yml
+      when:
+        - monitoring_replace_ui | bool
+        - not ansible_check_mode
+
+    - name: Create monitoring configuration directories
+      ansible.builtin.file:
+        path: "{{ remote_install_path }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - ""
+        - grafana/dashboards
+        - grafana/provisioning/datasources
+        - grafana/provisioning/dashboards
+        - grafana/provisioning/alerting
+
+    - name: Copy stack and public provisioning files
       ansible.builtin.copy:
-        src: "{{ local_path }}/{{ item }}"
-        dest: "{{ remote_install_path }}/"
+        src: "{{ playbook_dir }}/{{ item }}"
+        dest: "{{ remote_install_path }}/{{ item }}"
         mode: "0644"
-        remote_src: false
       loop:
         - compose.yml
-        - .env
         - loki-config.yaml
         - vector.yaml
+        - grafana/provisioning/datasources/monitoring.yml
+        - grafana/provisioning/dashboards/monitoring.yml
+        - grafana/provisioning/alerting/rules.yml
+        - grafana/provisioning/alerting/policies.yml
+      register: monitoring_public_config
 
-    - name: Render config templates
+    - name: Copy environment file
+      ansible.builtin.copy:
+        src: "{{ monitoring_env_file }}"
+        dest: "{{ remote_install_path }}/.env"
+        mode: "0600"
+      register: monitoring_environment
+      no_log: true
+
+    - name: Render inventory-generated Prometheus configuration
       ansible.builtin.template:
-        src: "{{ local_path }}/prometheus.yml.j2"
-        mode: "0644"
+        src: prometheus.yml.j2
         dest: "{{ remote_install_path }}/prometheus.yml"
-        remote_src: false
+        mode: "0644"
+      register: monitoring_prometheus_config
 
-    - name: Deploy ws-logs
+    - name: Render Telegram contact point
+      ansible.builtin.template:
+        src: grafana/provisioning/alerting/contact-points.yml.j2
+        dest: "{{ remote_install_path }}/grafana/provisioning/alerting/contact-points.yml"
+        mode: "0600"
+      register: monitoring_contact_point
+      no_log: true
+
+    - name: Copy managed dashboards
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ remote_install_path }}/grafana/dashboards/{{ item | basename }}"
+        mode: "0644"
+      loop: "{{ monitoring_dashboard_files }}"
+      register: monitoring_dashboards
+
+    - name: Find previously managed dashboard files
+      ansible.builtin.find:
+        paths: "{{ remote_install_path }}/grafana/dashboards"
+        patterns: '*.json'
+      register: monitoring_remote_dashboards
+
+    - name: Remove dashboard files no longer present in Git
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ monitoring_remote_dashboards.files }}"
+      when: item.path | basename not in monitoring_dashboard_files | map('basename') | list
+      register: monitoring_removed_dashboards
+
+    - name: Validate Prometheus configuration before restarting services
       ansible.builtin.command:
-        cmd: docker compose up -d --force-recreate
+        cmd: docker compose run --rm --no-deps --entrypoint promtool prometheus check config /etc/prometheus/prometheus.yml
         chdir: "{{ remote_install_path }}"
-      register: out
-      changed_when: out.rc != 0
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Deploy monitoring stack
+      community.docker.docker_compose_v2:
+        project_src: "{{ remote_install_path }}"
+        state: present
+        recreate: >-
+          {{ 'always' if (monitoring_public_config.changed or monitoring_environment.changed or
+             monitoring_prometheus_config.changed or monitoring_contact_point.changed or
+             monitoring_dashboards.changed or monitoring_removed_dashboards.changed) else 'auto' }}
+        wait: true
+        wait_timeout: 120
+
+    - name: Wait for Grafana database readiness
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/health
+        use_proxy: false
+      register: monitoring_grafana_health
+      until: monitoring_grafana_health.status == 200 and monitoring_grafana_health.json.database == 'ok'
+      retries: 12
+      delay: 5
+      when: not ansible_check_mode

@@ -1,0 +1,90 @@
+---
+- name: Refuse destructive cleanup without a successful backup
+  ansible.builtin.assert:
+    that:
+      - monitoring_backup_archive is defined
+      - monitoring_archive_result is defined
+      - monitoring_archive_result.rc == 0
+    fail_msg: Existing Grafana data must be backed up successfully before UI objects can be deleted.
+
+- name: Wait for the old Grafana installation
+  ansible.builtin.uri:
+    url: http://127.0.0.1:3000/api/health
+    use_proxy: false
+  register: monitoring_old_health
+  until: monitoring_old_health.status == 200 and monitoring_old_health.json.database == 'ok'
+  retries: 12
+  delay: 5
+
+- name: Inspect and remove legacy org-1 objects
+  module_defaults:
+    ansible.builtin.uri:
+      url_username: "{{ monitoring_grafana_admin_user }}"
+      url_password: "{{ monitoring_grafana_admin_password }}"
+      force_basic_auth: true
+      use_proxy: false
+  block:
+    - name: Check authenticated Grafana organization
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/org
+      register: monitoring_old_org
+      no_log: true
+
+    - name: Require organization 1 for migration
+      ansible.builtin.assert:
+        that: monitoring_old_org.json.id == 1
+        fail_msg: Provisioning targets organization 1; use an administrator of that organization.
+
+    # Bounded search: refuse >=5000 dashboards rather than silently omit a page.
+    # Add pagination if this homelab ever exceeds that ceiling.
+    - name: List existing dashboards
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/search?type=dash-db&limit=5000
+      register: monitoring_old_dashboards
+      no_log: true
+
+    - name: Refuse a potentially truncated dashboard list
+      ansible.builtin.assert:
+        that: monitoring_old_dashboards.json | length < 5000
+
+    - name: List existing Grafana-managed alert rules
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/v1/provisioning/alert-rules
+      register: monitoring_old_alerts
+      no_log: true
+
+    - name: Inspect legacy dashboards before deleting anything
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:3000/api/dashboards/uid/{{ item.uid | urlencode }}"
+      loop: "{{ monitoring_old_dashboards.json }}"
+      when: item.uid not in ['monitoring-nodes', 'monitoring-containers']
+      register: monitoring_old_dashboard_details
+      no_log: true
+
+    - name: Refuse deletion of dashboards owned by other provisioning files
+      ansible.builtin.assert:
+        that: not item.json.meta.provisioned | default(false)
+        fail_msg: Remove the old dashboard provisioning source before migrating; file-owned dashboards cannot be deleted through the API.
+      loop: "{{ monitoring_old_dashboard_details.results }}"
+      when: not item.skipped | default(false)
+      no_log: true
+
+    - name: Delete legacy Grafana-managed alert rules
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:3000/api/v1/provisioning/alert-rules/{{ item.uid | urlencode }}"
+        method: DELETE
+        status_code: 204
+      changed_when: true
+      loop: "{{ monitoring_old_alerts.json }}"
+      when: item.uid != 'monitoring-node-offline'
+      no_log: true
+
+    - name: Delete legacy dashboards
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:3000/api/dashboards/uid/{{ item.uid | urlencode }}"
+        method: DELETE
+        status_code: 200
+      changed_when: true
+      loop: "{{ monitoring_old_dashboards.json }}"
+      when: item.uid not in ['monitoring-nodes', 'monitoring-containers']
+      no_log: true

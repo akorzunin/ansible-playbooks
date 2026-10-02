@@ -1,0 +1,33 @@
+---
+# Overlay for ./hosts: one entry per machine, never both local/remote aliases.
+all:
+  children:
+    monitoring_servers:
+      hosts:
+        local_workstation:
+    monitored_nodes:
+      vars:
+        monitoring_enabled: true
+        monitoring_availability_alert: false
+        monitoring_client_node_exporter_port: 9100
+        monitoring_client_cadvisor_port: 3003
+      hosts:
+        local_workstation:
+          monitoring_node: workstation
+          monitoring_node_exporter_target: nodeexporter:9100
+          monitoring_cadvisor_target: cadvisor:8080
+          monitoring_gpu_target: nvidia-gpu-exporter:9835
+        local_pi:
+          monitoring_node: pi
+        nk1:
+          monitoring_availability_alert: true
+        nt1:
+          monitoring_availability_alert: true
+          monitoring_client_node_exporter_port: 901
+          monitoring_client_cadvisor_port: 900
+    # Retain SSH records in ./hosts, but never scrape or deploy exporters here.
+    retired_nodes:
+      hosts:
+        kr1:
+        sw1:
+        pl1:

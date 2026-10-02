@@ -1,0 +1,63 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: Node availability
+    folder: Monitoring
+    interval: 1m
+    rules:
+      - uid: monitoring-node-offline
+        title: Node exporter unreachable
+        condition: B
+        for: 2m
+        noDataState: NoData
+        execErrState: Error
+        isPaused: false
+        labels:
+          severity: critical
+          managed_by: ansible
+        annotations:
+          summary: 'Node {{ $labels.node }} exporter is unreachable'
+          description: >-
+            Prometheus cannot scrape node-exporter for two minutes. Check the node,
+            exporter, and network. This indicates reachability, not necessarily a powered-off machine.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: monitoring-prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: monitoring-prometheus
+              expr: 'up{job="nodeexporter", availability_alert="true"}'
+              instant: true
+              range: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: A
+              conditions:
+                - type: query
+                  query:
+                    params: [B]
+                  reducer:
+                    type: last
+                    params: []
+                  evaluator:
+                    type: lt
+                    params: [1]
+                  operator:
+                    type: and
