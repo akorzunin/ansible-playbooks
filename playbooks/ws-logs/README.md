@@ -23,14 +23,14 @@ address (for example, a VPN address). `monitoring_node` is a stable human-readab
 label. Workstation exporters use Compose DNS; remote exporter ports are inherited
 from the same inventory variables used to deploy them.
 
-Confirmed by HTTP `/metrics` probes during implementation:
+Exporter ports (nk1/nt1 probed directly; Pi verified through Prometheus during deployment):
 
 | Node | node-exporter | cAdvisor |
 | --- | --- | --- |
 | nk1 | 9100 | 3003 |
 | nt1 | 901 | 900 |
+| pi | 9100 | 3003 |
 
-Pi retains the previous 9100/3003 configuration; it was not probed from this machine.
 Exporters currently respond on public addresses. Restrict them to the workstation
 or a private monitoring network with firewall/VPN rules; this playbook does not
 change networking or expose additional ports.
@@ -88,8 +88,11 @@ The migration:
    data sources, old contact points, or Prometheus/Loki-managed rules.
 4. Installs the shared **Monitoring / Nodes** and **Monitoring / Containers**
    dashboards, data sources, availability rule, and Telegram contact point.
-5. Validates Prometheus configuration with `promtool`, then recreates services
-   when managed configuration changes and waits for Grafana readiness.
+5. Validates Prometheus configuration with `promtool`, reconciles Compose changes,
+   restarts services to reload changed configuration, and waits for Grafana readiness.
+   Unchanged containers are not force-recreated: Loki currently has container-local
+   storage, which survives restarts but not recreation. Persistent Loki storage is
+   still needed before changing its image or Compose configuration.
 
 The provisioning file owns the **entire org-1 notification-policy tree** and
 replaces the old policy with Telegram routing, including NoData/Error alerts.
@@ -192,6 +195,16 @@ if [ -d grafana ]; then mv grafana "grafana.failed-$(date +%s)"; fi
 sudo tar -xzf "$backup" -C "$PWD"
 docker compose up -d --force-recreate
 ```
+
+An off-server `.tar.gz.vault` backup must first be decrypted on the controller
+with the same Vault password file, then transferred securely to the workstation:
+
+```sh
+ansible-vault decrypt --vault-password-file=.ansible_pass \
+  --output=/private/directory/grafana-backup.tar.gz /path/to/grafana-backup.tar.gz.vault
+```
+
+Treat the decrypted archive as sensitive and remove it after restoration.
 
 The restored Compose/configuration comes from before migration. Keep the failed
 state until you have verified the restored dashboards, alerts, and notification

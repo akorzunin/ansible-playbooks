@@ -187,6 +187,24 @@ class MonitoringTests(unittest.TestCase):
         self.assertIn("monitoring_client_node_exporter_port", role[0]["environment"]["NODEEXPORTER_PORT"])
         self.assertIn("monitoring_client_cadvisor_port", role[0]["environment"]["CADVISOR_PORT"])
 
+    def test_configuration_reload_does_not_force_recreation(self):
+        play = yaml.safe_load((STACK / "deploy.yml").read_text())[0]
+        compose_tasks = [
+            task for task in play["tasks"]
+            if "community.docker.docker_compose_v2" in task
+        ]
+        self.assertEqual(compose_tasks[0]["community.docker.docker_compose_v2"]["recreate"], "auto")
+        reload = compose_tasks[1]
+        self.assertEqual(reload["community.docker.docker_compose_v2"]["state"], "restarted")
+        self.assertIn("loki", reload["community.docker.docker_compose_v2"]["services"])
+        self.assertIn("when", reload)
+
+    def test_public_ssh_override_only_changes_the_workstation(self):
+        override = yaml.safe_load((ROOT / "monitoring.remote.inventory.yml").read_text())
+        self.assertEqual(set(override["all"]["hosts"]), {"local_workstation"})
+        for value in override["all"]["hosts"]["local_workstation"].values():
+            self.assertIn("hostvars['remote_workstation']", value)
+
     def test_cleanup_is_opt_in_and_follows_backup(self):
         play = yaml.safe_load((STACK / "deploy.yml").read_text())[0]
         self.assertFalse(play["vars"]["monitoring_replace_ui"])
