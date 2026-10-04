@@ -99,7 +99,7 @@ services:
 
   bot:
     profiles: [bot]
-    build: ./bot
+    image: ghcr.io/akorzunin/arr-telegram-bot:latest
     user: "${BOT_UID:-1000}:${BOT_GID:-1000}"
     env_file: bot.env
     environment:

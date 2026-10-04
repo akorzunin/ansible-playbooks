@@ -82,7 +82,6 @@
         mode: preserve
       loop:
         - compose.yaml
-        - bot
 
     - name: Seed Compose environment without overwriting local settings
       ansible.builtin.copy:
@@ -113,9 +112,9 @@
       when: ARR_TELEGRAM_BOT_TOKEN is defined
       no_log: true
 
-    - name: Start stack when explicitly requested
+    - name: Start ARR stack when explicitly requested
       ansible.builtin.command:
-        cmd: "docker compose {{ '--profile bot' if arr_bot_enabled | bool else '' }} up -d --build"
+        cmd: "docker compose {{ '--profile bot' if arr_bot_enabled | bool else '' }} up -d --pull always"
         chdir: "{{ arr_dir }}"
       when: arr_start | bool
       register: arr_compose

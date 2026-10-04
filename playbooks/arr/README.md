@@ -15,7 +15,8 @@ existing Jellyfin. Prowlarr manages indexers; Bazarr fetches subtitles.
   seasons are preserved; only the requested season is enabled and searched.
 - Sonarr's season numbering is used, including for anime. Check unusual split
   seasons/cours against its metadata. Anime series type is detected from genres.
-- No plot-description/LLM matching or download-progress notifications yet.
+- No plot-description/LLM matching. The standalone Go bot notifies the requester
+  after Radarr/Sonarr reports a completed import (not merely a torrent completion).
 
 An empty/unset `TELEGRAM_ALLOWED_USERS` permits **any Telegram user** in private
 chats to request downloads. Populate it with comma-separated numeric user IDs to
@@ -67,9 +68,10 @@ Transmission is reached at `host.docker.internal:9092`. The inspected instance h
 RPC authentication disabled; don't expose its RPC port to untrusted networks.
 If you enable RPC authentication later, enter those credentials in both ARR apps.
 
-Outbound ARR, bot, and Bazarr requests use the existing workstation HTTP proxy at
+Outbound ARR and Bazarr requests use the existing workstation HTTP proxy at
 `host.docker.internal:20171`; internal service connections bypass it. ARR's own proxy
 settings are also configured via API. Prowlarr passes its proxy to FlareSolverr.
+The standalone bot has its own Compose proxy configuration.
 This stack does not install or change the VPN/proxy or route Transmission through it.
 
 ## Deploy and configure
@@ -90,18 +92,24 @@ RUTRACKER_PASS: "..."
 Run from the repository root, selecting **one** workstation inventory alias:
 
 ```sh
-# Start infrastructure; bot remains disabled for first-time setup.
+# Start infrastructure; the bot stays off until configuration writes its API keys.
 ansible-playbook playbooks/arr/deploy.yaml -i hosts -l remote_workstation \
   --vault-password-file=.ansible_pass -e arr_start=true
 
-# Configure running apps and start the bot.
+# Configure running apps, write bot.env, and start the Go bot.
 ansible-playbook playbooks/arr/configure.yaml -i hosts -l remote_workstation \
   --vault-password-file=.ansible_pass
 ```
 
 Without `-e arr_start=true`, the deployment playbook only prepares files/directories.
-For subsequent bot-code updates, add `-e arr_bot_enabled=true` to deployment.
-Omitting the bot profile does **not** stop an already running bot.
+The bot is built and published to GHCR by its separate source repository, but runs
+as a service in this ARR Compose stack. `configure.yaml` starts the bot after
+writing its API keys and profile IDs to `bot.env`. For subsequent image updates,
+run `deploy.yaml` with `-e arr_start=true -e arr_bot_enabled=true`, or rerun
+`configure.yaml`. The existing `config/bot/offset` is retained; no second Telegram
+poller should run with the same token. Keep `bot.env` and `config/bot` across
+upgrades. GHCR images from private repositories may require a target-host
+`docker login ghcr.io` with read:packages access before deployment.
 
 Deployment directory: `/srv/deploy/arr`.
 
@@ -152,32 +160,23 @@ Bazarr's in-app auto-update is disabled in favor of container image updates.
 ## Checks and limitations
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s playbooks/arr/bot -p 'test_*.py'
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s playbooks/arr -p 'test_configure.py'
 ```
 
-Validate Compose from a temporary copy containing `bot.env.example` as `bot.env`:
-`docker compose --profile bot config --quiet`. Don't print resolved Compose configs
-from ws: they contain secrets.
-
-On ws: `cd /srv/deploy/arr && docker compose --profile bot ps`.
-Use `docker compose logs --tail=100 bot` for bot diagnostics; bot logs deliberately
-omit token-bearing URLs and API response bodies. Third-party app logs can contain
-credentials, so inspect/redact them before sharing.
-
-The bot is one synchronous worker for private use, not a public request portal.
-Selections expire after 15 minutes, after a new search by the same user, or on
-restart. Poll offsets persist under `config/bot`; updates are checkpointed before
-handling to prevent replay on restart. A crash can therefore lose a request.
+Validate with `docker compose --profile bot config --quiet` without printing
+resolved Compose configs from ws: they may contain secrets. Check
+`docker compose --profile bot ps` on ws.
+Third-party app logs can contain credentials, so inspect/redact them before sharing.
 Check ARR before retrying after any timeout. Existing movie requests do not trigger
 another search. Series requests search only the selected season; previously enabled
-seasons are not silently disabled.
+seasons are not silently disabled. See the standalone bot source repository for
+its checks and notification semantics.
 
 Connection tests and metadata lookups do not test the full download/import path.
 Confirm a real title through Telegram, then verify Transmission, ARR import,
 Jellyfin visibility, and subtitle availability. No sample movie/series is downloaded
 by the configuration playbook.
 
-Back up `config/`, `.env`, and `bot.env` securely. To stop only the bot:
-`docker compose --profile bot stop bot`. `docker compose --profile bot down` removes
-containers but leaves bind-mounted configuration and media intact.
+Back up `config/`, `.env`, and `bot.env` securely. Stop only the bot with
+`docker compose --profile bot stop bot`. `docker compose --profile bot down`
+removes containers but leaves bind-mounted configuration and media intact.
