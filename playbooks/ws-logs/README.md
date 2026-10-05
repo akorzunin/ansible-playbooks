@@ -1,7 +1,7 @@
 # Inventory-managed monitoring
 
 Ansible + Compose remain the deployment mechanism. Git owns Prometheus targets,
-two shared dashboards, data sources, the node-availability rule, and Telegram
+one shared node/container dashboard, data sources, the node-availability rule, and Telegram
 notification routing. Grafana's database still stores users and other runtime state.
 
 ## Inventory
@@ -86,8 +86,8 @@ The migration:
    rules** except the new managed UIDs. Refuses deletion if a legacy dashboard is
    owned by another provisioning source. It does not delete users, folders, old
    data sources, old contact points, or Prometheus/Loki-managed rules.
-4. Installs the shared **Monitoring / Nodes** and **Monitoring / Containers**
-   dashboards, data sources, availability rule, and Telegram contact point.
+4. Installs the shared **Monitoring / Nodes & Containers** dashboard, data
+   sources, availability rule, and Telegram contact point.
 5. Validates Prometheus configuration with `promtool`, reconciles Compose changes,
    restarts services to reload changed configuration, and waits for Grafana readiness.
    Unchanged containers are not force-recreated: Loki currently has container-local
@@ -167,10 +167,21 @@ won't show pre-migration history. Stable `node` labels survive later address cha
 
 ## Editing and validating
 
-Edit dashboards in `grafana/dashboards/*.json`, not the old per-node JSONC template.
-Stable UIDs identify the shared dashboards. Provisioned dashboards are read-only;
-use a temporary UI copy for experiments and export changes back to Git. Removed
-Git dashboard files are deleted from the managed server directory on deployment.
+Edit the combined dashboard in `grafana/dashboards/nodes.json`, not the old per-node
+JSONC template. It keeps the `monitoring-nodes` UID so existing node dashboard links
+continue to work. One node selector filters both exporter and container metrics.
+A shared crosshair marks the hovered timestamp across charts. Node panels include
+filesystem utilization (%), available disk space (automatically scaled to GiB/TiB),
+1/5/15-minute load averages, and logical CPU count. Available space excludes blocks
+reserved for root. Container charts are full-width with right-side table legends
+sorted by latest non-null value, highest first. Click the value-column header to
+change sorting; legend values reflect the end of the selected time range, not the
+hovered timestamp.
+
+Provisioned dashboards are read-only; use a temporary UI copy for experiments and
+export changes back to Git. Removed Git dashboard files are deleted from the managed
+server directory on deployment. An ordinary deployment removes the old provisioned
+Containers dashboard; no `monitoring_replace_ui=true` is needed for this merge.
 
 Local checks (Python uses Ansible's existing Jinja2/PyYAML dependencies):
 

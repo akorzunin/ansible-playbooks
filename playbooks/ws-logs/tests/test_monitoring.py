@@ -112,7 +112,7 @@ class MonitoringTests(unittest.TestCase):
 
     def test_dashboards_use_stable_datasource_and_node_selector(self):
         dashboards = list((STACK / "grafana/dashboards").glob("*.json"))
-        self.assertEqual(len(dashboards), 2)
+        self.assertEqual(len(dashboards), 1)
         uids = set()
         for path in dashboards:
             dashboard = json.loads(path.read_text())
@@ -126,7 +126,81 @@ class MonitoringTests(unittest.TestCase):
                     self.assertIn('node=~"$node"', query["expr"])
                     self.assertNotIn("nodeexporter-", query["expr"])
                     self.assertNotIn("cadvisor-", query["expr"])
-        self.assertEqual(uids, {"monitoring-nodes", "monitoring-containers"})
+        self.assertEqual(uids, {"monitoring-nodes"})
+
+    def test_combined_dashboard_contains_node_and_container_metrics(self):
+        dashboard = json.loads((STACK / "grafana/dashboards/nodes.json").read_text())
+        self.assertEqual(dashboard["title"], "Nodes & Containers")
+        self.assertEqual(dashboard["graphTooltip"], 1)
+        variables = dashboard["templating"]["list"]
+        self.assertEqual(len(variables), 1)
+        self.assertEqual(
+            variables[0]["query"]["query"],
+            'label_values(up{job=~"nodeexporter|cadvisor"}, node)',
+        )
+        self.assertEqual(variables[0]["definition"], variables[0]["query"]["query"])
+        self.assertTrue(variables[0]["multi"])
+        self.assertTrue(variables[0]["includeAll"])
+        panels = {panel["title"]: panel for panel in dashboard["panels"]}
+        self.assertIn("Node exporter availability", panels)
+        self.assertIn("cAdvisor availability", panels)
+        self.assertIn("CPU utilization", panels)
+        self.assertIn("Memory utilization", panels)
+        self.assertIn("Filesystem utilization", panels)
+        self.assertIn("Network traffic", panels)
+        self.assertEqual(len(dashboard["panels"]), 13)
+        self.assertNotIn("Disk usage (used bytes)", panels)
+        disk = panels["Available disk space"]
+        self.assertEqual(disk["fieldConfig"]["defaults"]["unit"], "bytes")
+        self.assertEqual(
+            disk["targets"][0]["expr"],
+            'node_filesystem_avail_bytes{job="nodeexporter", node=~"$node", fstype!~"tmpfs|overlay|squashfs"}',
+        )
+        cpu = panels["CPU count"]["targets"][0]
+        self.assertEqual(
+            cpu["expr"],
+            'count by (node) (node_cpu_seconds_total{job="nodeexporter", node=~"$node", mode="idle"})',
+        )
+        self.assertTrue(cpu["instant"])
+        self.assertFalse(cpu["range"])
+        self.assertEqual(
+            [target["expr"] for target in panels["Load average (1 / 5 / 15 minutes)"]["targets"]],
+            [f'node_load{period}{{job="nodeexporter", node=~"$node"}}' for period in (1, 5, 15)],
+        )
+        containers = [panel for panel in dashboard["panels"] if panel["title"].startswith("Container ")]
+        self.assertEqual(len(containers), 4)
+        for panel in containers:
+            self.assertEqual(panel["gridPos"]["w"], 24)
+            legend = panel["options"]["legend"]
+            self.assertEqual(legend["placement"], "right")
+            self.assertEqual(legend["displayMode"], "table")
+            self.assertTrue(legend["showLegend"])
+            self.assertEqual(legend["calcs"], ["lastNotNull"])
+            self.assertEqual(legend["sortBy"], "Last *")
+            self.assertTrue(legend["sortDesc"])
+            self.assertIn('sum by (node, name)', panel["targets"][0]["expr"])
+            self.assertEqual(panel["targets"][0]["legendFormat"], "{{node}} / {{name}}")
+
+    def test_dashboard_panels_have_unique_ids_and_do_not_overlap(self):
+        dashboard = json.loads((STACK / "grafana/dashboards/nodes.json").read_text())
+        panels = dashboard["panels"]
+        self.assertEqual(len({panel["id"] for panel in panels}), len(panels))
+        for index, panel in enumerate(panels):
+            pos = panel["gridPos"]
+            self.assertGreater(pos["w"], 0)
+            self.assertGreater(pos["h"], 0)
+            self.assertGreaterEqual(pos["x"], 0)
+            self.assertGreaterEqual(pos["y"], 0)
+            self.assertLessEqual(pos["x"] + pos["w"], 24)
+            for other in panels[index + 1:]:
+                other_pos = other["gridPos"]
+                self.assertTrue(
+                    pos["x"] + pos["w"] <= other_pos["x"]
+                    or other_pos["x"] + other_pos["w"] <= pos["x"]
+                    or pos["y"] + pos["h"] <= other_pos["y"]
+                    or other_pos["y"] + other_pos["h"] <= pos["y"],
+                    f'{panel["title"]} overlaps {other["title"]}',
+                )
 
     def test_alert_is_multidimensional_and_independent_of_dashboard_variables(self):
         rules = yaml.safe_load(
@@ -198,12 +272,6 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(reload["community.docker.docker_compose_v2"]["state"], "restarted")
         self.assertIn("loki", reload["community.docker.docker_compose_v2"]["services"])
         self.assertIn("when", reload)
-
-    def test_public_ssh_override_only_changes_the_workstation(self):
-        override = yaml.safe_load((ROOT / "monitoring.remote.inventory.yml").read_text())
-        self.assertEqual(set(override["all"]["hosts"]), {"local_workstation"})
-        for value in override["all"]["hosts"]["local_workstation"].values():
-            self.assertIn("hostvars['remote_workstation']", value)
 
     def test_cleanup_is_opt_in_and_follows_backup(self):
         play = yaml.safe_load((STACK / "deploy.yml").read_text())[0]

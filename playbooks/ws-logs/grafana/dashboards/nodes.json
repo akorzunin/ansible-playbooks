@@ -1,10 +1,11 @@
 {
   "uid": "monitoring-nodes",
-  "title": "Nodes",
-  "description": "Inventory-managed nodes. Select one or more nodes; no per-host dashboard copies are needed.",
+  "title": "Nodes & Containers",
+  "description": "Node and container metrics for inventory-managed hosts with a shared node filter. Container CPU is measured in cores, not divided by CPUs on unrelated hosts.",
   "tags": ["monitoring", "ansible"],
   "schemaVersion": 39,
-  "version": 1,
+  "version": 3,
+  "graphTooltip": 1,
   "editable": false,
   "timezone": "browser",
   "refresh": "30s",
@@ -15,8 +16,8 @@
       "label": "Node",
       "type": "query",
       "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
-      "query": {"query": "label_values(up{job=\"nodeexporter\"}, node)", "refId": "StandardVariableQuery"},
-      "definition": "label_values(up{job=\"nodeexporter\"}, node)",
+      "query": {"query": "label_values(up{job=~\"nodeexporter|cadvisor\"}, node)", "refId": "StandardVariableQuery"},
+      "definition": "label_values(up{job=~\"nodeexporter|cadvisor\"}, node)",
       "refresh": 1,
       "sort": 1,
       "multi": true,
@@ -28,9 +29,9 @@
   },
   "panels": [
     {
-      "id": 1, "title": "Exporter availability", "type": "stat",
+      "id": 1, "title": "Node exporter availability", "type": "stat",
       "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
-      "gridPos": {"h": 5, "w": 24, "x": 0, "y": 0},
+      "gridPos": {"h": 5, "w": 8, "x": 0, "y": 0},
       "targets": [{"refId": "A", "expr": "up{job=\"nodeexporter\", node=~\"$node\"}", "instant": true, "range": false, "legendFormat": "{{node}}"}],
       "fieldConfig": {"defaults": {
         "min": 0, "max": 1,
@@ -74,6 +75,81 @@
       ],
       "fieldConfig": {"defaults": {"unit": "Bps", "min": 0}, "overrides": []},
       "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 6, "title": "CPU count", "type": "stat",
+      "description": "Logical CPUs per node, including hardware threads.",
+      "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
+      "gridPos": {"h": 5, "w": 8, "x": 8, "y": 0},
+      "targets": [{"refId": "A", "expr": "count by (node) (node_cpu_seconds_total{job=\"nodeexporter\", node=~\"$node\", mode=\"idle\"})", "instant": true, "range": false, "legendFormat": "{{node}}"}],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0, "decimals": 0}, "overrides": []},
+      "options": {"colorMode": "value", "graphMode": "none", "textMode": "value_and_name", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 7, "title": "Available disk space", "type": "timeseries",
+      "description": "Space available to normal users per filesystem, excluding reserved blocks. Values automatically scale to GiB/TiB.",
+      "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 21},
+      "targets": [{"refId": "A", "expr": "node_filesystem_avail_bytes{job=\"nodeexporter\", node=~\"$node\", fstype!~\"tmpfs|overlay|squashfs\"}", "legendFormat": "{{node}} {{mountpoint}}"}],
+      "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 8, "title": "Load average (1 / 5 / 15 minutes)", "type": "timeseries",
+      "description": "Unnormalized load averages; compare with the node's logical CPU count.",
+      "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 21},
+      "targets": [
+        {"refId": "A", "expr": "node_load1{job=\"nodeexporter\", node=~\"$node\"}", "legendFormat": "{{node}} / 1m"},
+        {"refId": "B", "expr": "node_load5{job=\"nodeexporter\", node=~\"$node\"}", "legendFormat": "{{node}} / 5m"},
+        {"refId": "C", "expr": "node_load15{job=\"nodeexporter\", node=~\"$node\"}", "legendFormat": "{{node}} / 15m"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 9, "title": "cAdvisor availability", "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
+      "gridPos": {"h": 5, "w": 8, "x": 16, "y": 0},
+      "targets": [{"refId": "A", "expr": "up{job=\"cadvisor\", node=~\"$node\"}", "instant": true, "range": false, "legendFormat": "{{node}}"}],
+      "fieldConfig": {"defaults": {
+        "min": 0, "max": 1,
+        "mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}],
+        "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+      }, "overrides": []},
+      "options": {"colorMode": "background", "graphMode": "none", "textMode": "value_and_name", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 10, "title": "Container CPU (cores)", "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 29},
+      "targets": [{"refId": "A", "expr": "sum by (node, name) (rate(container_cpu_usage_seconds_total{job=\"cadvisor\", node=~\"$node\", image!=\"\", name!=\"\"}[$__rate_interval]))", "legendFormat": "{{node}} / {{name}}"}],
+      "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "width": 350, "calcs": ["lastNotNull"], "showLegend": true, "sortBy": "Last *", "sortDesc": true}}
+    },
+    {
+      "id": 11, "title": "Container memory (working set)", "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 39},
+      "targets": [{"refId": "A", "expr": "sum by (node, name) (container_memory_working_set_bytes{job=\"cadvisor\", node=~\"$node\", image!=\"\", name!=\"\"})", "legendFormat": "{{node}} / {{name}}"}],
+      "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "width": 350, "calcs": ["lastNotNull"], "showLegend": true, "sortBy": "Last *", "sortDesc": true}}
+    },
+    {
+      "id": 12, "title": "Container network receive", "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 49},
+      "targets": [{"refId": "A", "expr": "sum by (node, name) (rate(container_network_receive_bytes_total{job=\"cadvisor\", node=~\"$node\", image!=\"\", name!=\"\"}[$__rate_interval]))", "legendFormat": "{{node}} / {{name}}"}],
+      "fieldConfig": {"defaults": {"unit": "Bps", "min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "width": 350, "calcs": ["lastNotNull"], "showLegend": true, "sortBy": "Last *", "sortDesc": true}}
+    },
+    {
+      "id": 13, "title": "Container network transmit", "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 59},
+      "targets": [{"refId": "A", "expr": "sum by (node, name) (rate(container_network_transmit_bytes_total{job=\"cadvisor\", node=~\"$node\", image!=\"\", name!=\"\"}[$__rate_interval]))", "legendFormat": "{{node}} / {{name}}"}],
+      "fieldConfig": {"defaults": {"unit": "Bps", "min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "right", "width": 350, "calcs": ["lastNotNull"], "showLegend": true, "sortBy": "Last *", "sortDesc": true}}
     }
   ]
 }
