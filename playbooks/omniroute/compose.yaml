@@ -10,6 +10,8 @@ services:
     environment:
       API_KEY_SECRET: ${OMNIROUTE_API_KEY_SECRET:?set in .env}
       HOSTNAME: 0.0.0.0
+      # Temporary GPT-6.1 Codex catalog workaround until upstream PR #15171 ships.
+      CODEX_CLIENT_VERSION: "0.159.2"
       HTTP_PROXY: http://host.docker.internal:20171
       HTTPS_PROXY: http://host.docker.internal:20171
       NO_PROXY: 127.0.0.1,localhost,host.docker.internal,192.168.1.132

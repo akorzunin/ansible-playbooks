@@ -7,7 +7,11 @@ providers:
 
 model:
   provider: custom:omniroute
-  default: cx/gpt-6-sol-high
+  # GPT-6.1 effort aliases require OmniRoute PR #15171; send effort separately.
+  default: cx/gpt-6.1-sol
+
+agent:
+  reasoning_effort: high
 
 fallback_providers:
   - provider: custom:omniroute
