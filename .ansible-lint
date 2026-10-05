@@ -2,9 +2,20 @@
 # .ansible-lint
 
 profile: production
+# Install requirements.yml before linting; skip dependency downloads and schema refreshes.
+offline: true
 
 exclude_paths:
   - .github
   - todo_playbooks
-  - playbooks/**/*compose.yaml
   - playbooks/install_nvidia_driver.yaml
+  # Application configs, not Ansible content.
+  - '**/compose.yaml'
+  - '**/compose.yml'
+  - playbooks/hermes-agent/config.yaml
+  - playbooks/homepage/config/
+  - playbooks/vector/vector.yaml
+  - playbooks/ws-logs/grafana/provisioning/
+  - playbooks/ws-logs/loki-config.yaml
+  - playbooks/ws-logs/vector.yaml
+  - roles/vector/files/vector.yaml
