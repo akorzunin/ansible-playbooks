@@ -5,10 +5,18 @@
   gather_facts: false
   become: false
   tasks:
-    - name: Render profiles from private controller outbounds
+    # Load at runtime so lint/syntax checks do not need the Vault password.
+    - name: Load shared Vault credentials and tokens
+      ansible.builtin.include_vars:
+        file: secrets.vault.yaml
+      no_log: true
+
+    - name: Render profiles from shared Vault credentials and tokens
       ansible.builtin.command:
         argv: [python3, "{{ playbook_dir }}/generate.py"]
+        stdin: "{{ {'sing_box_secrets': sing_box_secrets} | to_json }}"
       changed_when: true
+      no_log: true
 
 - name: Host private profiles on the workstation
   hosts: remote_workstation

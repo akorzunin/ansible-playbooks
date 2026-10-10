@@ -11,7 +11,7 @@ Private enrollment artifacts are generated in `private/` (ignored by Git, mode 0
 
 - `urls.json`: paste the appropriate HTTPS URL into a **remote** profile in the client.
 - `import-links.json`: `sing-box://import-remote-profile` links for compatible clients.
-- `tokens.json`: stable platform tokens. Back up this file securely to preserve URLs.
+- `tokens.json`: generated copy of the shared Vault tokens, not their source of truth.
 
 For Android, use sing-box for Android. For Windows, use a client that accepts full
 sing-box JSON remote profiles and supports Naïve, SSH, selectors and URLTest.
@@ -47,26 +47,82 @@ additional people. Treat enrollment/import links as passwords, not public links.
 
 ## Connections and routing
 
-All profiles use the controller's private `~/.local/share/nt1-{vless,naive,ssh}.json`
-files, including their real credentials. These files replace the outbounds in the
-original Android/Windows examples (including the Android placeholder SSH login).
+All profiles use `sing_box_secrets.connections` in `secrets.vault.yaml`, an
+Ansible Vault-encrypted file tracked in Git. It also stores the existing platform
+tokens in `sing_box_secrets.tokens`. No controller-local outbound files are needed,
+and a fresh controller never generates replacement tokens.
 
 - Automatic selection: URLTest, checks every 3 minutes, 50 ms tolerance.
 - Initial test order: Windows/Linux VLESS → Naïve → SSH; Android Naïve → SSH → VLESS.
 - URLTest selects by **latency**, not strict priority. It can choose Naïve/SSH even
   when VLESS is healthy. The `proxy` selector also allows choosing a protocol manually.
-- UDP always uses VLESS: this nt1 Naïve deployment and SSH do not provide UDP relay.
+- UDP uses VLESS unless an earlier bypass matches (such as DuckDNS): this nt1
+  Naïve deployment and SSH do not provide UDP relay.
 - Existing Russian-domain/GeoIP direct routing and platform inbounds are preserved.
 - Linux retains the existing local mixed/system-proxy listener on `127.0.0.1:12334`;
-  it does not gain a TUN interface. Windows retains its TUN and mixed listener;
-  Android retains its TUN.
-- Recovery HTTPS and rule-set downloads use direct routing. TUN traffic is sniffed
-  before matching the configuration hostname.
+  it does not gain a TUN interface. Linux omits `auto_detect_interface`: it is
+  unnecessary without TUN and caused startup DNS timeouts on the controller's
+  1.14.2 core; unbound direct dialing passed the same test. Windows retains its
+  TUN and mixed listener; Android retains its TUN.
+- `duckdns.org` and all its subdomains use direct routing, before the catch-all
+  UDP rule. This includes recovery HTTPS to the configuration hostname.
+  TUN traffic is sniffed first to identify domain names. IP-only connections or
+  TLS with hidden SNI (ECH) may not match: a domain rule alone cannot guarantee
+  bypass for those; use DNS mapping or destination IP rules if needed.
+- Rule-set downloads use direct routing.
 - Clash API/group controls bind only to `127.0.0.1:9091`.
 
 These three protocols all use **the same nt1 host**. Protocol selection is not
 redundancy against a complete nt1 outage. Publish a replacement server through
 the independent config endpoint to recover, or add a second server deliberately.
+
+## Check whether a request is proxied
+
+On Linux, watch the service log:
+
+```sh
+sudo journalctl -u sing-box -f
+```
+
+In another terminal, force a request through the Linux mixed listener (replace
+this hostname with the one you want to check):
+
+```sh
+curl --noproxy '' -x http://127.0.0.1:12334 -I https://jellyfin.akorz.duckdns.org/
+```
+
+Look for the corresponding `outbound/direct[direct]` connection: it means sing-box
+connected directly, not through the remote proxy. `outbound/vless[...]`,
+`outbound/naive[...]` or `outbound/ssh[...]` means it was proxied. Android/Windows
+clients expose equivalent connection logs in their UI. For TUN clients, also
+check a normal browser request; explicitly using an HTTP proxy supplies the
+hostname and does not test whether TUN sniffing can identify it.
+
+## Deploy from another machine
+
+Clone the repository including `secrets.vault.yaml`. Install Ansible and a
+Naïve-enabled sing-box 1.14+ core, and provide:
+
+- Inventory with `remote_workstation` and `remote_pi` (the current `hosts` file is
+  ignored by Git; copy it securely or supply your own with `-i`).
+- SSH access and sudo privileges for the target hosts as required by the playbook.
+- The existing Vault password, supplied through a private `.ansible_pass` file
+  (mode 0600), `--vault-password-file /secure/path`, or `--ask-vault-pass`.
+
+Do **not** commit the Vault password, plaintext credentials, or `private/`.
+`secrets.vault.yaml` contains encrypted JSON (valid YAML). Its credentials and
+platform tokens are shared deployment state; editing it changes all future
+publishes. Use a trusted editor without plaintext swap/backup files:
+
+```sh
+ansible-vault edit --vault-password-file .ansible_pass \
+  playbooks/sing-box-configs/secrets.vault.yaml
+```
+
+Generated files in `private/` can be recreated on each machine. Decrypted inputs
+reach the generator through stdin, not command-line arguments or an input file;
+the Ansible task uses `no_log`. Linux enrollment also reads its URL from Vault,
+so it does not require a previous deployment or a local `private/urls.json`.
 
 ## Publish a change
 
@@ -84,15 +140,20 @@ new contents on their next update; they do not need to be re-enrolled.
 
 Edit `templates/{android,windows,linux}.json` for platform settings and routing.
 These are credential-free snapshots of the supplied configs and Linux base config.
-Edit the private outbound files above for server/credential changes, then rerun
-the publish playbook. Merely editing a source file does not publish it automatically.
+Edit `secrets.vault.yaml` with `ansible-vault edit` for server/credential changes,
+then rerun the publish playbook. If a separate server playbook changes proxy
+credentials, update this Vault file to match before publishing. Merely editing
+a source file does not publish it automatically.
 The original `android.json` and `win-all-proxy.json` are kept privately for reference,
 ignored by Git, and are not the ongoing source of shared connection credentials.
 
 Generate/check locally without deploying:
 
 ```sh
-python playbooks/sing-box-configs/generate.py
+set -o pipefail
+ansible-vault view --vault-password-file .ansible_pass \
+  playbooks/sing-box-configs/secrets.vault.yaml | \
+  python playbooks/sing-box-configs/generate.py
 python -m unittest discover -s playbooks/sing-box-configs -p 'test_*.py'
 ```
 
@@ -155,7 +216,8 @@ is detected and repaired by recreating the router container (brief HTTPS outage)
 The route and log redaction are also in `playbooks/pi-caddy/Caddyfile` so a later
 full Pi Caddy deployment retains them.
 
-To rotate a leaked platform URL, replace its token in `private/tokens.json` with
-64 random lowercase hex characters and republish. Re-enroll affected devices;
+To rotate a leaked platform URL, use `ansible-vault edit` to replace its token in
+`sing_box_secrets.tokens` with 64 random lowercase hex characters and republish.
+Editing the generated `private/tokens.json` does not rotate the shared token. Re-enroll affected devices;
 rerun `linux-client.yaml` for Linux. URL rotation stops future downloads but does
 **not** revoke proxy credentials already downloaded: rotate those separately.

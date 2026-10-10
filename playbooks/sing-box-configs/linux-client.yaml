@@ -5,8 +5,14 @@
   become: true
   gather_facts: false
   vars:
-    config_urls: "{{ lookup('ansible.builtin.file', playbook_dir + '/private/urls.json') | from_json }}"
+    config_url: "https://configs.akorz.duckdns.org/{{ sing_box_secrets.tokens.linux }}/linux.json"
   tasks:
+    # Load at runtime so lint/syntax checks do not need the Vault password.
+    - name: Load shared Vault credentials and tokens
+      ansible.builtin.include_vars:
+        file: secrets.vault.yaml
+      no_log: true
+
     - name: Ensure an installed Linux profile exists before enrolling
       ansible.builtin.stat:
         path: /etc/sing-box/config.json
@@ -45,7 +51,7 @@
 
     - name: Install private remote enrollment URL
       ansible.builtin.copy:
-        content: "{{ {'url': config_urls.linux} | to_nice_json }}\n"
+        content: "{{ {'url': config_url} | to_nice_json }}\n"
         dest: /etc/sing-box-profile.json
         owner: root
         group: root

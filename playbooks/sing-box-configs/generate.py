@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Render full profiles from public platform settings and private nt1 outbounds."""
+"""Render profiles from platform settings and decrypted Vault JSON on stdin."""
 import argparse
 import copy
 import json
 import os
 from pathlib import Path
-import secrets
 import subprocess
+import sys
 import tempfile
 from urllib.parse import quote
 
@@ -46,11 +46,13 @@ def make_profile(base, connections, order):
         {"type": "direct", "tag": "direct"},
     ]
     route = profile.setdefault("route", {})
-    # TUN connections initially contain IPs, so sniff TLS SNI before matching the
-    # config hostname. Recovery traffic must not depend on a working VPN outbound.
+    # TUN connections initially contain IPs, so sniff TLS SNI before matching
+    # DuckDNS names. Keep this bypass before the catch-all UDP proxy rule.
+    # Sniffing cannot identify IP-only/ECH traffic; add DNS mapping or IP rules
+    # if those connections also need a guaranteed bypass.
     rules = [
         {"action": "sniff"},
-        {"domain": [DOMAIN], "action": "route", "outbound": "direct"},
+        {"domain_suffix": ["duckdns.org"], "action": "route", "outbound": "direct"},
         *[r for r in route.get("rules", []) if r.get("action") != "sniff"],
     ]
     route["rules"] = rules
@@ -70,19 +72,23 @@ def make_profile(base, connections, order):
     return profile
 
 
-def generate(private_dir, outbound_dir):
-    private_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-    private_dir.chmod(0o700)
-    connections = {}
-    for kind in ("vless", "naive", "ssh"):
-        source = json.loads((outbound_dir / f"nt1-{kind}.json").read_text())
-        matches = [o for o in source["outbounds"] if o["type"] == kind]
-        if len(matches) != 1:
-            raise ValueError(f"nt1-{kind}.json must contain exactly one {kind} outbound")
-        connections[kind] = matches[0]
+def generate(private_dir, connections, tokens):
+    if set(connections) != {"vless", "naive", "ssh"}:
+        raise ValueError("Vault must contain vless, naive and ssh connections")
+    for kind, outbound in connections.items():
+        if outbound.get("type") != kind:
+            raise ValueError(f"Connection {kind} must have type {kind}")
     tags = [o["tag"] for o in connections.values()]
     if len(set(tags)) != 3 or set(tags) & {"auto", "proxy", "direct"}:
         raise ValueError("Connection tags must be unique and cannot be auto/proxy/direct")
+    # Tokens are shared deployment state, never generated on a fresh controller.
+    if set(tokens) != set(ORDERS):
+        raise ValueError("Vault must contain tokens for all three platforms")
+    for platform, token in tokens.items():
+        if not isinstance(token, str) or len(token) != 64 or any(c not in "0123456789abcdef" for c in token):
+            raise ValueError(f"Invalid token for {platform}")
+    private_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    private_dir.chmod(0o700)
 
     # Validate all platforms before replacing any published local artifacts.
     with tempfile.TemporaryDirectory(dir=private_dir) as work:
@@ -97,14 +103,7 @@ def generate(private_dir, outbound_dir):
             subprocess.run(["sing-box", "check", "-c", str(candidate)], check=True,
                            stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
-    tokens_path = private_dir / "tokens.json"
-    tokens = json.loads(tokens_path.read_text()) if tokens_path.exists() else {}
-    for platform in ORDERS:
-        tokens.setdefault(platform, secrets.token_hex(32))
-        token = tokens[platform]
-        if len(token) != 64 or any(c not in "0123456789abcdef" for c in token):
-            raise ValueError(f"Invalid token for {platform}")
-    private_write(tokens_path, json.dumps(tokens, indent=2) + "\n")
+    private_write(private_dir / "tokens.json", json.dumps(tokens, indent=2) + "\n")
     for platform, content in rendered.items():
         private_write(private_dir / f"{platform}.json", content)
     urls = {p: f"https://{DOMAIN}/{tokens[p]}/{p}.json" for p in ORDERS}
@@ -117,11 +116,11 @@ def generate(private_dir, outbound_dir):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--private-dir", type=Path, default=ROOT / "private")
-    parser.add_argument("--outbound-dir", type=Path, default=Path.home() / ".local/share")
     args = parser.parse_args()
     try:
-        generate(args.private_dir, args.outbound_dir)
-    except subprocess.CalledProcessError:
-        # Core diagnostics can contain credentials. Do not echo them to deployment logs.
-        parser.exit(1, "sing-box check failed; inspect the private inputs locally.\n")
+        data = json.load(sys.stdin)["sing_box_secrets"]
+        generate(args.private_dir, data["connections"], data["tokens"])
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.CalledProcessError):
+        # Input/core errors can contain credentials. Never echo them to deployment logs.
+        parser.exit(1, "Profile generation failed; check Vault inputs and sing-box locally.\n")
     print(f"Validated profiles and stable enrollment URLs saved in {args.private_dir}")
