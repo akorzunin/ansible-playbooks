@@ -141,12 +141,15 @@ def configure_indexers():
     save("prowlarr", "indexerproxy", proxy)
     api("prowlarr", "command", {"name": "IndexerDefinitionUpdate"})
     schemas = api("prowlarr", "indexer/schema")
-    for name, url in [("Nyaa.si", "https://nyaa.si/"), ("1337x", "https://1337x.to/"), ("RuTracker.org", "https://rutracker.org/")]:
+    for name, url in [("Nyaa.si", "https://nyaa.si/"), ("1337x", "https://1337x.to/"),
+                      ("RuTracker.org", "https://rutracker.org/"), ("The Pirate Bay", "https://thepiratebay.org/")]:
         try:
             indexer = copy.deepcopy(next(x for x in schemas if x["name"] == name))
             indexer.update(enable=True, appProfileId=1, priority=25,
-                           tags=[] if name == "Nyaa.si" else [tag["id"]])
-            values = {"baseUrl": url}
+                           tags=[tag["id"]] if name in ("1337x", "RuTracker.org") else [])
+            # Full app sync propagates this threshold to Radarr/Sonarr's Torznab settings.
+            values = {"baseUrl": url, "torrentBaseSettings.appMinimumSeeders": 5,
+                      "torrentBaseSettings.preferMagnetUrl": True}
             if name == "Nyaa.si":
                 values.update({"cat-id": "1_2", "prefer_magnet_links": True})
             if name == "RuTracker.org":

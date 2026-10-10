@@ -5,6 +5,21 @@ existing Jellyfin. Prowlarr manages indexers; Bazarr fetches subtitles.
 
 ## Telegram usage
 
+- `/active` (or `/downloads`): list this chat's bot requests with ARR queue status
+  and download progress. Requests without an active torrent are shown if files
+  are still missing. Downloads added outside the bot are not listed.
+- `/cancel NUMBER`: use the number from `/active`, then confirm cancellation.
+  Unmonitors the movie or requested season and removes its Transmission torrents
+  **without deleting files**. Other seasons' monitoring remains unchanged. A
+  torrent shared across seasons in ARR's queue is refused; untracked torrent
+  contents are not inspected. Manage mixed-season packs in ARR/Transmission.
+  Already-running explicit searches may still finish; check ARR's queue afterwards.
+  Cancellation affects the shared ARR item, including requests from other users
+  for the same movie/season. Cancelled requests stop receiving import notifications.
+  These commands require the updated standalone bot image; pulling an old image
+  does not add them. To restart a cancelled movie with no file, search/select/confirm
+  it again in the bot, or re-enable monitoring/search in Radarr. Existing movies
+  with files or an active/pending ARR queue entry are left unchanged.
 - `/movie Spirited Away`: movie search.
 - `/series Cowboy Bebop`: season **1**, not the whole series.
 - `/series Example S02` or `Example season 2`: request season 2.
@@ -34,8 +49,17 @@ restrict access. Group chats are always ignored.
   and matching are provider-dependent; subtitles are not guaranteed for every file.
 - **Russian subtitles:** enabled for manual searches, not required by the default
   profile and not an automatic fallback replacing English.
-- **Indexers:** Nyaa.si (English-translated anime category), 1337x, RuTracker.org.
+- **Indexers:** Nyaa.si (English-translated anime category), 1337x, RuTracker.org,
+  The Pirate Bay. Magnet URLs are preferred when available. Pirate Bay's Prowlarr
+  definition uses its JSON API (normally `apibay.org`) to obtain infohashes/magnets;
+  it does not need FlareSolverr. API availability can differ from the website.
   RuTracker credentials come from `RUTRACKER_USER` / `RUTRACKER_PASS` in external vars.
+- **Minimum seeders: 5** on each managed Prowlarr indexer, propagated to
+  Radarr/Sonarr by full application sync. This filters weak releases; it does not
+  rank seeds above quality/custom-format preferences or fix torrents already
+  grabbed. Advertised seed counts may be stale and are not connectivity guarantees.
+  For a stuck download, use ARR's interactive search to compare seed counts and
+  rejection reasons; remove/blocklist and retry there if a replacement is wanted.
 - **FlareSolverr:** browser helper for Cloudflare checks on 1337x/RuTracker only.
   It has no published port. A passing test does not guarantee permanent access;
   site challenges and proxy exit-IP blocks can change.
@@ -71,7 +95,9 @@ If you enable RPC authentication later, enter those credentials in both ARR apps
 Outbound ARR and Bazarr requests use the existing workstation HTTP proxy at
 `host.docker.internal:20171`; internal service connections bypass it. ARR's own proxy
 settings are also configured via API. Prowlarr passes its proxy to FlareSolverr.
-The standalone bot has its own Compose proxy configuration.
+The standalone bot has its own Compose proxy configuration. Cancellation uses
+Transmission RPC at `http://host.docker.internal:9092/transmission/rpc` directly,
+with session-ID negotiation. Its RPC URL is set via `TRANSMISSION_URL` in Compose.
 This stack does not install or change the VPN/proxy or route Transmission through it.
 
 ## Deploy and configure
@@ -120,10 +146,11 @@ Deployment directory: `/srv/deploy/arr`.
 - RuTracker credentials are passed to configuration without Ansible logging and
   stored by Prowlarr. No separate tracker secret file is deployed.
 - The configuration playbook manages named `ARR ...` profiles, Transmission clients,
-  the three chosen indexers, Prowlarr app links, and Bazarr defaults. Rerunning it
+  the four chosen indexers, their 5-seeder minimum, Prowlarr app links, and Bazarr defaults. Rerunning it
   reapplies these choices; edit the script if you want different managed defaults.
 - Indexers are tested before saving; failed additions are reported in the summary.
-  Read that summary even if Ansible succeeds. Configuration never requests media.
+  Read that summary even if Ansible succeeds, especially for Pirate Bay's API.
+  Configuration never requests media. Existing torrents are not replaced.
 - Use one Telegram polling process per token and remove any existing webhook first.
 
 ## Admin access
@@ -167,8 +194,9 @@ Validate with `docker compose --profile bot config --quiet` without printing
 resolved Compose configs from ws: they may contain secrets. Check
 `docker compose --profile bot ps` on ws.
 Third-party app logs can contain credentials, so inspect/redact them before sharing.
-Check ARR before retrying after any timeout. Existing movie requests do not trigger
-another search. Series requests search only the selected season; previously enabled
+Check ARR before retrying after any timeout. Confirmed existing movie requests
+re-enable monitoring and search only if the movie has no file and no active/pending
+queue entry; its current profile and path are preserved. Series requests search only the selected season; previously enabled
 seasons are not silently disabled. See the standalone bot source repository for
 its checks and notification semantics.
 

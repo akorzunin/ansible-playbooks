@@ -105,6 +105,7 @@ services:
     environment:
       RADARR_URL: http://radarr:7878
       SONARR_URL: http://sonarr:8989
+      TRANSMISSION_URL: http://host.docker.internal:9092/transmission/rpc
       RADARR_ROOT: /downloads/complete/films
       SONARR_ROOT: /downloads/complete/shows
       HTTP_PROXY: http://host.docker.internal:20171

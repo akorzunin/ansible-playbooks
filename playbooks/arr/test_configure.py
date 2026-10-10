@@ -49,6 +49,41 @@ class ConfigureTests(unittest.TestCase):
             finally:
                 os.chdir(cwd)
 
+    def test_managed_indexers_sync_seeder_threshold_and_magnets(self):
+        names = ("Nyaa.si", "1337x", "RuTracker.org", "The Pirate Bay")
+        schemas = [{"name": name, "fields": [{"name": field} for field in
+                    ("baseUrl", "torrentBaseSettings.appMinimumSeeders", "torrentBaseSettings.preferMagnetUrl",
+                     "cat-id", "prefer_magnet_links", "username", "password")]} for name in names]
+
+        def api(app, path, data=None, method=None):
+            if path == "tag":
+                return [{"id": 7, "label": "arr-cloudflare"}]
+            if path == "indexerproxy/schema":
+                return [{"implementation": "FlareSolverr", "fields": [{"name": "host"}, {"name": "requestTimeout"}]}]
+            if path == "indexer/schema":
+                return schemas
+            if path == "applications/schema":
+                return [{"implementation": app_name, "fields": [{"name": "prowlarrUrl"}, {"name": "baseUrl"},
+                         {"name": "apiKey"}, {"name": "syncCategories", "value": [2000]}]} for app_name in ("radarr", "sonarr")]
+            return {}
+
+        with patch("configure.api", side_effect=api) as mocked_api, patch("configure.test"), patch("configure.save") as save, \
+                patch.dict(configure.KEYS, {"radarr": "rk", "sonarr": "sk"}), \
+                patch.dict(os.environ, {"RUTRACKER_USER": "user", "RUTRACKER_PASS": "pass"}):
+            configure.configure_indexers()
+        indexers = [c.args[2] for c in save.call_args_list if c.args[1] == "indexer"]
+        self.assertEqual([x["name"] for x in indexers], list(names))
+        for indexer in indexers:
+            values = {f["name"]: f.get("value") for f in indexer["fields"]}
+            self.assertEqual(values["torrentBaseSettings.appMinimumSeeders"], 5)
+            self.assertIs(values["torrentBaseSettings.preferMagnetUrl"], True)
+            self.assertEqual(indexer["tags"], [7] if indexer["name"] in ("1337x", "RuTracker.org") else [])
+        applications = [c.args[2] for c in save.call_args_list if c.args[1] == "applications"]
+        self.assertTrue(all(x["syncLevel"] == "fullSync" for x in applications))
+        mocked_api.assert_any_call("prowlarr", "command", {"name": "ApplicationIndexerSync"})
+        # Templates are copied rather than mutated across reruns.
+        self.assertNotIn("value", schemas[0]["fields"][0])
+
     def test_api_error_does_not_include_validation_secrets(self):
         from io import BytesIO
         from urllib.error import HTTPError
