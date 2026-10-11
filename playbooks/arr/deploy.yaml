@@ -8,6 +8,7 @@
     arr_dir: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}"
     arr_start: false
     arr_bot_enabled: false
+    arr_prepare_enabled: false
   vars_files:
     - "{{ playbook_dir }}/../../external_vars.yml"
 
@@ -63,6 +64,7 @@
         - prowlarr
         - bazarr
         - bot
+        - preparation
 
     - name: Create media library directories without changing existing ownership
       ansible.builtin.file:
@@ -74,6 +76,34 @@
         - complete/shows
         - incoming/radarr
         - incoming/sonarr
+
+    - name: Check Docker GPU runtime before enabling preparation
+      ansible.builtin.command:
+        argv:
+          - docker
+          - info
+          - --format
+          - "{{ '{{json .Runtimes}}' }}"
+      register: arr_docker_runtimes
+      changed_when: false
+      when: arr_prepare_enabled | bool
+
+    - name: Require the NVIDIA Container Toolkit Docker runtime
+      ansible.builtin.assert:
+        that:
+          - "'nvidia' in (arr_docker_runtimes.stdout | from_json)"
+        fail_msg: Configure the NVIDIA Container Toolkit Docker runtime before enabling preparation; do not restart a busy daemon blindly.
+      when: arr_prepare_enabled | bool
+
+    - name: Create separate optimized libraries on the media filesystem
+      ansible.builtin.file:
+        path: "/mnt/storage/jellyfin_optimized/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - films
+        - shows
+      when: arr_prepare_enabled | bool
 
     - name: Copy stack files
       ansible.builtin.copy:
@@ -103,6 +133,37 @@
         force: false
         mode: "0600"
 
+    - name: Seed private worker environment
+      ansible.builtin.copy:
+        src: worker.env.example
+        dest: "{{ arr_dir }}/worker.env"
+        force: false
+        mode: "0600"
+
+    - name: Require Jellyfin credentials when enabling preparation
+      ansible.builtin.assert:
+        that:
+          - ARR_JELLYFIN_API_KEY | default('') | length > 0
+        fail_msg: Set ARR_JELLYFIN_API_KEY before enabling preparation.
+      when: arr_prepare_enabled | bool
+      no_log: true
+
+    - name: Set worker Jellyfin credential
+      ansible.builtin.lineinfile:
+        path: "{{ arr_dir }}/worker.env"
+        regexp: "^JELLYFIN_API_KEY="
+        line: "JELLYFIN_API_KEY={{ ARR_JELLYFIN_API_KEY }}"
+        mode: "0600"
+      when: arr_prepare_enabled | bool
+      no_log: true
+
+    - name: Enable or disable bot preparation discovery
+      ansible.builtin.lineinfile:
+        path: "{{ arr_dir }}/.env"
+        regexp: "^ARR_PREPARATION_DIR="
+        line: "ARR_PREPARATION_DIR={{ '/preparation' if arr_prepare_enabled | bool else '' }}"
+        mode: "0600"
+
     - name: Set Telegram token from external vars
       ansible.builtin.lineinfile:
         path: "{{ arr_dir }}/bot.env"
@@ -112,9 +173,23 @@
       when: ARR_TELEGRAM_BOT_TOKEN is defined
       no_log: true
 
+    - name: Stop preparation worker when explicitly starting with preparation disabled
+      ansible.builtin.command:
+        cmd: docker compose --profile prepare stop prepare
+        chdir: "{{ arr_dir }}"
+      when:
+        - arr_start | bool
+        - not (arr_prepare_enabled | bool)
+      register: arr_prepare_stop
+      changed_when: arr_prepare_stop.rc == 0
+
     - name: Start ARR stack when explicitly requested
       ansible.builtin.command:
-        cmd: "docker compose {{ '--profile bot' if arr_bot_enabled | bool else '' }} up -d --pull always"
+        cmd: >-
+          docker compose
+          {{ '--profile bot' if (arr_bot_enabled | bool or arr_prepare_enabled | bool) else '' }}
+          {{ '--profile prepare' if arr_prepare_enabled | bool else '' }}
+          up -d --pull always
         chdir: "{{ arr_dir }}"
       when: arr_start | bool
       register: arr_compose

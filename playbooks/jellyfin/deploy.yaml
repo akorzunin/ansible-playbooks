@@ -19,6 +19,15 @@
         state: directory
         mode: "0755"
 
+    - name: Create separate optimized library directories on the media disk
+      ansible.builtin.file:
+        path: "/mnt/storage/jellyfin_optimized/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - films
+        - shows
+
     - name: Docker compose up {{ deploy_compose_service_name }}
       ansible.builtin.import_role:
         name: deploy_compose

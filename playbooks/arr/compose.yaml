@@ -103,6 +103,7 @@ services:
     user: "${BOT_UID:-1000}:${BOT_GID:-1000}"
     env_file: bot.env
     environment:
+      PREPARATION_DIR: ${ARR_PREPARATION_DIR:-}
       RADARR_URL: http://radarr:7878
       SONARR_URL: http://sonarr:8989
       TRANSMISSION_URL: http://host.docker.internal:9092/transmission/rpc
@@ -114,6 +115,8 @@ services:
     extra_hosts: *host_gateway
     volumes:
       - ./config/bot:/state
+      - ./config/preparation:/preparation
+      - /mnt/storage/jellyfin_media:/downloads:ro
     depends_on:
       - radarr
       - sonarr
@@ -127,6 +130,43 @@ services:
           cpus: "0.50"
           memory: 256M
     read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+  prepare:
+    profiles: [prepare]
+    image: ghcr.io/akorzunin/arr-telegram-bot:worker
+    user: "${BOT_UID:-1000}:${BOT_GID:-1000}"
+    env_file: worker.env
+    environment:
+      JELLYFIN_URL: http://host.docker.internal:8096
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: video,utility,compute
+    extra_hosts: *host_gateway
+    volumes:
+      - ./config/preparation:/preparation
+      - /mnt/storage/jellyfin_media:/downloads:ro
+      - type: bind
+        source: /mnt/storage/jellyfin_optimized
+        target: /optimized
+        bind:
+          create_host_path: false
+    runtime: nvidia
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu, video]
+        limits:
+          cpus: "4.0"
+          memory: 2G
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true

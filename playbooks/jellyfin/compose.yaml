@@ -16,6 +16,12 @@ services:
       - ./jellyfin/media:/media
       - ./jellyfin/media2:/media2:ro
       - /mnt/storage/jellyfin_media/:/storage:rw
+      - type: bind
+        source: /mnt/storage/jellyfin_optimized
+        target: /optimized
+        read_only: true
+        bind:
+          create_host_path: false
     restart: unless-stopped
     runtime: nvidia
     deploy:

@@ -4,6 +4,7 @@
   become: false
   vars:
     arr_dir: /srv/deploy/arr
+    arr_prepare_enabled: false
   vars_files:
     - "{{ playbook_dir }}/../../external_vars.yml"
 
@@ -35,6 +36,15 @@
     - name: Show credential-free configuration summary
       ansible.builtin.debug:
         var: arr_configuration.stdout_lines
+
+    - name: Start GPU preparation worker when enabled
+      ansible.builtin.command:
+        cmd: docker compose --profile prepare up -d --pull always prepare
+        chdir: "{{ arr_dir }}"
+      when: arr_prepare_enabled | bool
+      register: arr_prepare_start
+      changed_when: arr_prepare_start.rc == 0
+      no_log: true
 
     - name: Start configured Go Telegram bot from GHCR
       ansible.builtin.command:

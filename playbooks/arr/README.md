@@ -82,7 +82,8 @@ Movies import to `/downloads/complete/films`; series to
 `/downloads/complete/shows`. These match the workstation's existing Jellyfin
 **Films** and **Shows** libraries (real-time monitoring enabled). Anime currently
 uses these same roots rather than the separate legacy anime libraries.
-No Jellyfin configuration is modified.
+ARR configuration does not modify Jellyfin libraries. Optional streaming preparation
+adds a separate optimized-media mount through the Jellyfin deployment; see below.
 
 Staging directories are `/downloads/incoming/radarr` and
 `/downloads/incoming/sonarr`. Transmission's ARR integration disallows setting
@@ -143,7 +144,9 @@ upgrades. GHCR images from private repositories may require a target-host
 Deployment directory: `/srv/deploy/arr`.
 
 - `.env` and `bot.env` are seeded once with mode 0600.
-- Deployment updates only `TELEGRAM_BOT_TOKEN` from external vars when defined.
+- Deployment updates `TELEGRAM_BOT_TOKEN` from external vars when defined. When
+  preparation is enabled it also writes `ARR_JELLYFIN_API_KEY` into private
+  `worker.env`, and manages `ARR_PREPARATION_DIR` in `.env`.
 - Configuration discovers local ARR keys and writes them and quality-profile IDs
   to `bot.env`; no manual key copying is required. The user allowlist is preserved.
 - RuTracker credentials are passed to configuration without Ansible logging and
@@ -155,6 +158,93 @@ Deployment directory: `/srv/deploy/arr`.
   Read that summary even if Ansible succeeds, especially for Pirate Bay's API.
   Configuration never requests media. Existing torrents are not replaced.
 - Use one Telegram polling process per token and remove any existing webhook first.
+
+## Optional automatic streaming preparation
+
+This is **implemented but not enabled by default**. Publish both updated images
+from `../arr-telegram-bot/` first (`:latest` bot, `:worker` GPU worker). Do not start a
+second Telegram poller. The worker has GPU access, not the Telegram polling process.
+
+1. Confirm **the target workstation's Docker daemon** has the `nvidia` runtime:
+   `docker info --format '{{json .Runtimes}}'`. The deployment refuses to enable
+   preparation otherwise. NVIDIA Container Toolkit being installed is not enough;
+   Docker must be configured to use it. If needed, an administrator can use
+   `sudo nvidia-ctk runtime configure --runtime=docker`, followed by a **planned**
+   Docker restart. Do not restart a daemon serving active streams blindly.
+2. Create a Jellyfin administrator API key and set `ARR_JELLYFIN_API_KEY` in the
+   ignored `external_vars.yml` (Vault is supported). Never commit that key.
+3. Prepare ARR files/directories without starting services:
+
+   ```sh
+   ansible-playbook playbooks/arr/deploy.yaml -i hosts -l remote_workstation \
+     --vault-password-file=.ansible_pass -e arr_prepare_enabled=true
+   ```
+
+4. Apply the new optimized-media mount to Jellyfin (recreates its container; plan
+   around playback):
+
+   ```sh
+   ansible-playbook playbooks/jellyfin/deploy.yaml -i hosts -l remote_workstation \
+     --vault-password-file=.ansible_pass
+   ```
+
+5. In Jellyfin, create **Streaming Films** (Movies, `/optimized/films`) and
+   **Streaming Shows** (Shows, `/optimized/shows`). Enable real-time monitoring
+   and grant the intended users access. Staging is under `/optimized/.staging`,
+   outside these libraries. Original libraries and torrent data stay untouched.
+6. Start/recreate the bot and worker after ARR credentials have already been
+   configured:
+
+   ```sh
+   ansible-playbook playbooks/arr/deploy.yaml -i hosts -l remote_workstation \
+     --vault-password-file=.ansible_pass -e arr_start=true \
+     -e arr_bot_enabled=true -e arr_prepare_enabled=true
+   ```
+
+   For an initial ARR setup, use `configure.yaml -e arr_prepare_enabled=true`
+   instead, after deploying infrastructure with the bot off and configuring the
+   Jellyfin libraries. Use `arr_prepare_enabled=true` consistently on later
+   deployment runs; omitting it disables discovery on the next bot recreation.
+
+The bot inspects only its saved requests (including existing downloaded requested
+files and later upgrades), not the entire library. Compatible SDR H.264 ≤1080p
+with acceptable average/rolling bitrate is stream-copied; audio/container changes
+avoid video encoding. Other SDR video uses NVENC at ~12 Mbps (16 Mbps maxrate).
+Final outputs undergo full decode and bitrate validation before publication.
+HDR is blocked pending a tested tone-mapping implementation. Optimized files keep
+one default/first audio track, AAC mono/stereo; originals retain all tracks.
+External SRT and embedded plain text are supported, not PGS burn-in or ASS styling.
+Later Bazarr SRT additions/updates are mirrored. See the bot README for exact rules.
+
+`/active` now includes compatibility checking, queued/preparing percentage,
+validation, indexing, and failures. Fully ready requests are hidden. Ready messages
+are sent only after Jellyfin indexes the optimized file; season-pack updates are
+batched. Use `/retry NUMBER` or its button after fixing an error; indexing retries
+reuse an already prepared video. Requesting an already-downloaded movie queues its
+preparation without another search. Cancellation keeps both original data and
+published streaming copies. Queue/results persist in `config/preparation`; back
+this up together with `config/bot`. Back up `worker.env` securely too.
+
+The worker exposes no ports and receives only the Jellyfin key. Input media is
+read-only in both bot and worker. One worker/encode at a time is enforced by a local
+filesystem lock; this design is for one workstation, not distributed workers.
+Optimized copies use extra disk space, even for stream-copied compatible sources.
+Metadata and requested titles are retained indefinitely; index/retention work is
+needed before thousands of jobs, because supersession scans are quadratic.
+
+Validate locally on the target without printing credentials:
+
+```sh
+cd /srv/deploy/arr
+docker compose --profile bot --profile prepare config --quiet
+docker compose --profile bot --profile prepare ps
+```
+
+Confirm a requested SDR title shows **Direct Play**, then test two real SyncPlay
+clients. Synthetic/unit tests do not establish real internet throughput or client
+subtitle compatibility. To disable preparation, deploy with `arr_start=true`,
+`arr_bot_enabled=true`, and `arr_prepare_enabled=false`; the worker stops and the
+bot returns to import notifications. Files and persistent jobs are retained.
 
 ### Apply the PGS subtitle fix
 
@@ -192,6 +282,7 @@ bind to a LAN address instead, but requires appropriate firewall restrictions.
 | Bazarr | 0.10 / 128M | 1 / 1G |
 | FlareSolverr | 0.10 / 256M | 2 / 1G |
 | Bot | 0.05 / 32M | 0.5 / 256M |
+| Preparation (optional) | 1 NVIDIA GPU | 4 / 2G |
 
 Memory reservations are soft targets, not preallocated RAM. CPU reservations are
 Swarm scheduler hints, not guaranteed CPU shares under standalone Compose.
@@ -201,7 +292,7 @@ Bazarr's in-app auto-update is disabled in favor of container image updates.
 ## Checks and limitations
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s playbooks/arr -p 'test_configure.py'
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s playbooks/arr -p 'test_*.py'
 ```
 
 Validate with `docker compose --profile bot config --quiet` without printing
@@ -219,6 +310,6 @@ Confirm a real title through Telegram, then verify Transmission, ARR import,
 Jellyfin visibility, and subtitle availability. No sample movie/series is downloaded
 by the configuration playbook.
 
-Back up `config/`, `.env`, and `bot.env` securely. Stop only the bot with
+Back up `config/`, `.env`, `bot.env`, and `worker.env` securely. Stop only the bot with
 `docker compose --profile bot stop bot`. `docker compose --profile bot down`
 removes containers but leaves bind-mounted configuration and media intact.
