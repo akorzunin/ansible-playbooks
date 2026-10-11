@@ -61,3 +61,69 @@ groups:
                     params: [1]
                   operator:
                     type: and
+
+  - orgId: 1
+    name: Disk space
+    folder: Monitoring
+    interval: 1m
+    rules:
+      - uid: monitoring-disk-space-low
+        title: Disk space below 20% free
+        condition: B
+        for: 5m
+        noDataState: NoData
+        execErrState: Error
+        isPaused: false
+        labels:
+          severity: warning
+          managed_by: ansible
+        annotations:
+          summary: 'Node {{ $labels.node }} filesystem {{ $labels.mountpoint }} is low on disk space'
+          description: >-
+            Filesystem {{ $labels.device }} has {{ printf "%.1f" $values.A.Value }}%
+            available space, below 20% for five minutes. Available space excludes
+            reserved filesystem blocks. Free space or move data to another disk.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: monitoring-prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: monitoring-prometheus
+              expr: >-
+                (100 * node_filesystem_avail_bytes{job="nodeexporter", fstype!~"tmpfs|overlay|squashfs"}
+                / node_filesystem_size_bytes{job="nodeexporter", fstype!~"tmpfs|overlay|squashfs"})
+                and (node_filesystem_readonly{job="nodeexporter"} == 0)
+                and (node_filesystem_size_bytes{job="nodeexporter"} > 0)
+              instant: true
+              range: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: A
+              conditions:
+                - type: query
+                  query:
+                    params: [B]
+                  reducer:
+                    type: last
+                    params: []
+                  evaluator:
+                    type: lt
+                    params: [20]
+                  operator:
+                    type: and

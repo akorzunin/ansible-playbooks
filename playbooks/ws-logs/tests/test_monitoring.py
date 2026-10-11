@@ -217,6 +217,38 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(condition["model"]["type"], "threshold")
         self.assertEqual(condition["model"]["conditions"][0]["evaluator"], {"type": "lt", "params": [1]})
 
+    def test_disk_alert_covers_writable_filesystems_on_all_nodes(self):
+        rules = yaml.safe_load(
+            (STACK / "grafana/provisioning/alerting/rules.yml").read_text()
+        )
+        group = next(group for group in rules["groups"] if group["name"] == "Disk space")
+        rule = group["rules"][0]
+        query, condition = rule["data"]
+        self.assertEqual(group["interval"], "1m")
+        self.assertEqual(rule["uid"], "monitoring-disk-space-low")
+        self.assertEqual(rule["for"], "5m")
+        self.assertEqual(rule["condition"], condition["refId"])
+        self.assertEqual(rule["noDataState"], "NoData")
+        self.assertEqual(rule["execErrState"], "Error")
+        self.assertEqual(query["datasourceUid"], "monitoring-prometheus")
+        expr = query["model"]["expr"]
+        self.assertIn('100 * node_filesystem_avail_bytes{job="nodeexporter"', expr)
+        self.assertIn('/ node_filesystem_size_bytes{job="nodeexporter"', expr)
+        self.assertIn('fstype!~"tmpfs|overlay|squashfs"', expr)
+        self.assertIn('(node_filesystem_readonly{job="nodeexporter"} == 0)', expr)
+        self.assertIn('(node_filesystem_size_bytes{job="nodeexporter"} > 0)', expr)
+        self.assertNotIn("availability_alert", expr)
+        self.assertNotIn("$node", expr)
+        self.assertTrue(query["model"]["instant"])
+        self.assertFalse(query["model"]["range"])
+        self.assertEqual(condition["model"]["type"], "threshold")
+        self.assertEqual(
+            condition["model"]["conditions"][0]["evaluator"],
+            {"type": "lt", "params": [20]},
+        )
+        self.assertIn("$labels.node", rule["annotations"]["summary"])
+        self.assertIn("$labels.mountpoint", rule["annotations"]["summary"])
+
     def test_telegram_template_preserves_numeric_ids_and_literal_dollars(self):
         template = self.environment.from_string(
             (STACK / "grafana/provisioning/alerting/contact-points.yml.j2").read_text()

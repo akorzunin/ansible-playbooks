@@ -117,7 +117,7 @@ second Grafana against an empty directory and mistake it for a migration.
 
 ## Alerts
 
-One multidimensional rule checks:
+The node availability rule checks:
 
 ```promql
 up{job="nodeexporter", availability_alert="true"}
@@ -129,10 +129,18 @@ reachability check, not proof the machine is powered off. cAdvisor failure alone
 does not page you. Missing all query data and evaluation failures generate Grafana
 NoData/Error alerts, routed to Telegram too.
 
-After deployment, test **Monitoring Telegram** in Grafana's contact-point UI and
-check both targets in Prometheus. No test notification is sent by Ansible. Add
-richer alerts later in `grafana/provisioning/alerting/rules.yml`; alerts must preserve
-node labels and cannot use dashboard variables.
+The **Disk space below 20% free** rule checks all monitored nodes, independently
+of availability-alert opt-in. Each writable, non-empty filesystem with less than
+20% available space for five minutes generates an alert identifying its node,
+mountpoint, and device. It uses `node_filesystem_avail_bytes` (excluding reserved
+blocks) divided by `node_filesystem_size_bytes`, excludes `tmpfs`, `overlay`, and
+`squashfs`, and evaluates every minute. Read-only filesystems are excluded.
+
+Both rules route through **Monitoring Telegram**, including NoData/Error alerts.
+After deployment, test that contact point in Grafana and check the Prometheus
+targets. No test notification is sent by Ansible. Alerts in
+`grafana/provisioning/alerting/rules.yml` must preserve node labels and cannot use
+dashboard variables.
 
 ## Adding, disabling, and retiring nodes
 
