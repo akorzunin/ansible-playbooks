@@ -200,21 +200,22 @@ sudo systemctl restart sing-box
 
 Workstation files live in root-only `/srv/deploy/sing-box-configs/`. The static Caddy
 container publishes only `192.168.1.132:18085`, not all host interfaces. Do **not**
-forward this port through the router. Pi → workstation HTTP assumes a trusted LAN;
-use TLS on that hop if the LAN is untrusted. Public clients must use HTTPS.
+forward this port through the router. The workstation's edge Caddy proxies to this
+local HTTP listener. Public clients must use HTTPS.
 
 Only exact token/platform paths and GET/HEAD are served. Missing/wrong tokens,
 directory requests and other files return 404. Responses use `Cache-Control: no-store`.
-Hosting request logs are disabled; Pi structured logs redact request URIs and
+Hosting request logs are disabled; edge Caddy structured logs redact request URIs and
 headers to avoid leaking enrollment URLs during reverse-proxy errors.
 Do not enable unfiltered access/debug logging for this endpoint.
 
-The deployment uses `remote_workstation` and `remote_pi` inventory aliases. Pi
-Caddyfile changes are staged and validated before activation, with rollback on
-reload failure. Updates preserve its file bind mount; a pre-existing stale mount
-is detected and repaired by recreating the router container (brief HTTPS outage).
-The route and log redaction are also in `playbooks/pi-caddy/Caddyfile` so a later
-full Pi Caddy deployment retains them.
+The deployment uses the `remote_workstation` inventory alias for both hosting and
+edge Caddy (`/srv/deploy/caddy`). Caddyfile changes are staged and validated before
+activation, with rollback on reload failure. Updates preserve its file bind mount;
+a pre-existing stale mount is detected and repaired by recreating the router
+container (brief HTTPS outage). The route and log redaction are also in
+`playbooks/pi-caddy/Caddyfile` (legacy directory name) so a later full edge Caddy
+deployment retains them. See `playbooks/pi-caddy/README.md` for the router cutover.
 
 To rotate a leaked platform URL, use `ansible-vault edit` to replace its token in
 `sing_box_secrets.tokens` with 64 random lowercase hex characters and republish.

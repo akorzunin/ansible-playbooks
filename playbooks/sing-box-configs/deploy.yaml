@@ -88,11 +88,11 @@
       retries: 10
       delay: 2
 
-- name: Add HTTPS routing on the Pi
-  hosts: remote_pi
+- name: Add HTTPS routing on the workstation
+  hosts: remote_workstation
   become: false
   vars:
-    router_dir: /home/akorz/deploy/pi-caddy
+    router_dir: /srv/deploy/caddy
     router_path: "{{ router_dir }}/Caddyfile"
   tasks:
     - name: Stage existing live router configuration

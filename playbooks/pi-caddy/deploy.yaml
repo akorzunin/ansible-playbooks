@@ -1,11 +1,19 @@
-- name: Deploy ws Caddy
-  hosts: all
+- name: Deploy workstation Caddy
+  hosts: remote_workstation
   become: false
   vars:
-    local_path: "{{ lookup('env', 'PWD') }}/playbooks/pi-caddy/"
-    remote_install_path: ~/deploy/pi-caddy/
+    local_path: "{{ playbook_dir }}"
+    remote_install_path: /srv/deploy/caddy
 
   tasks:
+    - name: Create the service directory
+      become: true
+      ansible.builtin.file:
+        path: "{{ remote_install_path }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        mode: "0755"
+
     - name: Copy files to service directory
       ansible.builtin.copy:
         src: "{{ local_path }}/{{ item }}"
@@ -16,9 +24,15 @@
         - Caddyfile
         - compose.yaml
 
+    - name: Validate Caddy configuration before activation
+      ansible.builtin.command:
+        cmd: docker compose run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+        chdir: "{{ remote_install_path }}"
+      changed_when: false
+
+    # Atomic file copies can replace the bind-mounted inode; recreate to load them.
     - name: Deploy reverse_proxy
       ansible.builtin.command:
         cmd: docker compose up -d --force-recreate
         chdir: "{{ remote_install_path }}"
-      register: out
-      changed_when: out.rc != 0
+      changed_when: true
