@@ -205,10 +205,11 @@ def configure_bazarr():
             "settings-general-serie_default_enabled": "true", "settings-general-movie_default_enabled": "true",
             "settings-general-serie_default_profile": str(profile["profileId"]),
             "settings-general-movie_default_profile": str(profile["profileId"]),
-            "settings-general-use_embedded_subs": "true", "settings-general-auto_update": "false",
+            "settings-general-use_embedded_subs": "true", "settings-general-ignore_pgs_subs": "true",
+            "settings-general-auto_update": "false",
             "settings-general-enabled_providers": sorted((set(config["general"]["enabled_providers"]) - {"podnapisi"}) | {"yifysubtitles", "supersubtitles"})}
     api("bazarr", "system/settings", data, form=True)
-    print("Bazarr: linked to ARR; English default, Russian manual; YIFY Subtitles/SuperSubtitles enabled", flush=True)
+    print("Bazarr: linked to ARR; English default, Russian manual; embedded PGS ignored; YIFY Subtitles/SuperSubtitles enabled", flush=True)
 
 
 if __name__ == "__main__":

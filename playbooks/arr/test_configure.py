@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 import tempfile
@@ -83,6 +84,25 @@ class ConfigureTests(unittest.TestCase):
         mocked_api.assert_any_call("prowlarr", "command", {"name": "ApplicationIndexerSync"})
         # Templates are copied rather than mutated across reruns.
         self.assertNotIn("value", schemas[0]["fields"][0])
+
+    def test_bazarr_ignores_pgs_but_respects_embedded_text_on_reruns(self):
+        for existing in (False, True):
+            with self.subTest(existing_profile=existing):
+                profiles = [{"profileId": 7, "name": "ARR English"}] if existing else []
+                config = "auth:\n  apikey: test-key\ngeneral:\n  enabled_providers: []\n"
+                with patch("configure.Path.read_text", return_value=config), \
+                        patch.dict(configure.KEYS, {"radarr": "rk", "sonarr": "sk"}), \
+                        patch("configure.api", side_effect=[profiles, [{"code2": "en", "enabled": True}], None]) as api:
+                    configure.configure_bazarr()
+                args = api.call_args.args
+                self.assertEqual(args[:2], ("bazarr", "system/settings"))
+                self.assertEqual(api.call_args.kwargs, {"form": True})
+                settings = args[2]
+                self.assertEqual(settings["settings-general-ignore_pgs_subs"], "true")
+                self.assertEqual(settings["settings-general-use_embedded_subs"], "true")
+                self.assertEqual(settings["settings-general-serie_default_profile"], "7" if existing else "1")
+                self.assertEqual(settings["settings-general-movie_default_profile"], "7" if existing else "1")
+                self.assertEqual(len(json.loads(settings["languages-profiles"])), 1)
 
     def test_api_error_does_not_include_validation_secrets(self):
         from io import BytesIO

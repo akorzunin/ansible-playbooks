@@ -44,7 +44,10 @@ restrict access. Group chats are always ignored.
 - **Original audio preferred:** +100 custom-format score when ARR identifies the
   original language. This is a preference, not a hard requirement; ARR's quality
   ordering takes precedence and metadata/release-name parsing is not infallible.
-- **English subtitles:** Bazarr default profile, respecting embedded subtitles.
+- **English subtitles:** Bazarr default profile, respecting embedded text subtitles
+  but ignoring embedded PGS (image-based) tracks when checking for missing subtitles.
+  This lets Bazarr fetch external text alternatives for Jellyfin clients that cannot
+  display PGS directly; original video/subtitle tracks are not modified or OCR-converted.
   YIFY Subtitles and SuperSubtitles are enabled without extra accounts. Availability
   and matching are provider-dependent; subtitles are not guaranteed for every file.
 - **Russian subtitles:** enabled for manual searches, not required by the default
@@ -152,6 +155,17 @@ Deployment directory: `/srv/deploy/arr`.
   Read that summary even if Ansible succeeds, especially for Pirate Bay's API.
   Configuration never requests media. Existing torrents are not replaced.
 - Use one Telegram polling process per token and remove any existing webhook first.
+
+### Apply the PGS subtitle fix
+
+Rerun `playbooks/arr/configure.yaml` with the command above to apply the setting
+on the running stack (this also reapplies the other managed ARR preferences).
+For existing media, use Bazarr's **System → Tasks** to search for wanted subtitles
+once missing-subtitle recalculation finishes. If an existing title still looks
+complete, rescan its subtitles and verify it has the `ARR English` language profile;
+default profiles do not retroactively assign a profile to existing titles.
+In Jellyfin, refresh the title's metadata if necessary and select the external
+text subtitle track rather than PGS. No media redownload is needed.
 
 ## Admin access
 
