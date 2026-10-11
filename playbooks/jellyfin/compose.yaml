@@ -7,6 +7,12 @@ services:
     volumes:
       - ./jellyfin/config:/config
       - ./jellyfin/cache:/cache
+      # HLS segments must not fill the system disk, even when video is copied.
+      - type: bind
+        source: /mnt/storage/jellyfin_transcodes
+        target: /config/transcodes
+        bind:
+          create_host_path: false
       - ./jellyfin/media:/media
       - ./jellyfin/media2:/media2:ro
       - /mnt/storage/jellyfin_media/:/storage:rw

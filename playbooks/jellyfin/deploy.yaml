@@ -5,6 +5,20 @@
     deploy_compose_service_name: jellyfin
 
   tasks:
+    - name: Require the media disk to be mounted before deploying
+      ansible.builtin.command:
+        argv:
+          - mountpoint
+          - -q
+          - /mnt/storage
+      changed_when: false
+
+    - name: Create transcode directory on the media disk
+      ansible.builtin.file:
+        path: /mnt/storage/jellyfin_transcodes
+        state: directory
+        mode: "0755"
+
     - name: Docker compose up {{ deploy_compose_service_name }}
       ansible.builtin.import_role:
         name: deploy_compose
