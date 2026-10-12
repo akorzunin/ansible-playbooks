@@ -1,0 +1,101 @@
+{
+  "uid": "monitoring-nvidia",
+  "title": "NVIDIA GPUs",
+  "description": "NVIDIA GPU metrics from nvidia_gpu_exporter for inventory-managed GPU hosts. Unsupported hardware metrics remain No data rather than being shown as zero.",
+  "tags": ["monitoring", "ansible", "nvidia"],
+  "schemaVersion": 39,
+  "version": 1,
+  "graphTooltip": 1,
+  "editable": false,
+  "timezone": "browser",
+  "refresh": "30s",
+  "time": {"from": "now-6h", "to": "now"},
+  "templating": {
+    "list": [{
+      "name": "node",
+      "label": "Node",
+      "type": "query",
+      "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
+      "query": {"query": "label_values(up{job=\"nvidia-gpu-exporter\"}, node)", "refId": "StandardVariableQuery"},
+      "definition": "label_values(up{job=\"nvidia-gpu-exporter\"}, node)",
+      "refresh": 1,
+      "sort": 1,
+      "multi": true,
+      "includeAll": true,
+      "allValue": ".*",
+      "current": {"text": "All", "value": "$__all"},
+      "options": []
+    }]
+  },
+  "panels": [
+    {
+      "id": 1, "title": "GPU exporter availability", "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
+      "gridPos": {"h": 5, "w": 24, "x": 0, "y": 0},
+      "targets": [{"refId": "A", "expr": "up{job=\"nvidia-gpu-exporter\", node=~\"$node\"}", "instant": true, "range": false, "legendFormat": "{{node}}"}],
+      "fieldConfig": {"defaults": {
+        "min": 0, "max": 1,
+        "mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}],
+        "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
+      }, "overrides": []},
+      "options": {"colorMode": "background", "graphMode": "none", "textMode": "value_and_name", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "id": 2, "title": "GPU utilization", "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+      "targets": [{"refId": "A", "expr": "nvidia_smi_utilization_gpu_ratio{job=\"nvidia-gpu-exporter\", node=~\"$node\"}", "legendFormat": "{{node}} / {{uuid}}"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 3, "title": "VRAM usage", "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+      "targets": [
+        {"refId": "A", "expr": "nvidia_smi_memory_used_bytes{job=\"nvidia-gpu-exporter\", node=~\"$node\"}", "legendFormat": "{{node}} / {{uuid}} used"},
+        {"refId": "B", "expr": "nvidia_smi_memory_total_bytes{job=\"nvidia-gpu-exporter\", node=~\"$node\"}", "legendFormat": "{{node}} / {{uuid}} total"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 4, "title": "GPU temperature", "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 13},
+      "targets": [{"refId": "A", "expr": "nvidia_smi_temperature_gpu{job=\"nvidia-gpu-exporter\", node=~\"$node\"}", "legendFormat": "{{node}} / {{uuid}}"}],
+      "fieldConfig": {"defaults": {"unit": "celsius", "min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 5, "title": "GPU power", "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 13},
+      "targets": [
+        {"refId": "A", "expr": "nvidia_smi_power_draw_watts{job=\"nvidia-gpu-exporter\", node=~\"$node\"}", "legendFormat": "{{node}} / {{uuid}} draw"},
+        {"refId": "B", "expr": "nvidia_smi_power_limit_watts{job=\"nvidia-gpu-exporter\", node=~\"$node\"}", "legendFormat": "{{node}} / {{uuid}} limit"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "watt", "min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 6, "title": "GPU fan speed", "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 21},
+      "targets": [{"refId": "A", "expr": "nvidia_smi_fan_speed_ratio{job=\"nvidia-gpu-exporter\", node=~\"$node\"}", "legendFormat": "{{node}} / {{uuid}}"}],
+      "fieldConfig": {"defaults": {"unit": "percentunit", "min": 0, "max": 1}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    },
+    {
+      "id": 7, "title": "GPU clocks", "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 21},
+      "targets": [
+        {"refId": "A", "expr": "nvidia_smi_clocks_current_graphics_clock_hz{job=\"nvidia-gpu-exporter\", node=~\"$node\"}", "legendFormat": "{{node}} / {{uuid}} graphics"},
+        {"refId": "B", "expr": "nvidia_smi_clocks_current_memory_clock_hz{job=\"nvidia-gpu-exporter\", node=~\"$node\"}", "legendFormat": "{{node}} / {{uuid}} memory"}
+      ],
+      "fieldConfig": {"defaults": {"unit": "hertz", "min": 0}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
+    }
+  ]
+}

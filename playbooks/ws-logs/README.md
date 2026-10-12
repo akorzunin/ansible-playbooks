@@ -1,8 +1,8 @@
 # Inventory-managed monitoring
 
 Ansible + Compose remain the deployment mechanism. Git owns Prometheus targets,
-one shared node/container dashboard, data sources, the node-availability rule, and Telegram
-notification routing. Grafana's database still stores users and other runtime state.
+shared node/container and NVIDIA GPU dashboards, data sources, the node-availability
+rule, and Telegram notification routing. Grafana's database still stores users and other runtime state.
 
 ## Inventory
 
@@ -86,8 +86,8 @@ The migration:
    rules** except the new managed UIDs. Refuses deletion if a legacy dashboard is
    owned by another provisioning source. It does not delete users, folders, old
    data sources, old contact points, or Prometheus/Loki-managed rules.
-4. Installs the shared **Monitoring / Nodes & Containers** dashboard, data
-   sources, availability rule, and Telegram contact point.
+4. Installs the shared **Monitoring / Nodes & Containers** and **Monitoring /
+   NVIDIA GPUs** dashboards, data sources, availability rule, and Telegram contact point.
 5. Validates Prometheus configuration with `promtool`, reconciles Compose changes,
    restarts services to reload changed configuration, and waits for Grafana readiness.
    Unchanged containers are not force-recreated: Loki currently has container-local
@@ -185,6 +185,19 @@ reserved for root. Container charts are full-width with right-side table legends
 sorted by latest non-null value, highest first. Click the value-column header to
 change sorting; legend values reflect the end of the selected time range, not the
 hovered timestamp.
+
+The **Monitoring / NVIDIA GPUs** dashboard lives in `grafana/dashboards/nvidia.json`
+with UID `monitoring-nvidia`. Its node selector discovers only GPU exporter targets
+(currently `workstation`). It shows exporter availability, GPU utilization, used/total
+VRAM, temperature, power draw/limit, fan speed, and graphics/memory clocks. Legends
+include node and GPU UUID so multiple GPUs stay distinct. Ratio metrics use 0–1
+percentage units; memory and clocks are already exported in bytes and Hz. Unsupported
+hardware metrics remain **No data**, not zero.
+
+To restore the GPU dashboard after the IaC migration, run the ordinary server
+`deploy.yml` command above, **without** `monitoring_replace_ui=true`. No exporter
+or Compose changes are required. Then open **Monitoring / NVIDIA GPUs** and check
+`up{job="nvidia-gpu-exporter", node="workstation"}` in Prometheus if panels are empty.
 
 Provisioned dashboards are read-only; use a temporary UI copy for experiments and
 export changes back to Git. Removed Git dashboard files are deleted from the managed

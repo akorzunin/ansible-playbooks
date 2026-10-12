@@ -1,3 +1,2 @@
-- more alrets: on disk usage for ex
 - autocleanup for arr bot
 - prioritize 1 ep if downloading series

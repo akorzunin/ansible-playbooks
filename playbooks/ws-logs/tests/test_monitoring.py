@@ -105,6 +105,14 @@ class MonitoringTests(unittest.TestCase):
         )
         self.assertEqual(len(self.prometheus()["scrape_configs"]), 4)
 
+    def test_gpu_target_has_stable_workstation_label(self):
+        self.assertEqual(self.targets("nvidia-gpu-exporter"), {
+            "workstation": {
+                "targets": ["nvidia-gpu-exporter:9835"],
+                "labels": {"node": "workstation"},
+            },
+        })
+
     def test_no_empty_gpu_job_when_gpu_node_is_disabled(self):
         self.hostvars["local_workstation"]["monitoring_enabled"] = False
         jobs = [job["job_name"] for job in self.prometheus()["scrape_configs"]]
@@ -112,7 +120,7 @@ class MonitoringTests(unittest.TestCase):
 
     def test_dashboards_use_stable_datasource_and_node_selector(self):
         dashboards = list((STACK / "grafana/dashboards").glob("*.json"))
-        self.assertEqual(len(dashboards), 1)
+        self.assertEqual(len(dashboards), 2)
         uids = set()
         for path in dashboards:
             dashboard = json.loads(path.read_text())
@@ -126,7 +134,42 @@ class MonitoringTests(unittest.TestCase):
                     self.assertIn('node=~"$node"', query["expr"])
                     self.assertNotIn("nodeexporter-", query["expr"])
                     self.assertNotIn("cadvisor-", query["expr"])
-        self.assertEqual(uids, {"monitoring-nodes"})
+        self.assertEqual(uids, {"monitoring-nodes", "monitoring-nvidia"})
+
+    def test_nvidia_dashboard_matches_exporter_metrics_and_units(self):
+        dashboard = json.loads((STACK / "grafana/dashboards/nvidia.json").read_text())
+        self.assertEqual(dashboard["title"], "NVIDIA GPUs")
+        self.assertEqual(dashboard["graphTooltip"], 1)
+        variable, = dashboard["templating"]["list"]
+        self.assertEqual(variable["query"]["query"], 'label_values(up{job="nvidia-gpu-exporter"}, node)')
+        self.assertEqual(variable["definition"], variable["query"]["query"])
+        self.assertTrue(variable["multi"])
+        self.assertTrue(variable["includeAll"])
+        expected = {
+            "GPU exporter availability": (["up"], None),
+            "GPU utilization": (["nvidia_smi_utilization_gpu_ratio"], "percentunit"),
+            "VRAM usage": (["nvidia_smi_memory_used_bytes", "nvidia_smi_memory_total_bytes"], "bytes"),
+            "GPU temperature": (["nvidia_smi_temperature_gpu"], "celsius"),
+            "GPU power": (["nvidia_smi_power_draw_watts", "nvidia_smi_power_limit_watts"], "watt"),
+            "GPU fan speed": (["nvidia_smi_fan_speed_ratio"], "percentunit"),
+            "GPU clocks": (["nvidia_smi_clocks_current_graphics_clock_hz", "nvidia_smi_clocks_current_memory_clock_hz"], "hertz"),
+        }
+        self.assertEqual({panel["title"] for panel in dashboard["panels"]}, set(expected))
+        for panel in dashboard["panels"]:
+            metrics, unit = expected[panel["title"]]
+            self.assertEqual([target["expr"] for target in panel["targets"]], [
+                f'{metric}{{job="nvidia-gpu-exporter", node=~"$node"}}' for metric in metrics
+            ])
+            if unit is None:
+                self.assertTrue(panel["targets"][0]["instant"])
+                self.assertFalse(panel["targets"][0]["range"])
+            else:
+                self.assertEqual(panel["fieldConfig"]["defaults"]["unit"], unit)
+                for target in panel["targets"]:
+                    self.assertIn("{{node}}", target["legendFormat"])
+                    self.assertIn("{{uuid}}", target["legendFormat"])
+            if unit == "percentunit":
+                self.assertEqual(panel["fieldConfig"]["defaults"]["max"], 1)
 
     def test_combined_dashboard_contains_node_and_container_metrics(self):
         dashboard = json.loads((STACK / "grafana/dashboards/nodes.json").read_text())
@@ -182,25 +225,26 @@ class MonitoringTests(unittest.TestCase):
             self.assertEqual(panel["targets"][0]["legendFormat"], "{{node}} / {{name}}")
 
     def test_dashboard_panels_have_unique_ids_and_do_not_overlap(self):
-        dashboard = json.loads((STACK / "grafana/dashboards/nodes.json").read_text())
-        panels = dashboard["panels"]
-        self.assertEqual(len({panel["id"] for panel in panels}), len(panels))
-        for index, panel in enumerate(panels):
-            pos = panel["gridPos"]
-            self.assertGreater(pos["w"], 0)
-            self.assertGreater(pos["h"], 0)
-            self.assertGreaterEqual(pos["x"], 0)
-            self.assertGreaterEqual(pos["y"], 0)
-            self.assertLessEqual(pos["x"] + pos["w"], 24)
-            for other in panels[index + 1:]:
-                other_pos = other["gridPos"]
-                self.assertTrue(
-                    pos["x"] + pos["w"] <= other_pos["x"]
-                    or other_pos["x"] + other_pos["w"] <= pos["x"]
-                    or pos["y"] + pos["h"] <= other_pos["y"]
-                    or other_pos["y"] + other_pos["h"] <= pos["y"],
-                    f'{panel["title"]} overlaps {other["title"]}',
-                )
+        for path in (STACK / "grafana/dashboards").glob("*.json"):
+            with self.subTest(dashboard=path.name):
+                panels = json.loads(path.read_text())["panels"]
+                self.assertEqual(len({panel["id"] for panel in panels}), len(panels))
+                for index, panel in enumerate(panels):
+                    pos = panel["gridPos"]
+                    self.assertGreater(pos["w"], 0)
+                    self.assertGreater(pos["h"], 0)
+                    self.assertGreaterEqual(pos["x"], 0)
+                    self.assertGreaterEqual(pos["y"], 0)
+                    self.assertLessEqual(pos["x"] + pos["w"], 24)
+                    for other in panels[index + 1:]:
+                        other_pos = other["gridPos"]
+                        self.assertTrue(
+                            pos["x"] + pos["w"] <= other_pos["x"]
+                            or other_pos["x"] + other_pos["w"] <= pos["x"]
+                            or pos["y"] + pos["h"] <= other_pos["y"]
+                            or other_pos["y"] + other_pos["h"] <= pos["y"],
+                            f'{panel["title"]} overlaps {other["title"]}',
+                        )
 
     def test_alert_is_multidimensional_and_independent_of_dashboard_variables(self):
         rules = yaml.safe_load(
@@ -314,6 +358,14 @@ class MonitoringTests(unittest.TestCase):
         self.assertIn("not ansible_check_mode", includes[1]["when"])
         cleanup = yaml.safe_load((STACK / "replace-ui.yml").read_text())
         self.assertIn("monitoring_archive_result.rc == 0", cleanup[0]["ansible.builtin.assert"]["that"])
+        dashboard_tasks = [
+            task for task in cleanup[-1]["block"]
+            if task["name"] in ("Inspect legacy dashboards before deleting anything", "Delete legacy dashboards")
+        ]
+        self.assertEqual(len(dashboard_tasks), 2)
+        for task in dashboard_tasks:
+            for path in (STACK / "grafana/dashboards").glob("*.json"):
+                self.assertIn(json.loads(path.read_text())["uid"], task["when"])
 
 
 if __name__ == "__main__":
