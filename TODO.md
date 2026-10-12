@@ -1,2 +1,5 @@
 - autocleanup for arr bot
 - prioritize 1 ep if downloading series
+- arr-bot: be able to rm titles
+- check why encoding doesnt use GPU
+- organize jf libs
