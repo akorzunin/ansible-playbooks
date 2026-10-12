@@ -11,6 +11,14 @@ class PreparationDeploymentTests(unittest.TestCase):
     def setUp(self):
         self.services = yaml.safe_load((HERE / "compose.yaml").read_text())["services"]
 
+    def test_bot_and_worker_pin_the_same_commit(self):
+        repository = "ghcr.io/akorzunin/arr-telegram-bot:"
+        bot = self.services["bot"]["image"]
+        self.assertTrue(bot.startswith(repository))
+        version = bot.removeprefix(repository)
+        self.assertRegex(version, r"^[0-9a-f]{40}$")
+        self.assertEqual(self.services["prepare"]["image"], repository + "worker-" + version)
+
     def test_worker_is_opt_in_and_gpu_enabled(self):
         worker = self.services["prepare"]
         self.assertEqual(worker["profiles"], ["prepare"])

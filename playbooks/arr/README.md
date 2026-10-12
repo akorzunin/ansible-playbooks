@@ -134,10 +134,14 @@ ansible-playbook playbooks/arr/configure.yaml -i hosts -l remote_workstation \
 Without `-e arr_start=true`, the deployment playbook only prepares files/directories.
 The bot is built and published to GHCR by its separate source repository, but runs
 as a service in this ARR Compose stack. `configure.yaml` starts the bot after
-writing its API keys and profile IDs to `bot.env`. For subsequent image updates,
-run `deploy.yaml` with `-e arr_start=true -e arr_bot_enabled=true`, or rerun
-`configure.yaml`. The existing `config/bot/offset` is retained; no second Telegram
-poller should run with the same token. Keep `bot.env` and `config/bot` across
+writing its API keys and profile IDs to `bot.env`. Bot and worker images in
+`compose.yaml` are pinned to the same CI-published commit (`:SHA` and `:worker-SHA`),
+not moving tags. To update, wait for the bot repository's image workflow to succeed,
+then replace both SHA tags in `compose.yaml`. Run `deploy.yaml` with
+`-e arr_start=true -e arr_bot_enabled=true` (and `-e arr_prepare_enabled=true` when
+using preparation) to copy the pins and start them. Rerunning `configure.yaml`
+alone uses the already-deployed Compose file. The existing `config/bot/offset` is
+retained; no second Telegram poller should run with the same token. Keep `bot.env` and `config/bot` across
 upgrades. GHCR images from private repositories may require a target-host
 `docker login ghcr.io` with read:packages access before deployment.
 
@@ -162,8 +166,8 @@ Deployment directory: `/srv/deploy/arr`.
 ## Optional automatic streaming preparation
 
 This is **implemented but not enabled by default**. Publish both updated images
-from `../arr-telegram-bot/` first (`:latest` bot, `:worker` GPU worker). Do not start a
-second Telegram poller. The worker has GPU access, not the Telegram polling process.
+from `../arr-telegram-bot/` first, matching the pinned `:SHA` bot and `:worker-SHA`
+GPU worker tags in `compose.yaml`. Do not start a second Telegram poller. The worker has GPU access, not the Telegram polling process.
 
 1. Confirm **the target workstation's Docker daemon** has the `nvidia` runtime:
    `docker info --format '{{json .Runtimes}}'`. The deployment refuses to enable
@@ -209,7 +213,7 @@ second Telegram poller. The worker has GPU access, not the Telegram polling proc
 The bot inspects only its saved requests (including existing downloaded requested
 files and later upgrades), not the entire library. Compatible SDR H.264 ≤1080p
 with acceptable average/rolling bitrate is stream-copied; audio/container changes
-avoid video encoding. Other SDR video uses NVENC at ~12 Mbps (16 Mbps maxrate).
+avoid video encoding. Other SDR video uses NVENC at ~12 Mbps (14 Mbps maxrate, 14 Mbit VBV buffer).
 Final outputs undergo full decode and bitrate validation before publication.
 HDR is blocked pending a tested tone-mapping implementation. Optimized files keep
 one default/first audio track, AAC mono/stereo; originals retain all tracks.
@@ -286,7 +290,8 @@ bind to a LAN address instead, but requires appropriate firewall restrictions.
 
 Memory reservations are soft targets, not preallocated RAM. CPU reservations are
 Swarm scheduler hints, not guaranteed CPU shares under standalone Compose.
-Images follow `latest`; pin tested versions/digests before unattended upgrades.
+Bot and worker images are pinned to a CI-published commit. Third-party images
+still follow `latest`; pin tested versions/digests before unattended upgrades.
 Bazarr's in-app auto-update is disabled in favor of container image updates.
 
 ## Checks and limitations
