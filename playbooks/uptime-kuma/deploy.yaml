@@ -23,12 +23,12 @@
       ansible.builtin.command:
         cmd: docker compose pull
         chdir: "{{ project_dir }}"
-      register: out
-      changed_when: out.rc != 0
+      register: kuma_pull
+      changed_when: kuma_pull.rc == 0
 
     - name: Deploy new image
       ansible.builtin.command:
         cmd: docker compose up -d --force-recreate
         chdir: "{{ project_dir }}"
-      register: out
-      changed_when: out.rc != 0
+      register: kuma_start
+      changed_when: kuma_start.rc == 0

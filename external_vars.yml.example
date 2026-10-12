@@ -12,6 +12,7 @@ V2RAYA_ADMIN_PASSWORD: example
 V2RAYA_NODE_URL: "vless://uuid@example.com:443?type=tcp&security=reality&pbk=public-key&sni=example.com&fp=chrome&sid=short-id#node"
 ARR_TELEGRAM_BOT_TOKEN: ""
 # Store real values as !vault strings in external_vars.yml.
+# Uptime Kuma reuses AUTH_PASS and these monitoring Telegram credentials.
 MONITORING_TELEGRAM_BOT_TOKEN: ""
 MONITORING_TELEGRAM_CHAT_ID: "" # Numeric chat ID; groups usually have negative IDs.
 # Existing Grafana org-1 administrator, only needed for one-time UI cleanup.

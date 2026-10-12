@@ -1,0 +1,48 @@
+# Exported read-only from the workstation on 2026-10-12.
+# Names are reconciliation keys: renaming creates a new object; nothing is deleted.
+kuma_username: admin
+
+kuma_settings:
+  serverTimezone: Europe/Moscow
+  checkUpdate: true
+  searchEngineIndex: false
+  entryPage: dashboard
+  nscd: true
+  keepDataPeriodDays: 180
+  tlsExpiryNotifyDays: [7, 14, 21]
+  trustProxy: false
+
+kuma_notifications:
+  - name: "Tg Uptime Bot 👁️👄👁️"
+    type: telegram
+    isDefault: false
+    telegramBotToken: "{{ MONITORING_TELEGRAM_BOT_TOKEN }}"
+    telegramChatID: "{{ MONITORING_TELEGRAM_CHAT_ID | string }}"
+    telegramSendSilently: true
+
+kuma_monitors:
+  - name: workstation
+    type: http
+    url: https://homepage.akorz.duckdns.org/
+    description: Aboba
+    active: true
+    weight: 2000
+    interval: 600
+    retryInterval: 600
+    resendInterval: 0
+    timeout: 48
+    maxretries: 0
+    method: GET
+    httpBodyEncoding: json
+    ignoreTls: false
+    upsideDown: false
+    expiryNotification: false
+    maxredirects: 10
+    accepted_statuscodes: ["200-299"]
+    cacheBust: false
+    authMethod: null
+    parent: null
+    proxyId: null
+    conditions: []
+    notifications:
+      - "Tg Uptime Bot 👁️👄👁️"

@@ -1,0 +1,43 @@
+---
+- name: Reconcile Uptime Kuma configuration
+  hosts: local_workstation,remote_workstation
+  become: false
+  vars_files:
+    - "{{ playbook_dir }}/../../external_vars.yml"
+    - "{{ playbook_dir }}/config.yml"
+
+  tasks:
+    - name: Require existing account and Telegram credentials
+      ansible.builtin.assert:
+        that:
+          - AUTH_PASS | default('') | length > 0
+          - MONITORING_TELEGRAM_BOT_TOKEN | default('') | length > 0
+          - MONITORING_TELEGRAM_CHAT_ID | default('') | string is match('^-?[0-9]+$')
+        fail_msg: Set AUTH_PASS and MONITORING_TELEGRAM credentials in external_vars.yml (Vault).
+      no_log: true
+
+    - name: Apply configuration through the pinned container's Socket.IO API
+      ansible.builtin.command:
+        argv:
+          - docker
+          - exec
+          - -i
+          - -w
+          - /app
+          - uptime-kuma
+          - node
+          - -e
+          - "{{ lookup('ansible.builtin.file', playbook_dir + '/configure.cjs') }}"
+        stdin: >-
+          {{ {'username': kuma_username, 'password': AUTH_PASS,
+              'settings': kuma_settings, 'notifications': kuma_notifications,
+              'monitors': kuma_monitors, 'check': ansible_check_mode} | to_json }}
+      register: kuma_configuration
+      changed_when: (kuma_configuration.stdout | from_json).changed
+      # Run the API's read-only plan even in Ansible check mode.
+      check_mode: false
+      no_log: true
+
+    - name: Show credential-free reconciliation summary
+      ansible.builtin.debug:
+        msg: "{{ (kuma_configuration.stdout | from_json).actions }}"
