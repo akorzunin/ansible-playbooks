@@ -24,7 +24,17 @@ existing Jellyfin. Prowlarr manages indexers; Bazarr fetches subtitles.
 - `/series Cowboy Bebop`: season **1**, not the whole series.
 - `/series Example S02` or `Example season 2`: request season 2.
 - Plain titles search both movies and series; series default to season 1.
-- Choose a title/year match, then confirm. Invalid/missing seasons are rejected.
+- Choose a title/year match, choose **Original + EN**, **Russian + RU**, or
+  **Original + RU subs**, then confirm. Invalid/missing seasons are rejected.
+- `/language TITLE` (or `/language TITLE S02`): manage downloaded titles. Apply a
+  language profile, fetch extra EN/RU subtitles without changing profiles, or rebuild
+  streaming copies to preserve all source audio tracks. Missing/unverified Russian
+  audio requires a separate replacement-search confirmation; ARR does not download
+  standalone dubbing. Current files stay until ARR imports an accepted upgrade.
+  Audio/subtitle profiles apply to the **whole series**, including automatic upgrades;
+  extra subtitles and explicit replacement searches target the selected season.
+  Bazarr assignments wait for sync and retry durably. Legacy title preferences are
+  not bulk-changed.
 - Only the selected season is monitored for a newly added series. Future seasons
   are not automatically monitored. For an existing series, previously requested
   seasons are preserved; only the requested season is enabled and searched.
@@ -50,8 +60,13 @@ restrict access. Group chats are always ignored.
   display PGS directly; original video/subtitle tracks are not modified or OCR-converted.
   YIFY Subtitles and SuperSubtitles are enabled without extra accounts. Availability
   and matching are provider-dependent; subtitles are not guaranteed for every file.
-- **Russian subtitles:** enabled for manual searches, not required by the default
-  profile and not an automatic fallback replacing English.
+- **Russian audio required (per title):** the separate `ARR 1080p Russian Required`
+  profile scores Russian +10000 and requires at least 10000. Original audio adds
+  +100, preferring dual-audio releases. Parsing is not a track guarantee.
+- **Russian subtitles:** the `ARR Russian` Bazarr profile is selectable per title;
+  English remains the default. Extra subtitle searches preserve existing sidecars.
+  `configure.py` writes both ARR profile IDs and Bazarr connection/profile IDs into
+  private `bot.env`; all language settings must be present together.
 - **Indexers:** Nyaa.si (English-translated anime category), 1337x, RuTracker.org,
   The Pirate Bay. Magnet URLs are preferred when available. Pirate Bay's Prowlarr
   definition uses its JSON API (normally `apibay.org`) to obtain infohashes/magnets;

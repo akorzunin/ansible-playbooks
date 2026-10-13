@@ -90,7 +90,7 @@ class ConfigureTests(unittest.TestCase):
             with self.subTest(existing_profile=existing):
                 profiles = [{"profileId": 7, "name": "ARR English"}] if existing else []
                 config = "auth:\n  apikey: test-key\ngeneral:\n  enabled_providers: []\n"
-                with patch("configure.Path.read_text", return_value=config), \
+                with patch("configure.Path.read_text", return_value=config), patch("configure.set_env") as env, \
                         patch.dict(configure.KEYS, {"radarr": "rk", "sonarr": "sk"}), \
                         patch("configure.api", side_effect=[profiles, [{"code2": "en", "enabled": True}], None]) as api:
                     configure.configure_bazarr()
@@ -102,7 +102,37 @@ class ConfigureTests(unittest.TestCase):
                 self.assertEqual(settings["settings-general-use_embedded_subs"], "true")
                 self.assertEqual(settings["settings-general-serie_default_profile"], "7" if existing else "1")
                 self.assertEqual(settings["settings-general-movie_default_profile"], "7" if existing else "1")
-                self.assertEqual(len(json.loads(settings["languages-profiles"])), 1)
+                managed = json.loads(settings["languages-profiles"])
+                self.assertEqual(len(managed), 2)
+                self.assertEqual(managed[1]["name"], "ARR Russian")
+                self.assertEqual(managed[1]["items"][0]["language"], "ru")
+                for profile in managed:
+                    self.assertEqual(profile["items"][0]["audio_only_include"], "False")
+                self.assertEqual(env.call_args.args[0]["BAZARR_RU_PROFILE_ID"], 8 if existing else 2)
+
+    def test_language_profiles_require_russian_and_prefer_dual_audio(self):
+        saved = []
+        def api(app, path, *args):
+            if path == "customformat/schema":
+                return [{"implementation": "LanguageSpecification", "fields": [{"name": "value"}, {"name": "exceptLanguage"}]}]
+            if path == "language":
+                return [{"id": 11, "name": "Russian"}]
+            if path == "qualityprofile":
+                return [{"name": "HD-1080p", "formatItems": [{"format": 1}, {"format": 2}, {"format": 3}]}]
+            self.fail(path)
+        def save(app, path, obj):
+            saved.append(obj)
+            return {"id": 1 if "Original" in obj["name"] else 2}
+        with patch("configure.api", side_effect=api), patch("configure.save", side_effect=save), \
+                patch("configure.set_env") as env, patch.dict(configure.KEYS, {"radarr": "key"}):
+            configure.configure_language_profiles("radarr")
+        original, russian = saved[2:]
+        self.assertEqual(original["minFormatScore"], 0)
+        self.assertEqual(russian["minFormatScore"], 10000)
+        self.assertEqual(russian["cutoffFormatScore"], 10100)
+        self.assertEqual([f["score"] for f in russian["formatItems"]], [100, 10000, 0])
+        self.assertLess(russian["formatItems"][0]["score"], russian["minFormatScore"])
+        self.assertEqual(env.call_args.args[0]["RADARR_RU_PROFILE_ID"], 2)
 
     def test_api_error_does_not_include_validation_secrets(self):
         from io import BytesIO

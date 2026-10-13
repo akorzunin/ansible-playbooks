@@ -112,22 +112,39 @@ def configure_apps():
         config["copyUsingHardlinks"] = True
         api(app, "config/mediamanagement", config, "PUT")
 
-        spec = next(x for x in api(app, "customformat/schema") if x["implementation"] == "LanguageSpecification")
+        configure_language_profiles(app)
+        print(f"{app}: root, Transmission test, hardlinks and language profiles configured", flush=True)
+
+
+def configure_language_profiles(app):
+    schema = next(x for x in api(app, "customformat/schema") if x["implementation"] == "LanguageSpecification")
+    russian = next(x for x in api(app, "language") if x["name"] == "Russian")
+    customs = {}
+    for name, value in [("Original", -2), ("Russian", russian["id"])]:
+        spec = copy.deepcopy(schema)
         spec.pop("presets", None)
-        spec["name"] = "Original language"
-        fields(spec, {"value": -2, "exceptLanguage": False})
-        custom = save(app, "customformat", {"name": "ARR Original Audio", "includeCustomFormatWhenRenaming": False, "specifications": [spec]})
-        profile = copy.deepcopy(next(x for x in api(app, "qualityprofile") if x["name"] == "HD-1080p"))
+        spec["name"] = name + " language"
+        fields(spec, {"value": value, "exceptLanguage": False})
+        customs[name] = save(app, "customformat", {"name": f"ARR {name} Audio",
+                            "includeCustomFormatWhenRenaming": False, "specifications": [spec]})["id"]
+    template = next(x for x in api(app, "qualityprofile") if x["name"] == "HD-1080p")
+    profiles = {}
+    for name in ("Original Preferred", "Russian Required"):
+        profile = copy.deepcopy(template)
         profile.pop("id", None)
-        profile.update(name="ARR 1080p Original Preferred", upgradeAllowed=True,
-                       minFormatScore=0, cutoffFormatScore=100, minUpgradeFormatScore=1)
+        ru = name == "Russian Required"
+        profile.update(name="ARR 1080p " + name, upgradeAllowed=True,
+                       minFormatScore=10000 if ru else 0,
+                       cutoffFormatScore=10100 if ru else 100, minUpgradeFormatScore=1)
         if app == "radarr":
             profile["language"] = {"id": -1, "name": "Any"}
         for fmt in profile["formatItems"]:
-            fmt["score"] = 100 if fmt["format"] == custom["id"] else 0
-        profile = save(app, "qualityprofile", profile)
-        set_env({f"{app.upper()}_API_KEY": KEYS[app], f"{app.upper()}_QUALITY_PROFILE_ID": profile["id"]})
-        print(f"{app}: root, Transmission test, hardlinks, 1080p and original-audio preference configured", flush=True)
+            fmt["score"] = (100 if fmt["format"] == customs["Original"] else
+                            10000 if ru and fmt["format"] == customs["Russian"] else 0)
+        profiles[name] = save(app, "qualityprofile", profile)["id"]
+    set_env({f"{app.upper()}_API_KEY": KEYS[app],
+             f"{app.upper()}_QUALITY_PROFILE_ID": profiles["Original Preferred"],
+             f"{app.upper()}_RU_PROFILE_ID": profiles["Russian Required"]})
 
 
 def configure_indexers():
@@ -189,27 +206,30 @@ def configure_bazarr():
     config = yaml.safe_load(Path("config/bazarr/config/config.yaml").read_text())
     KEYS["bazarr"] = config["auth"]["apikey"]
     profiles = api("bazarr", "system/languages/profiles")
-    name = "ARR English"
-    profile = next((p for p in profiles if p["name"] == name), None)
-    if profile is None:
-        profile = {"profileId": max([p["profileId"] for p in profiles] + [0]) + 1, "name": name,
-                   "cutoff": 1, "items": [{"id": 1, "language": "en", "hi": "False", "forced": "False", "audio_exclude": "False"}],
-                   "mustContain": [], "mustNotContain": [], "originalFormat": False}
-        profiles.append(profile)
-    # Russian is enabled for manual searches, not required for the automatic cutoff.
+    managed = {}
+    for name, language in [("ARR English", "en"), ("ARR Russian", "ru")]:
+        profile = next((p for p in profiles if p["name"] == name), None)
+        if profile is None:
+            profile = {"profileId": max([p["profileId"] for p in profiles] + [0]) + 1, "name": name}
+            profiles.append(profile)
+        profile.update(cutoff=1, items=[{"id": 1, "language": language, "hi": "False", "forced": "False", "audio_exclude": "False", "audio_only_include": "False"}],
+                       mustContain=[], mustNotContain=[], originalFormat=False)
+        managed[language] = profile["profileId"]
     enabled = [x["code2"] for x in api("bazarr", "system/languages") if x["enabled"]]
     data = {"languages-enabled": sorted(set(enabled + ["en", "ru"])), "languages-profiles": json.dumps(profiles),
             "settings-general-use_sonarr": "true", "settings-general-use_radarr": "true",
             "settings-sonarr-ip": "sonarr", "settings-sonarr-port": "8989", "settings-sonarr-apikey": KEYS["sonarr"],
             "settings-radarr-ip": "radarr", "settings-radarr-port": "7878", "settings-radarr-apikey": KEYS["radarr"],
             "settings-general-serie_default_enabled": "true", "settings-general-movie_default_enabled": "true",
-            "settings-general-serie_default_profile": str(profile["profileId"]),
-            "settings-general-movie_default_profile": str(profile["profileId"]),
+            "settings-general-serie_default_profile": str(managed["en"]),
+            "settings-general-movie_default_profile": str(managed["en"]),
             "settings-general-use_embedded_subs": "true", "settings-general-ignore_pgs_subs": "true",
             "settings-general-auto_update": "false",
             "settings-general-enabled_providers": sorted((set(config["general"]["enabled_providers"]) - {"podnapisi"}) | {"yifysubtitles", "supersubtitles"})}
     api("bazarr", "system/settings", data, form=True)
-    print("Bazarr: linked to ARR; English default, Russian manual; embedded PGS ignored; YIFY Subtitles/SuperSubtitles enabled", flush=True)
+    set_env({"BAZARR_API_KEY": KEYS["bazarr"], "BAZARR_URL": "http://bazarr:6767",
+             "BAZARR_EN_PROFILE_ID": managed["en"], "BAZARR_RU_PROFILE_ID": managed["ru"]})
+    print("Bazarr: linked to ARR; English default, Russian per title; embedded PGS ignored; YIFY Subtitles/SuperSubtitles enabled", flush=True)
 
 
 if __name__ == "__main__":
