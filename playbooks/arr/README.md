@@ -155,6 +155,15 @@ Deployment directory: `/srv/deploy/arr`.
   to `bot.env`; no manual key copying is required. The user allowlist is preserved.
 - RuTracker credentials are passed to configuration without Ansible logging and
   stored by Prowlarr. No separate tracker secret file is deployed.
+- `TELEGRAM_ALLOWED_USERS` in `bot.env` controls general access; leave it empty to
+  allow anyone to request downloads in a private chat. `TELEGRAM_CLEANUP_USERS`
+  separately restricts permanent disk cleanup to specified numeric user IDs.
+  It falls back to the general allowlist when unset; both empty disables deletion.
+  `/list` shows ARR movies/seasons oldest import first and is read-only.
+  `/cleanup TITLE` (optionally `S02` or `all`) deletes imported files, associated
+  Transmission data and optimized copies after admin-bound confirmation.
+  Both updated bot and worker images are required for optimized-copy cleanup.
+  Mixed/unproven packs are refused. Entries remain unmonitored for safe retries.
 - The configuration playbook manages named `ARR ...` profiles, Transmission clients,
   the four chosen indexers, their 5-seeder minimum, Prowlarr app links, and Bazarr defaults. Rerunning it
   reapplies these choices; edit the script if you want different managed defaults.

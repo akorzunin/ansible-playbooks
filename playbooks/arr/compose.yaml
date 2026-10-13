@@ -99,7 +99,7 @@ services:
 
   bot:
     profiles: [bot]
-    image: ghcr.io/akorzunin/arr-telegram-bot:47887b7a3d5c986d35b57eed35e390570a519789
+    image: ghcr.io/akorzunin/arr-telegram-bot:6b34c10ed8ecdd2bde6e4f705404fc60a4abd6d8
     user: "${BOT_UID:-1000}:${BOT_GID:-1000}"
     env_file: bot.env
     environment:
@@ -136,7 +136,7 @@ services:
 
   prepare:
     profiles: [prepare]
-    image: ghcr.io/akorzunin/arr-telegram-bot:worker-47887b7a3d5c986d35b57eed35e390570a519789
+    image: ghcr.io/akorzunin/arr-telegram-bot:worker-6b34c10ed8ecdd2bde6e4f705404fc60a4abd6d8
     user: "${BOT_UID:-1000}:${BOT_GID:-1000}"
     env_file: worker.env
     environment:
