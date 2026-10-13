@@ -48,6 +48,17 @@ class PreparationDeploymentTests(unittest.TestCase):
         self.assertFalse(worker_mount["bind"]["create_host_path"])
         self.assertFalse(jellyfin_mount["bind"]["create_host_path"])
 
+    def test_jellyfin_originals_use_only_the_media_disk(self):
+        jellyfin = yaml.safe_load((HERE.parent / "jellyfin" / "compose.yaml").read_text())["services"]["jellyfin"]
+        mounts = jellyfin["volumes"]
+        original = next(v for v in mounts if isinstance(v, dict) and v["target"] == "/storage")
+        self.assertEqual(original["source"], "/mnt/storage/jellyfin_media")
+        self.assertTrue(original["read_only"])
+        self.assertFalse(original["bind"]["create_host_path"])
+        targets = [v["target"] if isinstance(v, dict) else v.split(":")[1] for v in mounts]
+        self.assertNotIn("/media", targets)
+        self.assertNotIn("/media2", targets)
+
     def test_deployment_remains_opt_in_and_secrets_private(self):
         deploy = yaml.safe_load((HERE / "deploy.yaml").read_text())[0]
         configure = yaml.safe_load((HERE / "configure.yaml").read_text())[0]

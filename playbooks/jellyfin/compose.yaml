@@ -13,9 +13,12 @@ services:
         target: /config/transcodes
         bind:
           create_host_path: false
-      - ./jellyfin/media:/media
-      - ./jellyfin/media2:/media2:ro
-      - /mnt/storage/jellyfin_media/:/storage:rw
+      - type: bind
+        source: /mnt/storage/jellyfin_media
+        target: /storage
+        read_only: true
+        bind:
+          create_host_path: false
       - type: bind
         source: /mnt/storage/jellyfin_optimized
         target: /optimized

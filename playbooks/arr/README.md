@@ -80,8 +80,11 @@ Jellyfin:      /storage
 
 Movies import to `/downloads/complete/films`; series to
 `/downloads/complete/shows`. These match the workstation's existing Jellyfin
-**Films** and **Shows** libraries (real-time monitoring enabled). Anime currently
-uses these same roots rather than the separate legacy anime libraries.
+**Films** and **Shows** libraries (real-time monitoring enabled). Legacy cartoon
+shows and anime series have been consolidated into `complete/shows`; anime films
+into `complete/films`. Transmission locations were updated to preserve seeding.
+Jellyfin mounts `/storage` read-only; the empty legacy `/media` and `/media2`
+mounts are no longer used. ARR and Bazarr retain write access through `/downloads`.
 ARR configuration does not modify Jellyfin libraries. Optional streaming preparation
 adds a separate optimized-media mount through the Jellyfin deployment; see below.
 
