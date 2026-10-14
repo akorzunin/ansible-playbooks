@@ -1,0 +1,13 @@
+services:
+  landing:
+    build: .
+    image: mion-landing:local
+    container_name: mion-landing
+    restart: unless-stopped
+    ports:
+      - "192.168.1.132:8001:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

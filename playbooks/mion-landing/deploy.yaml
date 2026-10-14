@@ -1,0 +1,91 @@
+---
+- name: Deploy the static Mion landing
+  hosts: remote_workstation
+  gather_facts: false
+  become: false
+  vars:
+    frontend_path: "{{ playbook_dir }}/../../../mion.front"
+    remote_install_path: /srv/deploy/mion-landing
+
+  tasks:
+    - name: Build the frontend on the controller
+      ansible.builtin.command:
+        cmd: pnpm build
+        chdir: "{{ frontend_path }}"
+      delegate_to: localhost
+      changed_when: true
+
+    - name: Allocate a temporary build archive
+      ansible.builtin.tempfile:
+        state: file
+        suffix: .tar.gz
+      delegate_to: localhost
+      register: build_archive
+
+    - name: Package and deploy the static build
+      block:
+        - name: Archive frontend assets
+          ansible.builtin.command:
+            argv: [tar, -czf, "{{ build_archive.path }}", -C, "{{ frontend_path }}", dist]
+          delegate_to: localhost
+          changed_when: true
+
+        - name: Create the deployment directory
+          ansible.builtin.file:
+            path: "{{ remote_install_path }}"
+            state: directory
+            mode: "0755"
+
+        - name: Copy Docker hosting files
+          ansible.builtin.copy:
+            src: "{{ item }}"
+            dest: "{{ remote_install_path }}/{{ item }}"
+            mode: "0644"
+          loop: [Dockerfile, compose.yaml, nginx.conf]
+
+        - name: Remove previous build assets
+          ansible.builtin.file:
+            path: "{{ remote_install_path }}/dist"
+            state: absent
+
+        - name: Upload the static build
+          ansible.builtin.unarchive:
+            src: "{{ build_archive.path }}"
+            dest: "{{ remote_install_path }}"
+
+        - name: Build the static image before replacing the old demo
+          ansible.builtin.command:
+            cmd: docker compose build
+            chdir: "{{ remote_install_path }}"
+          changed_when: true
+
+        - name: Check for the retired Saulux demo container
+          ansible.builtin.command:
+            argv: [docker, container, ls, -a, --filter, "name=^/saulux-demo$", --format, "{{ '{{.Names}}' }}"]
+          register: old_demo
+          changed_when: false
+
+        - name: Remove only the retired demo container
+          ansible.builtin.command:
+            argv: [docker, rm, -f, saulux-demo]
+          when: old_demo.stdout == 'saulux-demo'
+          changed_when: true
+
+        - name: Start the landing container
+          ansible.builtin.command:
+            cmd: docker compose up -d --wait
+            chdir: "{{ remote_install_path }}"
+          changed_when: true
+
+        - name: Verify the static landing responds
+          ansible.builtin.uri:
+            url: http://192.168.1.132:8001/
+            status_code: 200
+            use_proxy: false
+
+      always:
+        - name: Remove the temporary build archive
+          ansible.builtin.file:
+            path: "{{ build_archive.path }}"
+            state: absent
+          delegate_to: localhost
