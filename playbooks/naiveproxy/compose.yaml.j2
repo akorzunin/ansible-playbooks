@@ -1,0 +1,36 @@
+services:
+  naiveproxy:
+    image: naiveproxy:v2.11.2-naive
+    build: .
+    container_name: naiveproxy
+    restart: unless-stopped
+    network_mode: host
+    user: "{{ ansible_facts['getent_passwd']['naiveproxy'][1] }}:{{ ansible_facts['getent_passwd']['naiveproxy'][2] }}"
+    environment:
+      XDG_DATA_HOME: /var/lib/naiveproxy
+      XDG_CONFIG_HOME: /var/lib/naiveproxy
+      GOMEMLIMIT: 40MiB
+      GOGC: "50"
+      GOMAXPROCS: "2"
+    volumes:
+      - /etc/naiveproxy:/etc/naiveproxy:ro
+      - /var/lib/naiveproxy:/var/lib/naiveproxy:rw
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+          pids: 64
+        reservations:
+          memory: 10M
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

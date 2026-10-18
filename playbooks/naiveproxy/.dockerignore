@@ -1,0 +1,4 @@
+*
+!Dockerfile
+!caddy
+!ca-certificates.crt

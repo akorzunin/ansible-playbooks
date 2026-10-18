@@ -16,7 +16,7 @@ Environment=GOGC=50
 Environment=GOMAXPROCS=2
 StateDirectory=naiveproxy
 StateDirectoryMode=0700
-MemoryHigh=48M
+# No MemoryHigh: a tight soft limit stalls proxy threads in reclaim on this swapless VPS.
 MemoryMax=64M
 TasksMax=64
 NoNewPrivileges=true

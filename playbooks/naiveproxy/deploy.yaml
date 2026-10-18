@@ -1,11 +1,12 @@
 ---
-- name: Deploy NaiveProxy on nt1 without server-side builds
+- name: Deploy NaiveProxy on nt1 in Docker without compiling on the server
   hosts: nt1
   become: true
   vars_files:
     - "{{ playbook_dir }}/../../external_vars.yml"
   vars:
     naiveproxy_domain: naive.akorz-nt1.duckdns.org
+    naiveproxy_deploy_dir: /srv/deploy/naiveproxy
     naiveproxy_cache: "{{ lookup('env', 'HOME') }}/.cache/ansible-naiveproxy"
     naiveproxy_client_dir: "{{ lookup('env', 'HOME') }}/.local/share"
     naiveproxy_username: "{{ NAIVEPROXY_USER | default('naive') }}"
@@ -16,6 +17,9 @@
     naiveproxy_router: "{{ playbook_dir }}/../../node/nt1/caddy/Caddyfile"
 
   tasks:
+    - name: Inspect legacy systemd service
+      ansible.builtin.service_facts:
+
     - name: Check supported server architecture
       ansible.builtin.assert:
         that: ansible_facts['architecture'] == 'x86_64'
@@ -57,6 +61,29 @@
         fail_msg: Use a simple username and a random password of at least 24 URL-safe characters.
       no_log: true
 
+    - name: Inspect existing proxy configuration
+      ansible.builtin.stat:
+        path: /etc/naiveproxy/Caddyfile
+      register: naiveproxy_existing_config
+
+    - name: Verify migration preserves existing credentials and configuration
+      when:
+        - naiveproxy_existing_config.stat.exists
+        - ansible_facts['services'].get('naiveproxy.service', {}).get('state') == 'running'
+      block:
+        - name: Read existing proxy configuration privately
+          ansible.builtin.slurp:
+            src: /etc/naiveproxy/Caddyfile
+          register: naiveproxy_legacy_config
+          no_log: true
+
+        - name: Refuse to change configuration during systemd migration
+          ansible.builtin.assert:
+            that:
+              - (naiveproxy_legacy_config.content | b64decode) == lookup('ansible.builtin.template', 'Caddyfile.j2')
+            fail_msg: Existing configuration differs; supply the existing credentials before migrating.
+          no_log: true
+
     - name: Create unprivileged proxy account
       ansible.builtin.user:
         name: naiveproxy
@@ -72,7 +99,6 @@
         owner: root
         group: root
         mode: "0755"
-      notify: Restart naiveproxy
 
     - name: Create private server configuration directory
       ansible.builtin.file:
@@ -91,14 +117,68 @@
         mode: "0640"
         validate: /usr/local/bin/caddy-naive validate --config %s --adapter caddyfile
       no_log: true
-      notify: Restart naiveproxy
+      register: naiveproxy_config
 
-    - name: Install memory-limited systemd unit
+    - name: Preserve private proxy state directory
+      ansible.builtin.file:
+        path: /var/lib/naiveproxy
+        state: directory
+        owner: naiveproxy
+        group: naiveproxy
+        mode: "0700"
+
+    - name: Read numeric proxy account IDs for Docker
+      ansible.builtin.getent:
+        database: passwd
+        key: naiveproxy
+
+    - name: Create private Docker build directory
+      ansible.builtin.file:
+        path: "{{ naiveproxy_deploy_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Stage Docker build files without including private backups in the build context
       ansible.builtin.copy:
-        src: naiveproxy.service
-        dest: /etc/systemd/system/naiveproxy.service
+        src: "{{ item }}"
+        dest: "{{ naiveproxy_deploy_dir }}/{{ item }}"
         mode: "0644"
-      notify: Restart naiveproxy
+      loop:
+        - Dockerfile
+        - .dockerignore
+      register: naiveproxy_dockerfile
+
+    - name: Stage prebuilt binary and host trust store for scratch image
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ naiveproxy_deploy_dir }}/{{ item.dest }}"
+        remote_src: true
+        mode: "{{ item.mode }}"
+      loop:
+        - {src: /usr/local/bin/caddy-naive, dest: caddy, mode: '0755'}
+        - {src: /etc/ssl/certs/ca-certificates.crt, dest: ca-certificates.crt, mode: '0644'}
+      register: naiveproxy_image_files
+
+    - name: Install Docker Compose configuration
+      ansible.builtin.template:
+        src: compose.yaml.j2
+        dest: "{{ naiveproxy_deploy_dir }}/compose.yaml"
+        mode: "0644"
+        validate: docker compose -f %s config --quiet
+
+    - name: Inspect existing NaiveProxy image
+      community.docker.docker_image_info:
+        name: naiveproxy:v2.11.2-naive
+      register: naiveproxy_image
+
+    - name: Package prebuilt server and CA certificates without compiling
+      ansible.builtin.command:
+        argv: [docker, compose, build]
+        chdir: "{{ naiveproxy_deploy_dir }}"
+      when: naiveproxy_dockerfile.changed or naiveproxy_image_files.changed or not naiveproxy_image.images
+      changed_when: true
 
     - name: Stage nt1 TLS routing configuration
       ansible.builtin.copy:
@@ -155,25 +235,75 @@
           ansible.builtin.fail:
             msg: TLS routing update failed; previous configuration was restored.
 
-    - name: Enable proxy service
-      ansible.builtin.systemd_service:
-        name: naiveproxy
-        enabled: true
-        daemon_reload: true
+    - name: Start Docker proxy with rollback to the legacy service on migration failure
+      block:
+        - name: Stop and disable legacy systemd proxy before binding the same port
+          ansible.builtin.systemd_service:
+            name: naiveproxy
+            state: stopped
+            enabled: false
+          when: "'naiveproxy.service' in ansible_facts['services']"
 
-    - name: Apply proxy service changes
-      ansible.builtin.meta: flush_handlers
+        - name: Back up existing credentials and certificate state before Docker migration
+          ansible.builtin.shell:
+            cmd: >-
+              umask 077 && tar -czpf {{ (naiveproxy_deploy_dir + '/pre-docker-state.tar.gz') | quote }}
+              -C / etc/naiveproxy var/lib/naiveproxy
+            creates: "{{ naiveproxy_deploy_dir }}/pre-docker-state.tar.gz"
+          when: ansible_facts['services'].get('naiveproxy.service', {}).get('state') == 'running'
 
-    - name: Ensure proxy service is running
-      ansible.builtin.systemd_service:
-        name: naiveproxy
-        state: started
+        - name: Start memory-limited NaiveProxy container
+          community.docker.docker_compose_v2:
+            project_src: "{{ naiveproxy_deploy_dir }}"
+            build: never
+            pull: never
+            recreate: "{{ 'always' if naiveproxy_config.changed else 'auto' }}"
+            wait: true
+            wait_timeout: 30
 
-    - name: Wait for internal proxy listener
-      ansible.builtin.wait_for:
-        host: 127.0.0.1
-        port: 8444
-        timeout: 30
+        - name: Wait for internal proxy listener
+          ansible.builtin.wait_for:
+            host: 127.0.0.1
+            port: 8444
+            timeout: 30
+
+        - name: Verify HTTPS through the existing public TLS router
+          ansible.builtin.command:
+            argv:
+              - curl
+              - --noproxy
+              - '*'
+              - --resolve
+              - "{{ naiveproxy_domain }}:443:127.0.0.1"
+              - --connect-timeout
+              - '5'
+              - --max-time
+              - '10'
+              - --fail
+              - --silent
+              - --show-error
+              - "https://{{ naiveproxy_domain }}/"
+          register: naiveproxy_https
+          changed_when: false
+          retries: 6
+          delay: 5
+          until: naiveproxy_https.rc == 0
+      rescue:
+        - name: Stop failed Docker proxy to release its listener
+          community.docker.docker_compose_v2:
+            project_src: "{{ naiveproxy_deploy_dir }}"
+            state: stopped
+
+        - name: Restore previously running systemd proxy
+          ansible.builtin.systemd_service:
+            name: naiveproxy
+            enabled: true
+            state: started
+          when: ansible_facts['services'].get('naiveproxy.service', {}).get('state') == 'running'
+
+        - name: Report failed Docker deployment
+          ansible.builtin.fail:
+            msg: Docker deployment failed; the previously running systemd proxy was restored if present.
 
     - name: Write private sing-box config on the controller
       ansible.builtin.copy:
@@ -190,10 +320,3 @@
       delegate_to: localhost
       become: false
       no_log: true
-
-  handlers:
-    - name: Restart naiveproxy
-      ansible.builtin.systemd_service:
-        name: naiveproxy
-        state: restarted
-        daemon_reload: true
