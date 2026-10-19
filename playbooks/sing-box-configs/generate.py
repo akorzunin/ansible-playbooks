@@ -40,8 +40,8 @@ def make_profile(base, connections, order):
          "default": "auto", "interrupt_exist_connections": True},
         # URLTest is latency-based, not ordered failover; the order only seeds selection.
         {"type": "urltest", "tag": "auto", "outbounds": tags,
-         "url": "https://www.gstatic.com/generate_204", "interval": "3m",
-         "tolerance": 50, "interrupt_exist_connections": True},
+         "url": "https://www.gstatic.com/generate_204", "interval": "30s",
+         "tolerance": 200, "interrupt_exist_connections": False},
         *[copy.deepcopy(connections[kind]) for kind in order],
         {"type": "direct", "tag": "direct"},
     ]
@@ -53,11 +53,13 @@ def make_profile(base, connections, order):
     rules = [
         {"action": "sniff"},
         {"domain_suffix": ["duckdns.org"], "action": "route", "outbound": "direct"},
+        # Encourage QUIC clients to retry over TCP; other UDP still needs VLESS.
+        {"network": "udp", "port": 443, "action": "reject"},
         *[r for r in route.get("rules", []) if r.get("action") != "sniff"],
     ]
     route["rules"] = rules
     for rule in rules:
-        if rule.get("network") == "udp":
+        if rule.get("network") == "udp" and rule.get("action") == "route":
             rule["outbound"] = connections["vless"]["tag"]
     route["final"] = "proxy"
     for rule_set in route.get("rule_set", []):

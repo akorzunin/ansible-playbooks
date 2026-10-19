@@ -52,12 +52,18 @@ Ansible Vault-encrypted file tracked in Git. It also stores the existing platfor
 tokens in `sing_box_secrets.tokens`. No controller-local outbound files are needed,
 and a fresh controller never generates replacement tokens.
 
-- Automatic selection: URLTest, checks every 3 minutes, 50 ms tolerance.
+- Automatic selection: URLTest, checks every 30 seconds, 200 ms tolerance.
+  More frequent probes cost battery/data; tolerance reduces latency-driven switching.
+  Automatic switches preserve existing connections; manual selector changes interrupt them.
+  Failed sessions still depend on application retries/timeouts.
 - Initial test order: Windows/Linux VLESS → Naïve → SSH; Android Naïve → SSH → VLESS.
 - URLTest selects by **latency**, not strict priority. It can choose Naïve/SSH even
   when VLESS is healthy. The `proxy` selector also allows choosing a protocol manually.
-- UDP uses VLESS unless an earlier bypass matches (such as DuckDNS): this nt1
-  Naïve deployment and SSH do not provide UDP relay.
+- A successful tiny probe does not guarantee reliable transfers. URLTest has no
+  failure-history quarantine; manually select SSH if flaky VLESS keeps winning.
+- UDP/443 is rejected after the DuckDNS bypass to encourage QUIC-to-TCP fallback.
+  Other UDP uses VLESS unless an earlier bypass matches: this nt1 Naïve deployment
+  and SSH do not provide UDP relay. UDP-only applications still need working VLESS.
 - Existing Russian-domain/GeoIP direct routing and platform inbounds are preserved.
 - Linux retains the existing local mixed/system-proxy listener on `127.0.0.1:12334`;
   it does not gain a TUN interface. Linux omits `auto_detect_interface`: it is

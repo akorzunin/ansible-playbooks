@@ -29,14 +29,21 @@ class ProfileTests(unittest.TestCase):
                 self.assertEqual(result["inbounds"], base["inbounds"])
                 self.assertEqual(result["outbounds"][0]["default"], "auto")
                 self.assertEqual(result["outbounds"][1]["outbounds"], order)
+                self.assertEqual(result["outbounds"][1]["interval"], "30s")
+                self.assertEqual(result["outbounds"][1]["tolerance"], 200)
+                self.assertFalse(result["outbounds"][1]["interrupt_exist_connections"])
+                self.assertTrue(result["outbounds"][0]["interrupt_exist_connections"])
                 self.assertEqual(result["route"]["final"], "proxy")
                 rules = result["route"]["rules"]
                 self.assertEqual(rules[0], {"action": "sniff"})
                 self.assertEqual(rules[1], {
                     "domain_suffix": ["duckdns.org"], "action": "route", "outbound": "direct",
                 })
-                udp = next(r for r in rules if r.get("network") == "udp")
-                self.assertGreater(rules.index(udp), 1)
+                self.assertEqual(rules[2], {
+                    "network": "udp", "port": 443, "action": "reject",
+                })
+                udp = next(r for r in rules if r.get("network") == "udp" and r.get("action") == "route")
+                self.assertGreater(rules.index(udp), 2)
                 self.assertEqual(udp["outbound"], "vless")
                 self.assertNotIn("cache_file", result["experimental"])
                 for inbound in result["inbounds"]:
