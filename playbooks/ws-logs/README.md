@@ -157,12 +157,13 @@ rewritten into fake `node_*` or `container_*` metrics. The separate test Telegra
 dashboard has been removed; use **Nodes & Containers** and **NVIDIA GPUs**.
 
 Container CPU is still expressed in cores in the shared dashboard (Docker CPU
-percentage divided by 100). Working-set memory subtracts inactive file cache:
-`total_inactive_file` on cgroup v1, `inactive_file` on v2, clamped at zero. If both
-fields are absent it falls back to raw usage, which includes cache. The native
-Telegraf dashboard always shows raw Docker usage. This is dashboard/alert coverage,
-not full metric-for-metric parity: non-Docker cgroups and unused exporter collectors
-are not reproduced. Host network sums can still double-count VPN traffic.
+percentage divided by 100). Container memory uses `docker_container_mem_usage`
+directly: Telegraf already applies Docker CLI-style cache adjustment. Do not subtract
+inactive file cache again or clamp the result; that double subtraction can create
+artificial zeroes and spikes. Historical cAdvisor data still uses working-set bytes.
+This is dashboard/alert coverage, not full metric-for-metric parity: non-Docker
+cgroups and unused exporter collectors are not reproduced. Host network sums can
+still double-count VPN traffic.
 
 Verify after deployment:
 

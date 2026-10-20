@@ -318,6 +318,21 @@ class MonitoringTests(unittest.TestCase):
             self.assertIn('job="cadvisor"', expr)
             self.assertEqual(panel["targets"][0]["legendFormat"], "{{node}} / {{name}}")
 
+    def test_container_memory_does_not_subtract_cache_twice(self):
+        dashboard = json.loads((STACK / "grafana/dashboards/nodes.json").read_text())
+        panel = next(panel for panel in dashboard["panels"] if panel["id"] == 11)
+        expr = panel["targets"][0]["expr"]
+        self.assertIn(
+            'label_replace(docker_container_mem_usage{job="telegraf", node=~"$node", container_name=~"$container"},',
+            expr,
+        )
+        self.assertNotIn("inactive_file", expr)
+        self.assertNotIn("clamp_min", expr)
+        self.assertIn('or on (node, name)', expr)
+        self.assertIn('container_memory_working_set_bytes{job="cadvisor"', expr)
+        self.assertIn("already cache-adjusted", panel["description"])
+        self.assertEqual(panel["fieldConfig"]["defaults"]["unit"], "bytes")
+
     def test_container_filter_covers_both_collectors_and_only_container_charts(self):
         dashboard = json.loads((STACK / "grafana/dashboards/nodes.json").read_text())
         variable = dashboard["templating"]["list"][1]

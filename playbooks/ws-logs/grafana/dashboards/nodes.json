@@ -4,7 +4,7 @@
   "description": "Node and container metrics for inventory-managed hosts with a shared node filter. Container CPU is measured in cores, not divided by CPUs on unrelated hosts.",
   "tags": ["monitoring", "ansible"],
   "schemaVersion": 39,
-  "version": 6,
+  "version": 7,
   "graphTooltip": 1,
   "editable": false,
   "timezone": "browser",
@@ -144,10 +144,10 @@
     },
     {
       "id": 11, "title": "Container memory (working set)", "type": "timeseries",
-      "description": "Telegraf: Docker usage minus inactive file cache (v1 total_inactive_file or v2 inactive_file), clamped at zero. Falls back to raw usage when the kernel omits both cache fields; use raw Docker memory on the Telegraf dashboard to investigate differences.",
+      "description": "Telegraf's Docker memory usage is already cache-adjusted (Docker CLI semantics). Use it directly; subtracting inactive file cache again underreports memory. Historical cAdvisor data uses working-set bytes.",
       "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
       "gridPos": {"h": 10, "w": 24, "x": 0, "y": 39},
-      "targets": [{"refId": "A", "expr": "sum by (node, name) (label_replace(clamp_min(docker_container_mem_usage{job=\"telegraf\", node=~\"$node\", container_name=~\"$container\"} - (docker_container_mem_total_inactive_file{job=\"telegraf\", node=~\"$node\", container_name=~\"$container\"} or docker_container_mem_inactive_file{job=\"telegraf\", node=~\"$node\", container_name=~\"$container\"} or 0 * docker_container_mem_usage{job=\"telegraf\", node=~\"$node\", container_name=~\"$container\"}), 0), \"name\", \"$1\", \"container_name\", \"(.+)\")) or on (node, name) sum by (node, name) (container_memory_working_set_bytes{job=\"cadvisor\", node=~\"$node\", image!=\"\", name!=\"\", name=~\"$container\"})", "legendFormat": "{{node}} / {{name}}"}],
+      "targets": [{"refId": "A", "expr": "sum by (node, name) (label_replace(docker_container_mem_usage{job=\"telegraf\", node=~\"$node\", container_name=~\"$container\"}, \"name\", \"$1\", \"container_name\", \"(.+)\")) or on (node, name) sum by (node, name) (container_memory_working_set_bytes{job=\"cadvisor\", node=~\"$node\", image!=\"\", name!=\"\", name=~\"$container\"})", "legendFormat": "{{node}} / {{name}}"}],
       "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}, "overrides": []},
       "options": {"legend": {"displayMode": "table", "placement": "right", "width": 350, "calcs": ["lastNotNull"], "showLegend": true, "sortBy": "Last *", "sortDesc": true}}
     },
