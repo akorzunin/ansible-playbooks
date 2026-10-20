@@ -12,6 +12,7 @@ exclude_paths:
   # Application configs, not Ansible content.
   - '**/compose.yaml'
   - '**/compose.yml'
+  - '**/*.vault.yaml'
   - playbooks/hermes-agent/config.yaml
   - playbooks/homepage/config/
   - playbooks/vector/vector.yaml

@@ -13,7 +13,7 @@ from urllib.parse import quote
 ROOT = Path(__file__).resolve().parent
 DOMAIN = "configs.akorz.duckdns.org"
 ORDERS = {
-    "android": ["naive", "ssh", "vless"],
+    "android": ["ssh", "vless", "naive"],
     "windows": ["vless", "naive", "ssh"],
     "linux": ["vless", "naive", "ssh"],
 }
@@ -36,12 +36,8 @@ def make_profile(base, connections, order):
     profile = copy.deepcopy(base)
     tags = [connections[kind]["tag"] for kind in order]
     profile["outbounds"] = [
-        {"type": "selector", "tag": "proxy", "outbounds": ["auto", *tags],
-         "default": "auto", "interrupt_exist_connections": True},
-        # URLTest is latency-based, not ordered failover; the order only seeds selection.
-        {"type": "urltest", "tag": "auto", "outbounds": tags,
-         "url": "https://www.gstatic.com/generate_204", "interval": "30s",
-         "tolerance": 200, "interrupt_exist_connections": False},
+        {"type": "selector", "tag": "proxy", "outbounds": tags,
+         "default": tags[0], "interrupt_exist_connections": True},
         *[copy.deepcopy(connections[kind]) for kind in order],
         {"type": "direct", "tag": "direct"},
     ]
@@ -53,14 +49,12 @@ def make_profile(base, connections, order):
     rules = [
         {"action": "sniff"},
         {"domain_suffix": ["duckdns.org"], "action": "route", "outbound": "direct"},
-        # Encourage QUIC clients to retry over TCP; other UDP still needs VLESS.
-        {"network": "udp", "port": 443, "action": "reject"},
         *[r for r in route.get("rules", []) if r.get("action") != "sniff"],
     ]
     route["rules"] = rules
     for rule in rules:
         if rule.get("network") == "udp" and rule.get("action") == "route":
-            rule["outbound"] = connections["vless"]["tag"]
+            rule["outbound"] = "proxy"
     route["final"] = "proxy"
     for rule_set in route.get("rule_set", []):
         if rule_set.get("type") == "remote":

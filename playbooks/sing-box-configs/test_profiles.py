@@ -19,7 +19,7 @@ class ProfileTests(unittest.TestCase):
         self.connections = {kind: {"type": kind, "tag": kind} for kind in ("vless", "naive", "ssh")}
         self.tokens = {platform: str(i) * 64 for i, platform in enumerate(generate.ORDERS)}
 
-    def test_platforms_keep_inbounds_and_use_auto_and_vless_udp(self):
+    def test_platforms_keep_inbounds_and_use_manual_selection_for_tcp_and_udp(self):
         for platform, order in generate.ORDERS.items():
             with self.subTest(platform=platform):
                 base = json.loads((generate.ROOT / "templates" / f"{platform}.json").read_text())
@@ -27,11 +27,9 @@ class ProfileTests(unittest.TestCase):
                 result = generate.make_profile(base, self.connections, order)
                 self.assertEqual(base, original)
                 self.assertEqual(result["inbounds"], base["inbounds"])
-                self.assertEqual(result["outbounds"][0]["default"], "auto")
-                self.assertEqual(result["outbounds"][1]["outbounds"], order)
-                self.assertEqual(result["outbounds"][1]["interval"], "30s")
-                self.assertEqual(result["outbounds"][1]["tolerance"], 200)
-                self.assertFalse(result["outbounds"][1]["interrupt_exist_connections"])
+                self.assertEqual(result["outbounds"][0]["default"], "ssh" if platform == "android" else "vless")
+                self.assertEqual(result["outbounds"][0]["outbounds"], order)
+                self.assertFalse(any(o["type"] == "urltest" for o in result["outbounds"]))
                 self.assertTrue(result["outbounds"][0]["interrupt_exist_connections"])
                 self.assertEqual(result["route"]["final"], "proxy")
                 rules = result["route"]["rules"]
@@ -39,12 +37,10 @@ class ProfileTests(unittest.TestCase):
                 self.assertEqual(rules[1], {
                     "domain_suffix": ["duckdns.org"], "action": "route", "outbound": "direct",
                 })
-                self.assertEqual(rules[2], {
-                    "network": "udp", "port": 443, "action": "reject",
-                })
+                self.assertFalse(any(r.get("action") == "reject" for r in rules))
                 udp = next(r for r in rules if r.get("network") == "udp" and r.get("action") == "route")
-                self.assertGreater(rules.index(udp), 2)
-                self.assertEqual(udp["outbound"], "vless")
+                self.assertGreater(rules.index(udp), 1)
+                self.assertEqual(udp["outbound"], "proxy")
                 self.assertNotIn("cache_file", result["experimental"])
                 for inbound in result["inbounds"]:
                     if inbound["type"] == "tun":
