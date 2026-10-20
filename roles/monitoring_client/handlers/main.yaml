@@ -1,0 +1,7 @@
+---
+- name: Restart Telegraf
+  community.docker.docker_compose_v2:
+    project_src: /srv/monitoring/telegraf
+    state: restarted
+    services: [telegraf]
+    dependencies: false

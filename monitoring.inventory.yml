@@ -1,30 +1,45 @@
 ---
-# Overlay for ./hosts: one entry per machine, never both local/remote aliases.
+# Overlay for ./hosts: one entry per machine
 all:
   children:
     monitoring_servers:
       hosts:
-        local_workstation:
+        remote_workstation:
     monitored_nodes:
       vars:
         monitoring_enabled: true
         monitoring_availability_alert: false
-        monitoring_client_node_exporter_port: 9100
-        monitoring_client_cadvisor_port: 3003
+        monitoring_client_telegraf_port: 9273
       hosts:
-        local_workstation:
+        remote_workstation:
           monitoring_node: workstation
-          monitoring_node_exporter_target: nodeexporter:9100
-          monitoring_cadvisor_target: cadvisor:8080
+          monitoring_telegraf_target: telegraf:9273
           monitoring_gpu_target: nvidia-gpu-exporter:9835
-        local_pi:
+        remote_pi:
           monitoring_node: pi
+          # SSH uses the public hostname; metrics are reachable over the LAN.
+          monitoring_address: 192.168.1.58
+          monitoring_client_telegraf_bind_address: 192.168.1.58
+          # Alpine no longer publishes ARMv7 images; the pinned Debian image does.
+          monitoring_client_telegraf_image: telegraf:1.40.2
+          monitoring_telegraf_allowed_sources:
+            - 127.0.0.1/32
+            - 172.16.0.0/12
+            - 192.168.1.132/32
         nk1:
           monitoring_availability_alert: true
+          monitoring_telegraf_allowed_sources:
+            - 127.0.0.1/32
+            - 172.16.0.0/12
+            # Observed dynamic ISP pool, not host identity; use a VPN /32 for host-only access.
+            - 178.141.0.0/17
         nt1:
           monitoring_availability_alert: true
-          monitoring_client_node_exporter_port: 901
-          monitoring_client_cadvisor_port: 900
+          monitoring_telegraf_allowed_sources:
+            - 127.0.0.1/32
+            - 172.16.0.0/12
+            # Observed dynamic ISP pool, not host identity; use a VPN /32 for host-only access.
+            - 178.141.0.0/17
     # Retain SSH records in ./hosts, but never scrape or deploy exporters here.
     retired_nodes:
       hosts:

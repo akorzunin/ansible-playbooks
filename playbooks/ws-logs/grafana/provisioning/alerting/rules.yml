@@ -7,7 +7,7 @@ groups:
     interval: 1m
     rules:
       - uid: monitoring-node-offline
-        title: Node exporter unreachable
+        title: Host collector unreachable
         condition: B
         for: 2m
         noDataState: NoData
@@ -19,8 +19,8 @@ groups:
         annotations:
           summary: 'Node {{ $labels.node }} exporter is unreachable'
           description: >-
-            Prometheus cannot scrape node-exporter for two minutes. Check the node,
-            exporter, and network. This indicates reachability, not necessarily a powered-off machine.
+            Prometheus cannot scrape the host collector (node-exporter or Telegraf)
+            for two minutes. Check the node, collector, and network. This indicates reachability, not necessarily a powered-off machine.
         data:
           - refId: A
             relativeTimeRange:
@@ -32,7 +32,7 @@ groups:
               datasource:
                 type: prometheus
                 uid: monitoring-prometheus
-              expr: 'up{job="nodeexporter", availability_alert="true"}'
+              expr: 'up{job=~"nodeexporter|telegraf", availability_alert="true"}'
               instant: true
               range: false
               intervalMs: 1000
@@ -95,10 +95,16 @@ groups:
                 type: prometheus
                 uid: monitoring-prometheus
               expr: >-
-                (100 * node_filesystem_avail_bytes{job="nodeexporter", fstype!~"tmpfs|overlay|squashfs"}
-                / node_filesystem_size_bytes{job="nodeexporter", fstype!~"tmpfs|overlay|squashfs"})
-                and (node_filesystem_readonly{job="nodeexporter"} == 0)
-                and (node_filesystem_size_bytes{job="nodeexporter"} > 0)
+                max by (node, mountpoint, device) (label_replace(
+                  (100 * disk_free{job="telegraf", mode="rw", fstype!~"tmpfs|overlay|squashfs"}
+                  / disk_total{job="telegraf", mode="rw", fstype!~"tmpfs|overlay|squashfs"})
+                  and (disk_total{job="telegraf", mode="rw", fstype!~"tmpfs|overlay|squashfs"} > 0),
+                  "mountpoint", "$1", "path", "(.+)"))
+                or on (node, mountpoint) max by (node, mountpoint, device) (
+                  (100 * node_filesystem_avail_bytes{job="nodeexporter", fstype!~"tmpfs|overlay|squashfs"}
+                  / node_filesystem_size_bytes{job="nodeexporter", fstype!~"tmpfs|overlay|squashfs"})
+                  and (node_filesystem_readonly{job="nodeexporter"} == 0)
+                  and (node_filesystem_size_bytes{job="nodeexporter"} > 0))
               instant: true
               range: false
               intervalMs: 1000

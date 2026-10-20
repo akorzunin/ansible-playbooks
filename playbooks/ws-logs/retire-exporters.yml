@@ -1,0 +1,93 @@
+---
+- name: Retire verified legacy exporters on Telegraf clients
+  hosts: monitored_nodes:!monitoring_servers:!retired_nodes
+  serial: 1
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Verify replacement metrics from the actual Prometheus server
+      vars:
+        monitoring_telegraf_query: >-
+          count by (__name__) ({job="telegraf",node="{{ monitoring_node | default(inventory_hostname) }}",
+          __name__=~"{{ 'cpu_usage_idle|mem_available|mem_total|disk_free|disk_total|'
+          ~ 'net_bytes_recv|diskio_read_bytes|system_load1|system_n_cpus|'
+          ~ 'docker_container_cpu_usage_percent|docker_container_mem_usage|'
+          ~ 'docker_container_net_rx_bytes|docker_container_net_tx_bytes' }}"})
+          and on () (up{job="telegraf",node="{{ monitoring_node | default(inventory_hostname) }}"} == 1)
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9090/api/v1/query?query={{ monitoring_telegraf_query | urlencode }}"
+        use_proxy: false
+      delegate_to: "{{ groups['monitoring_servers'] | first }}"
+      become: false
+      register: monitoring_client_metrics
+      until: >-
+        monitoring_client_metrics.status == 200 and
+        monitoring_client_metrics.json.status == 'success' and
+        monitoring_client_metrics.json.data.result | length == 13
+      retries: 12
+      delay: 10
+      when:
+        - not ansible_check_mode
+        - monitoring_enabled | default(true) | bool
+
+    - name: Inspect legacy exporter containers
+      community.docker.docker_container_info:
+        name: "{{ item }}"
+      loop: [nodeexporter, cadvisor]
+      register: monitoring_old_clients
+      no_log: true
+      when:
+        - not ansible_check_mode
+        - monitoring_enabled | default(true) | bool
+
+    # All existing exporters use one Compose file. Back up multi-file projects manually.
+    - name: Confirm exporter images and Compose ownership before removal
+      ansible.builtin.assert:
+        that:
+          - item.container.Config.Labels['com.docker.compose.service'] == item.item
+          - >-
+            item.container.Config.Image is match('^prom/node-exporter:')
+            if item.item == 'nodeexporter'
+            else item.container.Config.Image is match('^(gcr.io/cadvisor/cadvisor(-arm)?|ghcr.io/google/cadvisor):')
+          - item.container.Config.Labels['com.docker.compose.project.config_files'] is match('^/')
+          - "',' not in item.container.Config.Labels['com.docker.compose.project.config_files']"
+      loop: "{{ monitoring_old_clients.results }}"
+      no_log: true
+      when:
+        - not ansible_check_mode
+        - item.exists | default(false)
+
+    - name: Preserve legacy deployment metadata for rollback
+      ansible.builtin.copy:
+        dest: /srv/monitoring/telegraf/legacy-exporters.json
+        content: "{{ monitoring_old_clients.results | to_nice_json }}"
+        mode: "0600"
+        force: false
+      no_log: true
+      when:
+        - not ansible_check_mode
+        - monitoring_old_clients.results | selectattr('exists', 'defined') | selectattr('exists') | list | length > 0
+
+    - name: Back up legacy exporter Compose files without changing their projects
+      ansible.builtin.copy:
+        src: "{{ item.container.Config.Labels['com.docker.compose.project.config_files'] }}"
+        dest: "/srv/monitoring/telegraf/legacy-{{ item.item }}-compose.yaml"
+        remote_src: true
+        mode: "0600"
+        force: false
+      loop: "{{ monitoring_old_clients.results }}"
+      no_log: true
+      when:
+        - not ansible_check_mode
+        - item.exists | default(false)
+
+    # Remove only the named exporter containers, not networks, volumes, or other services.
+    - name: Remove legacy exporters after verified Telegraf cutover and backup
+      community.docker.docker_container:
+        name: "{{ item.item }}"
+        state: absent
+      loop: "{{ monitoring_old_clients.results }}"
+      no_log: true
+      when:
+        - not ansible_check_mode
+        - item.exists | default(false)

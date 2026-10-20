@@ -20,20 +20,21 @@ Their private SSH records are not deleted.
 
 `monitoring_address` overrides `ansible_host` when Prometheus needs a different
 address (for example, a VPN address). `monitoring_node` is a stable human-readable
-label. Workstation exporters use Compose DNS; remote exporter ports are inherited
-from the same inventory variables used to deploy them.
+label. All four nodes use Telegraf. The workstation uses Compose DNS
+(`telegraf:9273`); remote agents publish port 9273. `remote_pi` uses the public
+hostname for SSH but `monitoring_address: 192.168.1.58` for LAN scrapes from the
+workstation, and publishes metrics only on that LAN address.
 
-Exporter ports (nk1/nt1 probed directly; Pi verified through Prometheus during deployment):
-
-| Node | node-exporter | cAdvisor |
-| --- | --- | --- |
-| nk1 | 9100 | 3003 |
-| nt1 | 901 | 900 |
-| pi | 9100 | 3003 |
-
-Exporters currently respond on public addresses. Restrict them to the workstation
-or a private monitoring network with firewall/VPN rules; this playbook does not
-change networking or expose additional ports.
+Remote agents require `monitoring_telegraf_allowed_sources`. The Pi allows the
+workstation's LAN address; nk1/nt1 allow `178.141.0.0/17`, the smallest single CIDR
+covering the workstation's observed dynamic public addresses. This spans
+`178.141.0.0`–`178.141.127.255` (32,768 addresses), so other subscribers in that
+range can also read metrics. Loopback and local Docker bridge sources are also
+allowed. Requests from other public sources receive HTTP 403. **Future ISP
+assignments outside this range still require updating both VPS allowlists in
+`monitoring.inventory.yml` and redeploying those clients.** Prefer a stable VPN
+source for host-only access. No firewall rules are modified. The workstation
+agent has no published host port; its endpoint stays inside the Compose network.
 
 ## Secrets and environment
 
@@ -61,7 +62,7 @@ backups as sensitive. Nothing modifies the private inventory or secrets automati
 
 ## First migration: back up, replace, provision
 
-Run from the repository root. The server defaults to `local_workstation`, not every
+Run from the repository root. The server defaults to `remote_workstation`, not every
 host in the private inventory. No infrastructure is changed until you run these commands.
 
 ```sh
@@ -115,12 +116,74 @@ ansible-playbook -i ./hosts -i ./monitoring.inventory.yml \
 Override `remote_install_path` if the existing stack lives elsewhere. Don't run a
 second Grafana against an empty directory and mistake it for a migration.
 
+## Telegraf collectors
+
+All monitored nodes use Telegraf 1.40.2. Workstation, nk1, and nt1 use the Alpine
+image; the 32-bit ARMv7 Pi uses `telegraf:1.40.2` (Debian), because the Alpine tag
+does not publish ARMv7 images. One template,
+`roles/monitoring_client/templates/telegraf.conf.j2`, supplies every agent's
+configuration with its stable node hostname and optional endpoint source allowlist.
+The workstation agent lives in the existing stack; remote agents live in the
+separate `/srv/monitoring/telegraf` Compose project.
+
+It collects host CPU, available memory, load/uptime, filesystem capacity, disk I/O,
+and network counters, plus running Docker containers' CPU, memory, network, and
+block-I/O metrics. Read-only host mounts supply real host data. `/proc/1/net` is
+mounted over `/hostproc/net` so network counters come from the host's namespace,
+not the agent's bridge interface. No host networking or privileged mode is needed.
+
+**Security:** Telegraf runs as root and can read the host filesystem and access
+the Docker socket. A `:ro` socket bind does **not** make the Docker API read-only;
+that API is root-equivalent access. The image's privilege-dropping entrypoint is
+bypassed intentionally. Do not allow untrusted changes to its configuration.
+
+Deploy remote agents first with `deploy-clients.yml` (serial, one host at a time).
+It never removes legacy exporters or uses the generic role's force-recreate/orphan
+cleanup. Deploy the server with `deploy.yml` to switch Prometheus to the inventory's
+Telegraf endpoints. After checking every dashboard query, run `retire-exporters.yml`:
+it checks a successful scrape and 13 required metric families **for each node from
+the actual Prometheus server**, verifies the old exporter images/Compose labels,
+and saves root-readable rollback metadata and Compose files under
+`/srv/monitoring/telegraf/legacy-*` before removing only the two exporter containers.
+Existing legacy project directories, networks, images, and volumes are retained.
+The server's previous configuration is archived under `~/deploy/ws-logs/backups/`.
+A failed verification stops retirement; no stack-wide `down` or global orphan
+cleanup is used.
+
+**Monitoring / Nodes & Containers** supports both collectors. Queries prefer
+Telegraf per node/filesystem/container and fall back to exporter metrics, retaining
+old history until Prometheus retention expires. Native metric names are not
+rewritten into fake `node_*` or `container_*` metrics. The separate test Telegraf
+dashboard has been removed; use **Nodes & Containers** and **NVIDIA GPUs**.
+
+Container CPU is still expressed in cores in the shared dashboard (Docker CPU
+percentage divided by 100). Working-set memory subtracts inactive file cache:
+`total_inactive_file` on cgroup v1, `inactive_file` on v2, clamped at zero. If both
+fields are absent it falls back to raw usage, which includes cache. The native
+Telegraf dashboard always shows raw Docker usage. This is dashboard/alert coverage,
+not full metric-for-metric parity: non-Docker cgroups and unused exporter collectors
+are not reproduced. Host network sums can still double-count VPN traffic.
+
+Verify after deployment:
+
+1. Check `docker compose logs --tail=50 telegraf` in `~/deploy/ws-logs`.
+2. Check `up{job="telegraf"}` is `1` for all four nodes, with no node-exporter or
+   cAdvisor scrape targets remaining.
+3. Check every shared dashboard panel for each node, and check the disk alert
+   query still returns every node's writable root filesystem.
+
+To roll back, restore the saved server configuration and restart Prometheus/Grafana.
+For a remote host, use its retained legacy project directories and saved metadata
+to recover the old image versions/settings, then run `docker compose up -d` only
+in those exporter projects. Restore the corresponding Git/inventory configuration
+before the next managed deployment. Do not delete metric history.
+
 ## Alerts
 
 The node availability rule checks:
 
 ```promql
-up{job="nodeexporter", availability_alert="true"}
+up{job=~"nodeexporter|telegraf", availability_alert="true"}
 ```
 
 Each series below 1 for two minutes creates an alert for its `node`. Currently only
@@ -132,9 +195,11 @@ NoData/Error alerts, routed to Telegram too.
 The **Disk space below 20% free** rule checks all monitored nodes, independently
 of availability-alert opt-in. Each writable, non-empty filesystem with less than
 20% available space for five minutes generates an alert identifying its node,
-mountpoint, and device. It uses `node_filesystem_avail_bytes` (excluding reserved
-blocks) divided by `node_filesystem_size_bytes`, excludes `tmpfs`, `overlay`, and
-`squashfs`, and evaluates every minute. Read-only filesystems are excluded.
+mountpoint, and device. It uses Telegraf's `disk_free / disk_total` for writable
+filesystems (`mode="rw"`), or `node_filesystem_avail_bytes / node_filesystem_size_bytes`
+on exporter nodes. Both exclude reserved blocks, `tmpfs`, `overlay`, and `squashfs`.
+Telegraf's `path` label is normalized to `mountpoint`; read-only and zero-sized
+filesystems are excluded. Evaluation remains once per minute.
 
 Both rules route through **Monitoring Telegram**, including NoData/Error alerts.
 After deployment, test that contact point in Grafana and check the Prometheus
@@ -146,9 +211,10 @@ dashboard variables.
 
 1. Add SSH details to the private `hosts` inventory.
 2. Add the same host to `monitored_nodes` in `monitoring.inventory.yml`.
-3. Override exporter ports/address as needed; set `monitoring_availability_alert:
-   true` if it should page you.
-4. For a new Docker host, deploy exporters, then redeploy the monitoring server:
+3. Configure the metrics address, `monitoring_client_telegraf_port` if not 9273,
+   and a non-empty `monitoring_telegraf_allowed_sources` list. Set
+   `monitoring_availability_alert: true` if it should page you.
+4. For a new Docker host, deploy Telegraf, then redeploy the monitoring server:
 
 ```sh
 ansible-playbook -i ./hosts -i ./monitoring.inventory.yml \
@@ -158,11 +224,18 @@ ansible-playbook -i ./hosts -i ./monitoring.inventory.yml \
   --vault-password-file=.ansible_pass playbooks/ws-logs/deploy.yml
 ```
 
-The client playbook requires Docker and sudo; it creates the existing role's
-`monitoring` network. The server's exporters stay in the server Compose project.
-**Do not blindly redeploy existing Pi/nk1 exporters:** older standalone Compose
-projects use the same container names. Retire those old exporter projects first,
-then use `deploy-clients.yml` with the inventory ports. nt1 already uses this role.
+The client playbook requires Docker Compose and sudo. Both the client role and
+`node/nt1/services.deploy.yaml` now deploy Telegraf, not the old exporters; always
+load the monitoring overlay for endpoint restrictions. For an existing exporter
+host, keep the old containers until server-side checks pass, then retire them:
+
+```sh
+ansible-playbook -i ./hosts -i ./monitoring.inventory.yml \
+  --vault-password-file=.ansible_pass playbooks/ws-logs/retire-exporters.yml -l newnode
+```
+
+The retirement playbook supports the existing single-file Compose projects;
+back up multi-file legacy projects manually before attempting their migration.
 
 Dashboards discover new nodes automatically. Use `monitoring_enabled: false` to
 stop scraping a host, or move it to `retired_nodes`. Redeploy the server afterward.
@@ -178,6 +251,12 @@ won't show pre-migration history. Stable `node` labels survive later address cha
 Edit the combined dashboard in `grafana/dashboards/nodes.json`, not the old per-node
 JSONC template. It keeps the `monitoring-nodes` UID so existing node dashboard links
 continue to work. One node selector filters both exporter and container metrics.
+The searchable **Container** dropdown lists containers on the selected nodes from
+both Telegraf and cAdvisor. Open it, type a name, and select one or several containers
+to filter all four container charts and their legends; **All** restores every container.
+Host charts are unaffected. The list discovers currently reported containers, not
+containers that only exist in historical data. Search lives in this dashboard filter,
+not inside individual legends.
 A shared crosshair marks the hovered timestamp across charts. Node panels include
 filesystem utilization (%), available disk space (automatically scaled to GiB/TiB),
 1/5/15-minute load averages, and logical CPU count. Available space excludes blocks

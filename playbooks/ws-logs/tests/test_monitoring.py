@@ -1,9 +1,12 @@
 """Offline checks for monitoring's inventory/provisioning contract."""
 
 import copy
+import ipaddress
 import json
 from pathlib import Path
+import re
 import unittest
+import tomllib
 
 import jinja2
 import yaml
@@ -55,40 +58,32 @@ class MonitoringTests(unittest.TestCase):
         }
 
     def test_active_nodes_ports_and_alert_opt_in(self):
-        targets = self.targets("nodeexporter")
+        targets = self.targets("telegraf")
         self.assertEqual(set(targets), {"workstation", "pi", "nk1", "nt1"})
-        self.assertEqual(targets["workstation"]["targets"], ["nodeexporter:9100"])
-        self.assertEqual(targets["nk1"]["targets"], ["nk1.example.test:9100"])
-        self.assertEqual(targets["nt1"]["targets"], ["nt1.example.test:901"])
-        self.assertEqual(self.targets("cadvisor")["nk1"]["targets"], ["nk1.example.test:3003"])
-        self.assertEqual(self.targets("cadvisor")["nt1"]["targets"], ["nt1.example.test:900"])
-        opted_in = {
-            node for node, target in targets.items()
-            if target["labels"]["availability_alert"] == "true"
-        }
+        self.assertEqual(targets["workstation"]["targets"], ["telegraf:9273"])
+        self.assertEqual(targets["pi"]["targets"], ["192.168.1.58:9273"])
+        self.assertEqual(targets["nk1"]["targets"], ["nk1.example.test:9273"])
+        self.assertEqual(targets["nt1"]["targets"], ["nt1.example.test:9273"])
+        opted_in = {node for node, target in targets.items() if target["labels"]["availability_alert"] == "true"}
         self.assertEqual(opted_in, {"nk1", "nt1"})
-        for target in targets.values():
-            self.assertIsInstance(target["labels"]["availability_alert"], str)
+        jobs = {job["job_name"] for job in self.prometheus()["scrape_configs"]}
+        self.assertEqual(jobs, {"prometheus", "telegraf", "nvidia-gpu-exporter"})
 
     def test_retired_nodes_are_excluded_even_if_added_to_monitored_group(self):
         for host in self.groups["retired_nodes"]:
             self.groups["monitored_nodes"].append(host)
             self.hostvars[host] = copy.deepcopy(self.hostvars["nk1"])
-        self.assertEqual(set(self.targets("nodeexporter")), {"workstation", "pi", "nk1", "nt1"})
-        self.assertEqual(set(self.targets("cadvisor")), {"workstation", "pi", "nk1", "nt1"})
+        self.assertEqual(set(self.targets("telegraf")), {"workstation", "pi", "nk1", "nt1"})
 
     def test_disabled_nodes_are_not_scraped(self):
         for disabled in (False, "false"):
             with self.subTest(disabled=disabled):
                 self.hostvars["nk1"]["monitoring_enabled"] = disabled
-                self.assertNotIn("nk1", self.targets("nodeexporter"))
-                self.assertNotIn("nk1", self.targets("cadvisor"))
+                self.assertNotIn("nk1", self.targets("telegraf"))
 
     def test_string_false_does_not_enable_availability_alerts(self):
         self.hostvars["nk1"]["monitoring_availability_alert"] = "false"
-        self.assertEqual(
-            self.targets("nodeexporter")["nk1"]["labels"]["availability_alert"], "false"
-        )
+        self.assertEqual(self.targets("telegraf")["nk1"]["labels"]["availability_alert"], "false")
 
     def test_new_node_and_address_override_need_no_new_jobs(self):
         self.groups["monitored_nodes"].append("newnode")
@@ -96,14 +91,110 @@ class MonitoringTests(unittest.TestCase):
             "ansible_host": "ssh.example.test",
             "monitoring_address": "10.10.10.10",
             "monitoring_node": "stable-name",
-            "monitoring_client_node_exporter_port": 9991,
-            "monitoring_client_cadvisor_port": 9990,
+            "monitoring_client_telegraf_port": 9991,
         }
-        self.assertEqual(
-            self.targets("nodeexporter")["stable-name"]["targets"],
-            ["10.10.10.10:9991"],
-        )
-        self.assertEqual(len(self.prometheus()["scrape_configs"]), 4)
+        self.assertEqual(self.targets("telegraf")["stable-name"]["targets"], ["10.10.10.10:9991"])
+        self.assertEqual(len(self.prometheus()["scrape_configs"]), 3)
+
+    def test_no_empty_jobs_when_all_nodes_are_disabled(self):
+        for host in self.groups["monitored_nodes"]:
+            self.hostvars[host]["monitoring_enabled"] = False
+        self.assertEqual([job["job_name"] for job in self.prometheus()["scrape_configs"]], ["prometheus"])
+
+    def test_telegraf_availability_opt_in_is_preserved(self):
+        self.hostvars["remote_workstation"]["monitoring_availability_alert"] = True
+        target = self.targets("telegraf")["workstation"]
+        self.assertEqual(target["labels"]["availability_alert"], "true")
+
+    def test_exporters_are_retired_only_after_coverage_and_ownership_checks(self):
+        tasks = yaml.safe_load((STACK / "deploy.yml").read_text())[0]["tasks"]
+        names = [task["name"] for task in tasks]
+        verify = names.index("Wait for Telegraf host and container metrics in Prometheus")
+        ownership = names.index("Refuse to remove exporters belonging to another Compose project")
+        retire = names.index("Retire legacy workstation exporters after Telegraf verification")
+        self.assertLess(verify, ownership)
+        self.assertLess(ownership, retire)
+        self.assertIn("length == 13", tasks[verify]["until"])
+        self.assertEqual(tasks[retire]["community.docker.docker_container"]["state"], "absent")
+        self.assertIn("not ansible_check_mode", tasks[retire]["when"])
+        compose = next(task["community.docker.docker_compose_v2"] for task in tasks if "community.docker.docker_compose_v2" in task)
+        self.assertFalse(compose.get("remove_orphans", False))
+
+    def test_telegraf_collects_host_and_docker_metrics_without_host_ports(self):
+        compose = yaml.safe_load((STACK / "compose.yml").read_text())
+        service = compose["services"]["telegraf"]
+        self.assertEqual(service["image"], "telegraf:1.40.2-alpine")
+        self.assertNotIn("ports", service)
+        self.assertNotIn("privileged", service)
+        self.assertEqual(service["user"], "root")
+        self.assertEqual(service["entrypoint"], ["telegraf"])
+        self.assertIn("/:/hostfs:ro,rslave", service["volumes"])
+        self.assertIn("/var/run/docker.sock:/var/run/docker.sock:ro", service["volumes"])
+        self.assertEqual(service["environment"]["HOST_PROC"], "/hostproc")
+        self.assertIn("/proc:/hostproc:ro", service["volumes"])
+        self.assertIn("/proc/1/net:/hostproc/net:ro", service["volumes"])
+        self.assertEqual(service["environment"]["HOST_MOUNT_PREFIX"], "/hostfs")
+        template = self.environment.from_string((ROOT / "roles/monitoring_client/templates/telegraf.conf.j2").read_text())
+        config = tomllib.loads(template.render(**self.hostvars["remote_workstation"], inventory_hostname="remote_workstation"))
+        self.assertEqual(config["agent"]["hostname"], "workstation")
+        self.assertEqual(config["agent"]["interval"], "15s")
+        self.assertEqual(set(config["inputs"]), {"cpu", "mem", "system", "disk", "diskio", "net", "docker"})
+        output, = config["outputs"]["prometheus_client"]
+        self.assertEqual(output["listen"], ":9273")
+        self.assertFalse(output["string_as_label"])
+        docker, = config["inputs"]["docker"]
+        self.assertEqual(docker["container_state_include"], ["running"])
+        self.assertEqual(docker["docker_label_include"], [
+            "com.docker.compose.project", "com.docker.compose.service",
+        ])
+        self.assertNotIn("nodeexporter", compose["services"])
+        self.assertNotIn("cadvisor", compose["services"])
+        self.assertNotIn("depends_on", compose["services"]["prometheus"])
+        play = yaml.safe_load((STACK / "deploy.yml").read_text())[0]
+        template_task = next(task for task in play["tasks"] if task["name"] == "Render workstation Telegraf configuration")
+        self.assertTrue(template_task["ansible.builtin.template"]["src"].endswith("roles/monitoring_client/templates/telegraf.conf.j2"))
+        reload = next(task for task in play["tasks"] if task["name"] == "Reload services when managed configuration changes")
+        self.assertIn("telegraf", reload["community.docker.docker_compose_v2"]["services"])
+
+    def test_remote_agents_have_stable_hostnames_and_source_restrictions(self):
+        template = self.environment.from_string((ROOT / "roles/monitoring_client/templates/telegraf.conf.j2").read_text())
+        for host in ("remote_pi", "nk1", "nt1"):
+            variables = self.hostvars[host]
+            config = tomllib.loads(template.render(**variables, inventory_hostname=host))
+            self.assertEqual(config["agent"]["hostname"], variables.get("monitoring_node", host))
+            self.assertEqual(config["outputs"]["prometheus_client"][0]["ip_range"], variables["monitoring_telegraf_allowed_sources"])
+            self.assertNotIn("0.0.0.0/0", variables["monitoring_telegraf_allowed_sources"])
+        self.assertEqual(self.hostvars["remote_pi"]["monitoring_client_telegraf_image"], "telegraf:1.40.2")
+        self.assertEqual(self.hostvars["remote_pi"]["monitoring_client_telegraf_bind_address"], "192.168.1.58")
+
+    def test_vps_allowlists_cover_observed_dynamic_public_addresses(self):
+        observed = [
+            "178.141.4.135", "178.141.43.157", "178.141.53.28", "178.141.32.176",
+            "178.141.87.75", "178.141.68.207", "178.141.13.19", "178.141.30.3",
+            "178.141.1.78", "178.141.26.167", "178.141.56.152", "178.141.35.199",
+        ]
+        for host in ("nk1", "nt1"):
+            sources = self.hostvars[host]["monitoring_telegraf_allowed_sources"]
+            self.assertIn("178.141.0.0/17", sources)
+            networks = [ipaddress.ip_network(source) for source in sources]
+            for address in observed:
+                self.assertTrue(any(ipaddress.ip_address(address) in network for network in networks))
+            for address in ("178.141.128.0", "178.142.35.199"):
+                self.assertFalse(any(ipaddress.ip_address(address) in network for network in networks))
+
+    def test_client_retirement_requires_per_node_metrics_and_backup(self):
+        play = yaml.safe_load((STACK / "retire-exporters.yml").read_text())[0]
+        self.assertEqual(play["hosts"], "monitored_nodes:!monitoring_servers:!retired_nodes")
+        self.assertEqual(play["serial"], 1)
+        verify = play["tasks"][0]
+        self.assertIn("delegate_to", verify)
+        self.assertIn('node="{{ monitoring_node', verify["vars"]["monitoring_telegraf_query"])
+        self.assertIn("length == 13", verify["until"])
+        names = [task["name"] for task in play["tasks"]]
+        self.assertLess(names.index("Back up legacy exporter Compose files without changing their projects"), names.index("Remove legacy exporters after verified Telegraf cutover and backup"))
+        remove = play["tasks"][-1]["community.docker.docker_container"]
+        self.assertEqual(remove["state"], "absent")
+        self.assertNotIn("force_kill", remove)
 
     def test_gpu_target_has_stable_workstation_label(self):
         self.assertEqual(self.targets("nvidia-gpu-exporter"), {
@@ -114,7 +205,7 @@ class MonitoringTests(unittest.TestCase):
         })
 
     def test_no_empty_gpu_job_when_gpu_node_is_disabled(self):
-        self.hostvars["local_workstation"]["monitoring_enabled"] = False
+        self.hostvars["remote_workstation"]["monitoring_enabled"] = False
         jobs = [job["job_name"] for job in self.prometheus()["scrape_configs"]]
         self.assertNotIn("nvidia-gpu-exporter", jobs)
 
@@ -135,6 +226,7 @@ class MonitoringTests(unittest.TestCase):
                     self.assertNotIn("nodeexporter-", query["expr"])
                     self.assertNotIn("cadvisor-", query["expr"])
         self.assertEqual(uids, {"monitoring-nodes", "monitoring-nvidia"})
+        self.assertFalse((STACK / "grafana/dashboards/telegraf.json").exists())
 
     def test_nvidia_dashboard_matches_exporter_metrics_and_units(self):
         dashboard = json.loads((STACK / "grafana/dashboards/nvidia.json").read_text())
@@ -176,41 +268,39 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(dashboard["title"], "Nodes & Containers")
         self.assertEqual(dashboard["graphTooltip"], 1)
         variables = dashboard["templating"]["list"]
-        self.assertEqual(len(variables), 1)
+        self.assertEqual([variable["name"] for variable in variables], ["node", "container"])
         self.assertEqual(
             variables[0]["query"]["query"],
-            'label_values(up{job=~"nodeexporter|cadvisor"}, node)',
+            'label_values(up{job=~"nodeexporter|cadvisor|telegraf"}, node)',
         )
         self.assertEqual(variables[0]["definition"], variables[0]["query"]["query"])
         self.assertTrue(variables[0]["multi"])
         self.assertTrue(variables[0]["includeAll"])
         panels = {panel["title"]: panel for panel in dashboard["panels"]}
-        self.assertIn("Node exporter availability", panels)
-        self.assertIn("cAdvisor availability", panels)
+        self.assertIn("Host collector availability", panels)
+        self.assertIn("Container collector availability", panels)
         self.assertIn("CPU utilization", panels)
         self.assertIn("Memory utilization", panels)
         self.assertIn("Filesystem utilization", panels)
+        self.assertIn('(disk_total{job="telegraf", node=~"$node"} > 0)', panels["Filesystem utilization"]["targets"][0]["expr"])
         self.assertIn("Network traffic", panels)
         self.assertEqual(len(dashboard["panels"]), 13)
         self.assertNotIn("Disk usage (used bytes)", panels)
         disk = panels["Available disk space"]
         self.assertEqual(disk["fieldConfig"]["defaults"]["unit"], "bytes")
-        self.assertEqual(
-            disk["targets"][0]["expr"],
-            'node_filesystem_avail_bytes{job="nodeexporter", node=~"$node", fstype!~"tmpfs|overlay|squashfs"}',
-        )
+        self.assertIn('disk_free{job="telegraf"', disk["targets"][0]["expr"])
+        self.assertIn('node_filesystem_avail_bytes{job="nodeexporter"', disk["targets"][0]["expr"])
+        self.assertIn('or on (node, mountpoint)', disk["targets"][0]["expr"])
         cpu = panels["CPU count"]["targets"][0]
-        self.assertEqual(
-            cpu["expr"],
-            'count by (node) (node_cpu_seconds_total{job="nodeexporter", node=~"$node", mode="idle"})',
-        )
+        self.assertIn('system_n_cpus{job="telegraf"', cpu["expr"])
+        self.assertIn('count by (node) (node_cpu_seconds_total', cpu["expr"])
         self.assertTrue(cpu["instant"])
         self.assertFalse(cpu["range"])
-        self.assertEqual(
-            [target["expr"] for target in panels["Load average (1 / 5 / 15 minutes)"]["targets"]],
-            [f'node_load{period}{{job="nodeexporter", node=~"$node"}}' for period in (1, 5, 15)],
-        )
-        containers = [panel for panel in dashboard["panels"] if panel["title"].startswith("Container ")]
+        for period, target in zip((1, 5, 15), panels["Load average (1 / 5 / 15 minutes)"]["targets"]):
+            self.assertIn(f'system_load{period}', target["expr"])
+            self.assertIn(f'node_load{period}', target["expr"])
+            self.assertIn('or on (node)', target["expr"])
+        containers = [panel for panel in dashboard["panels"] if panel["title"].startswith("Container ") and panel["type"] == "timeseries"]
         self.assertEqual(len(containers), 4)
         for panel in containers:
             self.assertEqual(panel["gridPos"]["w"], 24)
@@ -221,8 +311,45 @@ class MonitoringTests(unittest.TestCase):
             self.assertEqual(legend["calcs"], ["lastNotNull"])
             self.assertEqual(legend["sortBy"], "Last *")
             self.assertTrue(legend["sortDesc"])
-            self.assertIn('sum by (node, name)', panel["targets"][0]["expr"])
+            expr = panel["targets"][0]["expr"]
+            self.assertIn('sum by (node, name)', expr)
+            self.assertIn('or on (node, name)', expr)
+            self.assertIn('job="telegraf"', expr)
+            self.assertIn('job="cadvisor"', expr)
             self.assertEqual(panel["targets"][0]["legendFormat"], "{{node}} / {{name}}")
+
+    def test_container_filter_covers_both_collectors_and_only_container_charts(self):
+        dashboard = json.loads((STACK / "grafana/dashboards/nodes.json").read_text())
+        variable = dashboard["templating"]["list"][1]
+        self.assertEqual(variable["label"], "Container")
+        self.assertEqual(variable["type"], "query")
+        self.assertTrue(variable["multi"])
+        self.assertTrue(variable["includeAll"])
+        self.assertEqual(variable["allValue"], ".*")
+        self.assertEqual(variable["current"]["value"], "$__all")
+        self.assertEqual(variable["refresh"], 1)
+        self.assertEqual(variable["sort"], 1)
+        query = variable["query"]["query"]
+        self.assertEqual(variable["definition"], query)
+        self.assertTrue(query.startswith("query_result("))
+        self.assertIn('label_replace(docker_container_mem_usage', query)
+        self.assertIn('"name", "$1", "container_name", "(.+)"', query)
+        self.assertIn('container_memory_working_set_bytes', query)
+        self.assertEqual(query.count('node=~"$node"'), 2)
+        self.assertNotIn("$container", query)
+        pattern = variable["regex"].strip("/")
+        for name in ("arr-sonarr-1", "my.container", "grafana"):
+            self.assertEqual(re.search(pattern, f'{{name="{name}"}} 1').group(1), name)
+        for panel in dashboard["panels"]:
+            for target in panel["targets"]:
+                expr = target["expr"]
+                if panel["type"] != "timeseries" or not panel["title"].startswith("Container "):
+                    self.assertNotIn("$container", expr)
+                    continue
+                for selector in re.findall(r"\{([^{}]+)\}", expr):
+                    with self.subTest(panel=panel["title"], selector=selector):
+                        label = "container_name" if 'job="telegraf"' in selector else "name"
+                        self.assertIn(f'{label}=~"$container"', selector)
 
     def test_dashboard_panels_have_unique_ids_and_do_not_overlap(self):
         for path in (STACK / "grafana/dashboards").glob("*.json"):
@@ -256,7 +383,7 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(rule["noDataState"], "NoData")
         self.assertEqual(rule["execErrState"], "Error")
         self.assertEqual(query["datasourceUid"], "monitoring-prometheus")
-        self.assertEqual(query["model"]["expr"], 'up{job="nodeexporter", availability_alert="true"}')
+        self.assertEqual(query["model"]["expr"], 'up{job=~"nodeexporter|telegraf", availability_alert="true"}')
         self.assertTrue(query["model"]["instant"])
         self.assertEqual(condition["model"]["type"], "threshold")
         self.assertEqual(condition["model"]["conditions"][0]["evaluator"], {"type": "lt", "params": [1]})
@@ -276,6 +403,10 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(rule["execErrState"], "Error")
         self.assertEqual(query["datasourceUid"], "monitoring-prometheus")
         expr = query["model"]["expr"]
+        self.assertIn('100 * disk_free{job="telegraf", mode="rw"', expr)
+        self.assertIn('disk_total{job="telegraf", mode="rw"', expr)
+        self.assertIn('"mountpoint", "$1", "path"', expr)
+        self.assertIn('or on (node, mountpoint)', expr)
         self.assertIn('100 * node_filesystem_avail_bytes{job="nodeexporter"', expr)
         self.assertIn('/ node_filesystem_size_bytes{job="nodeexporter"', expr)
         self.assertIn('fstype!~"tmpfs|overlay|squashfs"', expr)
@@ -330,12 +461,41 @@ class MonitoringTests(unittest.TestCase):
             {"monitoring-prometheus", "monitoring-loki"},
         )
 
+    def test_wrapped_readiness_queries_preserve_all_metric_names(self):
+        expected = {
+            "cpu_usage_idle", "mem_available", "mem_total", "disk_free", "disk_total",
+            "net_bytes_recv", "diskio_read_bytes", "system_load1", "system_n_cpus",
+            "docker_container_cpu_usage_percent", "docker_container_mem_usage",
+            "docker_container_net_rx_bytes", "docker_container_net_tx_bytes",
+        }
+        for filename in ("deploy.yml", "retire-exporters.yml"):
+            tasks = yaml.safe_load((STACK / filename).read_text())[0]["tasks"]
+            query = next(task["vars"]["monitoring_telegraf_query"] for task in tasks
+                         if "monitoring_telegraf_query" in task.get("vars", {}))
+            rendered = self.environment.from_string(query).render(monitoring_node="nk1", inventory_hostname="nk1")
+            pattern = re.search(r'__name__=~"([^"]+)"', rendered).group(1)
+            self.assertEqual(set(pattern.split("|")), expected)
+            self.assertIn('node="nk1"', rendered)
+
+    def test_client_configuration_changes_notify_restart_handler(self):
+        role = yaml.safe_load((ROOT / "roles/monitoring_client/tasks/main.yaml").read_text())
+        template = next(task for task in role if "ansible.builtin.template" in task)
+        handlers = yaml.safe_load((ROOT / "roles/monitoring_client/handlers/main.yaml").read_text())
+        handler = next(handler for handler in handlers if handler["name"] == template["notify"])
+        restart = handler["community.docker.docker_compose_v2"]
+        self.assertEqual(restart["state"], "restarted")
+        self.assertEqual(restart["services"], ["telegraf"])
+        self.assertFalse(restart["dependencies"])
+
     def test_client_deploy_excludes_server_and_retired_nodes(self):
         client = yaml.safe_load((STACK / "deploy-clients.yml").read_text())[0]
         self.assertEqual(client["hosts"], "monitored_nodes:!monitoring_servers:!retired_nodes")
         role = yaml.safe_load((ROOT / "roles/monitoring_client/tasks/main.yaml").read_text())
-        self.assertIn("monitoring_client_node_exporter_port", role[0]["environment"]["NODEEXPORTER_PORT"])
-        self.assertIn("monitoring_client_cadvisor_port", role[0]["environment"]["CADVISOR_PORT"])
+        self.assertEqual(client["serial"], 1)
+        deploy = next(task["community.docker.docker_compose_v2"] for task in role if "community.docker.docker_compose_v2" in task)
+        self.assertEqual(deploy["project_src"], "/srv/monitoring/telegraf")
+        self.assertFalse(deploy.get("remove_orphans", False))
+        self.assertFalse(any("ansible.builtin.import_role" in task for task in role))
 
     def test_configuration_reload_does_not_force_recreation(self):
         play = yaml.safe_load((STACK / "deploy.yml").read_text())[0]

@@ -1,56 +1,27 @@
 services:
-  cadvisor:
-    image: ghcr.io/google/cadvisor:${CADVISOR_VERSION}
-    container_name: cadvisor
+  telegraf:
+    image: ${TELEGRAF_IMAGE}
+    container_name: telegraf
+    user: root
+    # Bypass the image's privilege drop to retain access to the host Docker socket.
+    entrypoint: ["telegraf"]
+    command: ["--config", "/etc/telegraf/telegraf.conf"]
     restart: unless-stopped
-    privileged: true
-    devices:
-      - /dev/kmsg:/dev/kmsg
+    environment:
+      HOST_PROC: /hostproc
+      HOST_SYS: /hostfs/sys
+      HOST_ETC: /hostfs/etc
+      HOST_VAR: /hostfs/var
+      HOST_RUN: /hostfs/run
+      HOST_MOUNT_PREFIX: /hostfs
     volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker:/var/lib/docker:ro
-      - /cgroup:/cgroup:ro
+      - ./telegraf.conf:/etc/telegraf/telegraf.conf:ro
+      - /:/hostfs:ro,rslave
+      - /proc:/hostproc:ro
+      - /proc/1/net:/hostproc/net:ro
+      # Read-only bind does not make the Docker API read-only: root-equivalent access.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     ports:
-      - "${CADVISOR_PORT:-900}:8080"
-    deploy:
-      resources:
-        limits:
-          memory: 150M
-        reservations:
-          memory: 100M
-    networks:
-      - monitoring
+      - "${TELEGRAF_BIND_ADDRESS}:${TELEGRAF_PORT}:9273"
     labels:
-      org.label-schema.group: "monitoring"
-
-  nodeexporter:
-    image: prom/node-exporter:${NODEEXPORTER_VERSION}
-    container_name: nodeexporter
-    restart: unless-stopped
-    command:
-      - '--path.procfs=/host/proc'
-      - '--path.rootfs=/rootfs'
-      - '--path.sysfs=/host/sys'
-      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /:/rootfs:ro
-    ports:
-      - "${NODEEXPORTER_PORT:-901}:9100"
-    deploy:
-      resources:
-        limits:
-          memory: 50M
-        reservations:
-          memory: 20M
-    networks:
-      - monitoring
-    labels:
-      org.label-schema.group: "monitoring"
-
-networks:
-  monitoring:
-    external: true
+      org.opencontainers.group: monitoring

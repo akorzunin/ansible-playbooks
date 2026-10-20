@@ -1,12 +1,44 @@
-- name: Run monitoring services in docker compose
-  ansible.builtin.import_role:
-    name: deploy_compose
-  vars:
-    deploy_compose_dir: "/srv/monitoring"
-    deploy_compose_file: compose.yaml
-    deploy_compose_service_name: monitoring_client
-  environment:
-    CADVISOR_VERSION: "{{ monitoring_client_cadvizor_version }}"
-    NODEEXPORTER_VERSION: "{{ monitoring_client_node_exporter_version }}"
-    NODEEXPORTER_PORT: "{{ monitoring_client_node_exporter_port }}"
-    CADVISOR_PORT: "{{ monitoring_client_cadvisor_port }}"
+---
+- name: Require an explicit source allowlist for published Telegraf metrics
+  ansible.builtin.assert:
+    that:
+      - monitoring_telegraf_allowed_sources | default([]) | length > 0
+      - monitoring_client_telegraf_port | int > 0
+    fail_msg: Load monitoring.inventory.yml and configure monitoring_telegraf_allowed_sources before publishing metrics.
+
+- name: Create the Telegraf deployment directory
+  ansible.builtin.file:
+    path: /srv/monitoring/telegraf
+    state: directory
+    mode: "0755"
+
+- name: Copy the Telegraf Compose file
+  ansible.builtin.copy:
+    src: compose.yaml
+    dest: /srv/monitoring/telegraf/compose.yaml
+    mode: "0644"
+
+- name: Render Telegraf configuration
+  ansible.builtin.template:
+    src: telegraf.conf.j2
+    dest: /srv/monitoring/telegraf/telegraf.conf
+    mode: "0644"
+  notify: Restart Telegraf
+
+- name: Write pinned Telegraf deployment settings
+  ansible.builtin.copy:
+    dest: /srv/monitoring/telegraf/.env
+    content: |
+      TELEGRAF_IMAGE={{ monitoring_client_telegraf_image }}
+      TELEGRAF_BIND_ADDRESS={{ monitoring_client_telegraf_bind_address }}
+      TELEGRAF_PORT={{ monitoring_client_telegraf_port }}
+    mode: "0644"
+
+# A separate verified cutover retires legacy exporters; never remove orphans here.
+- name: Deploy Telegraf alongside any legacy exporters
+  community.docker.docker_compose_v2:
+    project_src: /srv/monitoring/telegraf
+    state: present
+    recreate: auto
+    wait: true
+    wait_timeout: 180

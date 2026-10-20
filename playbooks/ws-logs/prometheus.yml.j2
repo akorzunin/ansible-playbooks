@@ -9,27 +9,28 @@ scrape_configs:
         labels:
           node: workstation
 
-{% for job, target_variable, port_variable in [
-  ('nodeexporter', 'monitoring_node_exporter_target', 'monitoring_client_node_exporter_port'),
-  ('cadvisor', 'monitoring_cadvisor_target', 'monitoring_client_cadvisor_port')
-] %}
-  - job_name: {{ job }}
-    static_configs:
+{% set active = namespace(hosts=[]) %}
 {% for host in groups['monitored_nodes'] | sort %}
 {% set node = hostvars[host] %}
 {% if node.monitoring_enabled | default(true) | bool and host not in groups.get('retired_nodes', []) %}
-      - targets: [{{ node[target_variable] | default((node.monitoring_address | default(node.ansible_host | default(host))) ~ ':' ~ node[port_variable]) | to_json }}]
+{% set active.hosts = active.hosts + [host] %}
+{% endif %}
+{% endfor %}
+{% if active.hosts %}
+  - job_name: telegraf
+    static_configs:
+{% for host in active.hosts %}
+{% set node = hostvars[host] %}
+      - targets: [{{ node.monitoring_telegraf_target | default((node.monitoring_address | default(node.ansible_host | default(host))) ~ ':' ~ node.monitoring_client_telegraf_port) | to_json }}]
         labels:
           node: {{ node.monitoring_node | default(host) | to_json }}
           availability_alert: {{ ('true' if node.monitoring_availability_alert | default(false) | bool else 'false') | to_json }}
+{% endfor %}
 {% endif %}
-{% endfor %}
-{% endfor %}
 
 {% set gpu = namespace(hosts=[]) %}
-{% for host in groups['monitored_nodes'] | sort %}
-{% set node = hostvars[host] %}
-{% if node.monitoring_enabled | default(true) | bool and host not in groups.get('retired_nodes', []) and node.monitoring_gpu_target is defined %}
+{% for host in active.hosts %}
+{% if hostvars[host].monitoring_gpu_target is defined %}
 {% set gpu.hosts = gpu.hosts + [host] %}
 {% endif %}
 {% endfor %}

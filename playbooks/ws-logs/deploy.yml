@@ -24,16 +24,14 @@
           - monitoring_dashboard_files | length > 0
         fail_msg: Use both -i ./hosts and -i ./monitoring.inventory.yml.
 
-    - name: Validate exporter addresses and ports
+    - name: Validate Telegraf addresses and ports
       ansible.builtin.assert:
         that:
           - >-
             hostvars[item].monitoring_address is defined or
             hostvars[item].ansible_host is defined or
-            (hostvars[item].monitoring_node_exporter_target is defined and
-             hostvars[item].monitoring_cadvisor_target is defined)
-          - hostvars[item].monitoring_client_node_exporter_port | int > 0
-          - hostvars[item].monitoring_client_cadvisor_port | int > 0
+            hostvars[item].monitoring_telegraf_target is defined
+          - hostvars[item].monitoring_client_telegraf_port | int > 0
         fail_msg: "Missing connection/monitoring settings for {{ item }}; load ./hosts as well as the overlay."
       loop: "{{ groups['monitored_nodes'] | difference(groups.get('retired_nodes', [])) }}"
       when: hostvars[item].monitoring_enabled | default(true) | bool
@@ -117,6 +115,13 @@
         - grafana/provisioning/alerting/policies.yml
       register: monitoring_public_config
 
+    - name: Render workstation Telegraf configuration
+      ansible.builtin.template:
+        src: ../../roles/monitoring_client/templates/telegraf.conf.j2
+        dest: "{{ remote_install_path }}/telegraf.conf"
+        mode: "0644"
+      register: monitoring_telegraf_config
+
     - name: Copy environment file
       ansible.builtin.copy:
         src: "{{ monitoring_env_file }}"
@@ -188,11 +193,13 @@
           - prometheus
           - loki
           - vector
+          - telegraf
         dependencies: false
       when: >-
         monitoring_public_config.changed or monitoring_environment.changed or
         monitoring_prometheus_config.changed or monitoring_contact_point.changed or
-        monitoring_dashboards.changed or monitoring_removed_dashboards.changed
+        monitoring_dashboards.changed or monitoring_removed_dashboards.changed or
+        monitoring_telegraf_config.changed
 
     - name: Wait for Grafana database readiness
       ansible.builtin.uri:
@@ -203,3 +210,59 @@
       retries: 12
       delay: 5
       when: not ansible_check_mode
+
+    # Leave the old containers running if any replacement metric family is missing.
+    - name: Wait for Telegraf host and container metrics in Prometheus
+      vars:
+        monitoring_telegraf_query: >-
+          count by (__name__) ({job="telegraf",node="{{ monitoring_node | default(inventory_hostname) }}",
+          __name__=~"{{ 'cpu_usage_idle|mem_available|mem_total|disk_free|disk_total|'
+          ~ 'net_bytes_recv|diskio_read_bytes|system_load1|system_n_cpus|'
+          ~ 'docker_container_cpu_usage_percent|docker_container_mem_usage|'
+          ~ 'docker_container_net_rx_bytes|docker_container_net_tx_bytes' }}"})
+          and on () (up{job="telegraf",node="{{ monitoring_node | default(inventory_hostname) }}"} == 1)
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9090/api/v1/query?query={{ monitoring_telegraf_query | urlencode }}"
+        use_proxy: false
+      register: monitoring_telegraf_metrics
+      until: >-
+        monitoring_telegraf_metrics.status == 200 and
+        monitoring_telegraf_metrics.json.status == 'success' and
+        monitoring_telegraf_metrics.json.data.result | length == 13
+      retries: 12
+      delay: 10
+      when: not ansible_check_mode
+
+    - name: Inspect legacy workstation exporters before retiring them
+      community.docker.docker_container_info:
+        name: "{{ item }}"
+      loop: [nodeexporter, cadvisor]
+      register: monitoring_legacy_exporters
+      no_log: true
+      when: not ansible_check_mode
+
+    - name: Refuse to remove exporters belonging to another Compose project
+      ansible.builtin.assert:
+        that:
+          - item.container.Config.Labels['com.docker.compose.project.working_dir'] == remote_install_path
+          - item.container.Config.Labels['com.docker.compose.service'] == item.item
+      no_log: true
+      loop: "{{ monitoring_legacy_exporters.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when:
+        - not ansible_check_mode
+        - item.exists | default(false)
+
+    # Remove only these two known containers, never all Compose orphans or volumes.
+    - name: Retire legacy workstation exporters after Telegraf verification
+      community.docker.docker_container:
+        name: "{{ item.item }}"
+        state: absent
+      no_log: true
+      loop: "{{ monitoring_legacy_exporters.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when:
+        - not ansible_check_mode
+        - item.exists | default(false)

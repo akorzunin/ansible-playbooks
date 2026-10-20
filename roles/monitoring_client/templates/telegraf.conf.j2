@@ -1,0 +1,39 @@
+[agent]
+  interval = "15s"
+  flush_interval = "15s"
+  hostname = {{ monitoring_node | default(inventory_hostname) | to_json }}
+
+[[outputs.prometheus_client]]
+  listen = ":9273"
+  metric_version = 1
+  expiration_interval = "60s"
+{% if monitoring_telegraf_allowed_sources is defined %}
+  ip_range = {{ monitoring_telegraf_allowed_sources | to_json }}
+{% endif %}
+  # Container IDs/status strings change often; keep numeric metrics and stable tags.
+  string_as_label = false
+
+[[inputs.cpu]]
+  percpu = true
+  totalcpu = true
+
+[[inputs.mem]]
+
+[[inputs.system]]
+
+[[inputs.disk]]
+  ignore_fs = ["tmpfs", "devtmpfs", "devfs", "iso9660", "overlay", "aufs", "squashfs"]
+
+[[inputs.net]]
+  interfaces = ["*"]
+
+[[inputs.diskio]]
+  skip_serial_number = true
+
+[[inputs.docker]]
+  endpoint = "unix:///var/run/docker.sock"
+  timeout = "5s"
+  container_state_include = ["running"]
+  perdevice_include = []
+  total_include = ["cpu", "blkio", "network"]
+  docker_label_include = ["com.docker.compose.project", "com.docker.compose.service"]

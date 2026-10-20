@@ -5,8 +5,6 @@ services:
     hostname: prometheus
     user: root
     restart: unless-stopped
-    depends_on:
-      - cadvisor
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -40,41 +38,33 @@ services:
     labels:
       org.opencontainers.group: "monitoring"
 
-  nodeexporter:
-    image: prom/node-exporter:v1.8.2
-    container_name: nodeexporter
-    hostname: nodeexporter
+  # Workstation collector; remote nodes still use their existing exporters.
+  telegraf:
+    image: telegraf:1.40.2-alpine
+    container_name: telegraf
+    hostname: workstation
+    user: root
+    # The image entrypoint drops to telegraf, losing access to the host Docker socket.
+    entrypoint: ["telegraf"]
+    command: ["--config", "/etc/telegraf/telegraf.conf"]
     restart: unless-stopped
-    command:
-      - '--path.procfs=/host/proc'
-      - '--path.rootfs=/rootfs'
-      - '--path.sysfs=/host/sys'
-      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    environment:
+      HOST_PROC: /hostproc
+      HOST_SYS: /hostfs/sys
+      HOST_ETC: /hostfs/etc
+      HOST_VAR: /hostfs/var
+      HOST_RUN: /hostfs/run
+      HOST_MOUNT_PREFIX: /hostfs
     volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /:/rootfs:ro
+      - ./telegraf.conf:/etc/telegraf/telegraf.conf:ro
+      - /:/hostfs:ro,rslave
+      - /proc:/hostproc:ro
+      # /proc/net resolves to the reader's namespace; PID 1 supplies the host's NICs.
+      - /proc/1/net:/hostproc/net:ro
+      # A read-only bind does not make the Docker API read-only: root-equivalent access.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     expose:
-      - "9100"
-    labels:
-      org.opencontainers.group: "monitoring"
-
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.51.0
-    container_name: cadvisor
-    hostname: cadvisor
-    restart: unless-stopped
-    privileged: true
-    devices:
-      - /dev/kmsg:/dev/kmsg
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker:/var/lib/docker:ro
-      - /cgroup:/cgroup:ro
-    expose:
-      - "3000"
+      - "9273"
     labels:
       org.opencontainers.group: "monitoring"
 

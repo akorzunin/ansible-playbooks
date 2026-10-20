@@ -4,7 +4,7 @@
   "description": "Node and container metrics for inventory-managed hosts with a shared node filter. Container CPU is measured in cores, not divided by CPUs on unrelated hosts.",
   "tags": ["monitoring", "ansible"],
   "schemaVersion": 39,
-  "version": 3,
+  "version": 6,
   "graphTooltip": 1,
   "editable": false,
   "timezone": "browser",
@@ -16,8 +16,23 @@
       "label": "Node",
       "type": "query",
       "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
-      "query": {"query": "label_values(up{job=~\"nodeexporter|cadvisor\"}, node)", "refId": "StandardVariableQuery"},
-      "definition": "label_values(up{job=~\"nodeexporter|cadvisor\"}, node)",
+      "query": {"query": "label_values(up{job=~\"nodeexporter|cadvisor|telegraf\"}, node)", "refId": "StandardVariableQuery"},
+      "definition": "label_values(up{job=~\"nodeexporter|cadvisor|telegraf\"}, node)",
+      "refresh": 1,
+      "sort": 1,
+      "multi": true,
+      "includeAll": true,
+      "allValue": ".*",
+      "current": {"text": "All", "value": "$__all"},
+      "options": []
+    }, {
+      "name": "container",
+      "label": "Container",
+      "type": "query",
+      "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
+      "query": {"query": "query_result(count by (name) (label_replace(docker_container_mem_usage{job=\"telegraf\", node=~\"$node\", container_name!=\"\"}, \"name\", \"$1\", \"container_name\", \"(.+)\")) or count by (name) (container_memory_working_set_bytes{job=\"cadvisor\", node=~\"$node\", image!=\"\", name!=\"\"}))", "refId": "StandardVariableQuery"},
+      "definition": "query_result(count by (name) (label_replace(docker_container_mem_usage{job=\"telegraf\", node=~\"$node\", container_name!=\"\"}, \"name\", \"$1\", \"container_name\", \"(.+)\")) or count by (name) (container_memory_working_set_bytes{job=\"cadvisor\", node=~\"$node\", image!=\"\", name!=\"\"}))",
+      "regex": "/name=\"([^\"]+)\"/",
       "refresh": 1,
       "sort": 1,
       "multi": true,
@@ -29,10 +44,10 @@
   },
   "panels": [
     {
-      "id": 1, "title": "Node exporter availability", "type": "stat",
+      "id": 1, "title": "Host collector availability", "type": "stat",
       "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
       "gridPos": {"h": 5, "w": 8, "x": 0, "y": 0},
-      "targets": [{"refId": "A", "expr": "up{job=\"nodeexporter\", node=~\"$node\"}", "instant": true, "range": false, "legendFormat": "{{node}}"}],
+      "targets": [{"refId": "A", "expr": "max by (node) (up{job=~\"nodeexporter|telegraf\", node=~\"$node\"})", "instant": true, "range": false, "legendFormat": "{{node}}"}],
       "fieldConfig": {"defaults": {
         "min": 0, "max": 1,
         "mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}],
@@ -44,7 +59,7 @@
       "id": 2, "title": "CPU utilization", "type": "timeseries",
       "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
-      "targets": [{"refId": "A", "expr": "100 * (1 - avg by (node) (rate(node_cpu_seconds_total{job=\"nodeexporter\", mode=\"idle\", node=~\"$node\"}[$__rate_interval])))", "legendFormat": "{{node}}"}],
+      "targets": [{"refId": "A", "expr": "avg by (node) (100 - cpu_usage_idle{job=\"telegraf\", cpu=\"cpu-total\", node=~\"$node\"}) or on (node) (100 * (1 - avg by (node) (rate(node_cpu_seconds_total{job=\"nodeexporter\", mode=\"idle\", node=~\"$node\"}[$__rate_interval]))))", "legendFormat": "{{node}}"}],
       "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}, "overrides": []},
       "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
     },
@@ -52,7 +67,7 @@
       "id": 3, "title": "Memory utilization", "type": "timeseries",
       "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
-      "targets": [{"refId": "A", "expr": "100 * (1 - node_memory_MemAvailable_bytes{job=\"nodeexporter\", node=~\"$node\"} / node_memory_MemTotal_bytes{job=\"nodeexporter\", node=~\"$node\"})", "legendFormat": "{{node}}"}],
+      "targets": [{"refId": "A", "expr": "max by (node) (100 * (1 - mem_available{job=\"telegraf\", node=~\"$node\"} / mem_total{job=\"telegraf\", node=~\"$node\"})) or on (node) max by (node) (100 * (1 - node_memory_MemAvailable_bytes{job=\"nodeexporter\", node=~\"$node\"} / node_memory_MemTotal_bytes{job=\"nodeexporter\", node=~\"$node\"}))", "legendFormat": "{{node}}"}],
       "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}, "overrides": []},
       "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
     },
@@ -60,7 +75,7 @@
       "id": 4, "title": "Filesystem utilization", "type": "timeseries",
       "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 13},
-      "targets": [{"refId": "A", "expr": "100 * (1 - node_filesystem_avail_bytes{job=\"nodeexporter\", node=~\"$node\", fstype!~\"tmpfs|overlay|squashfs\"} / node_filesystem_size_bytes{job=\"nodeexporter\", node=~\"$node\", fstype!~\"tmpfs|overlay|squashfs\"})", "legendFormat": "{{node}} {{mountpoint}}"}],
+      "targets": [{"refId": "A", "expr": "max by (node, mountpoint) (label_replace((100 * (1 - disk_free{job=\"telegraf\", node=~\"$node\"} / disk_total{job=\"telegraf\", node=~\"$node\"})) and (disk_total{job=\"telegraf\", node=~\"$node\"} > 0), \"mountpoint\", \"$1\", \"path\", \"(.+)\")) or on (node, mountpoint) max by (node, mountpoint) (100 * (1 - node_filesystem_avail_bytes{job=\"nodeexporter\", node=~\"$node\", fstype!~\"tmpfs|overlay|squashfs\"} / node_filesystem_size_bytes{job=\"nodeexporter\", node=~\"$node\", fstype!~\"tmpfs|overlay|squashfs\"}) and (node_filesystem_size_bytes{job=\"nodeexporter\", node=~\"$node\", fstype!~\"tmpfs|overlay|squashfs\"} > 0))", "legendFormat": "{{node}} {{mountpoint}}"}],
       "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "max": 100}, "overrides": []},
       "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
     },
@@ -70,8 +85,8 @@
       "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 13},
       "targets": [
-        {"refId": "A", "expr": "sum by (node) (rate(node_network_receive_bytes_total{job=\"nodeexporter\", node=~\"$node\", device!~\"lo|veth.*|docker.*|br-.*\"}[$__rate_interval]))", "legendFormat": "{{node}} receive"},
-        {"refId": "B", "expr": "sum by (node) (rate(node_network_transmit_bytes_total{job=\"nodeexporter\", node=~\"$node\", device!~\"lo|veth.*|docker.*|br-.*\"}[$__rate_interval]))", "legendFormat": "{{node}} transmit"}
+        {"refId": "A", "expr": "sum by (node) (rate(net_bytes_recv{job=\"telegraf\", node=~\"$node\", interface!~\"lo|veth.*|docker.*|br-.*\"}[$__rate_interval])) or on (node) sum by (node) (rate(node_network_receive_bytes_total{job=\"nodeexporter\", node=~\"$node\", device!~\"lo|veth.*|docker.*|br-.*\"}[$__rate_interval]))", "legendFormat": "{{node}} receive"},
+        {"refId": "B", "expr": "sum by (node) (rate(net_bytes_sent{job=\"telegraf\", node=~\"$node\", interface!~\"lo|veth.*|docker.*|br-.*\"}[$__rate_interval])) or on (node) sum by (node) (rate(node_network_transmit_bytes_total{job=\"nodeexporter\", node=~\"$node\", device!~\"lo|veth.*|docker.*|br-.*\"}[$__rate_interval]))", "legendFormat": "{{node}} transmit"}
       ],
       "fieldConfig": {"defaults": {"unit": "Bps", "min": 0}, "overrides": []},
       "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
@@ -81,7 +96,7 @@
       "description": "Logical CPUs per node, including hardware threads.",
       "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
       "gridPos": {"h": 5, "w": 8, "x": 8, "y": 0},
-      "targets": [{"refId": "A", "expr": "count by (node) (node_cpu_seconds_total{job=\"nodeexporter\", node=~\"$node\", mode=\"idle\"})", "instant": true, "range": false, "legendFormat": "{{node}}"}],
+      "targets": [{"refId": "A", "expr": "max by (node) (system_n_cpus{job=\"telegraf\", node=~\"$node\"}) or on (node) count by (node) (node_cpu_seconds_total{job=\"nodeexporter\", node=~\"$node\", mode=\"idle\"})", "instant": true, "range": false, "legendFormat": "{{node}}"}],
       "fieldConfig": {"defaults": {"unit": "short", "min": 0, "decimals": 0}, "overrides": []},
       "options": {"colorMode": "value", "graphMode": "none", "textMode": "value_and_name", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
     },
@@ -90,7 +105,7 @@
       "description": "Space available to normal users per filesystem, excluding reserved blocks. Values automatically scale to GiB/TiB.",
       "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 21},
-      "targets": [{"refId": "A", "expr": "node_filesystem_avail_bytes{job=\"nodeexporter\", node=~\"$node\", fstype!~\"tmpfs|overlay|squashfs\"}", "legendFormat": "{{node}} {{mountpoint}}"}],
+      "targets": [{"refId": "A", "expr": "max by (node, mountpoint) (label_replace(disk_free{job=\"telegraf\", node=~\"$node\"}, \"mountpoint\", \"$1\", \"path\", \"(.+)\")) or on (node, mountpoint) max by (node, mountpoint) (node_filesystem_avail_bytes{job=\"nodeexporter\", node=~\"$node\", fstype!~\"tmpfs|overlay|squashfs\"})", "legendFormat": "{{node}} {{mountpoint}}"}],
       "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}, "overrides": []},
       "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
     },
@@ -100,18 +115,18 @@
       "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
       "gridPos": {"h": 8, "w": 12, "x": 12, "y": 21},
       "targets": [
-        {"refId": "A", "expr": "node_load1{job=\"nodeexporter\", node=~\"$node\"}", "legendFormat": "{{node}} / 1m"},
-        {"refId": "B", "expr": "node_load5{job=\"nodeexporter\", node=~\"$node\"}", "legendFormat": "{{node}} / 5m"},
-        {"refId": "C", "expr": "node_load15{job=\"nodeexporter\", node=~\"$node\"}", "legendFormat": "{{node}} / 15m"}
+        {"refId": "A", "expr": "max by (node) (system_load1{job=\"telegraf\", node=~\"$node\"}) or on (node) max by (node) (node_load1{job=\"nodeexporter\", node=~\"$node\"})", "legendFormat": "{{node}} / 1m"},
+        {"refId": "B", "expr": "max by (node) (system_load5{job=\"telegraf\", node=~\"$node\"}) or on (node) max by (node) (node_load5{job=\"nodeexporter\", node=~\"$node\"})", "legendFormat": "{{node}} / 5m"},
+        {"refId": "C", "expr": "max by (node) (system_load15{job=\"telegraf\", node=~\"$node\"}) or on (node) max by (node) (node_load15{job=\"nodeexporter\", node=~\"$node\"})", "legendFormat": "{{node}} / 15m"}
       ],
       "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []},
       "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
     },
     {
-      "id": 9, "title": "cAdvisor availability", "type": "stat",
+      "id": 9, "title": "Container collector availability", "type": "stat",
       "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
       "gridPos": {"h": 5, "w": 8, "x": 16, "y": 0},
-      "targets": [{"refId": "A", "expr": "up{job=\"cadvisor\", node=~\"$node\"}", "instant": true, "range": false, "legendFormat": "{{node}}"}],
+      "targets": [{"refId": "A", "expr": "max by (node) (up{job=~\"cadvisor|telegraf\", node=~\"$node\"})", "instant": true, "range": false, "legendFormat": "{{node}}"}],
       "fieldConfig": {"defaults": {
         "min": 0, "max": 1,
         "mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}],
@@ -123,15 +138,16 @@
       "id": 10, "title": "Container CPU (cores)", "type": "timeseries",
       "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
       "gridPos": {"h": 10, "w": 24, "x": 0, "y": 29},
-      "targets": [{"refId": "A", "expr": "sum by (node, name) (rate(container_cpu_usage_seconds_total{job=\"cadvisor\", node=~\"$node\", image!=\"\", name!=\"\"}[$__rate_interval]))", "legendFormat": "{{node}} / {{name}}"}],
+      "targets": [{"refId": "A", "expr": "sum by (node, name) (label_replace(docker_container_cpu_usage_percent{job=\"telegraf\", cpu=\"cpu-total\", node=~\"$node\", container_name=~\"$container\"} / 100, \"name\", \"$1\", \"container_name\", \"(.+)\")) or on (node, name) sum by (node, name) (rate(container_cpu_usage_seconds_total{job=\"cadvisor\", node=~\"$node\", image!=\"\", name!=\"\", name=~\"$container\"}[$__rate_interval]))", "legendFormat": "{{node}} / {{name}}"}],
       "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []},
       "options": {"legend": {"displayMode": "table", "placement": "right", "width": 350, "calcs": ["lastNotNull"], "showLegend": true, "sortBy": "Last *", "sortDesc": true}}
     },
     {
       "id": 11, "title": "Container memory (working set)", "type": "timeseries",
+      "description": "Telegraf: Docker usage minus inactive file cache (v1 total_inactive_file or v2 inactive_file), clamped at zero. Falls back to raw usage when the kernel omits both cache fields; use raw Docker memory on the Telegraf dashboard to investigate differences.",
       "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
       "gridPos": {"h": 10, "w": 24, "x": 0, "y": 39},
-      "targets": [{"refId": "A", "expr": "sum by (node, name) (container_memory_working_set_bytes{job=\"cadvisor\", node=~\"$node\", image!=\"\", name!=\"\"})", "legendFormat": "{{node}} / {{name}}"}],
+      "targets": [{"refId": "A", "expr": "sum by (node, name) (label_replace(clamp_min(docker_container_mem_usage{job=\"telegraf\", node=~\"$node\", container_name=~\"$container\"} - (docker_container_mem_total_inactive_file{job=\"telegraf\", node=~\"$node\", container_name=~\"$container\"} or docker_container_mem_inactive_file{job=\"telegraf\", node=~\"$node\", container_name=~\"$container\"} or 0 * docker_container_mem_usage{job=\"telegraf\", node=~\"$node\", container_name=~\"$container\"}), 0), \"name\", \"$1\", \"container_name\", \"(.+)\")) or on (node, name) sum by (node, name) (container_memory_working_set_bytes{job=\"cadvisor\", node=~\"$node\", image!=\"\", name!=\"\", name=~\"$container\"})", "legendFormat": "{{node}} / {{name}}"}],
       "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}, "overrides": []},
       "options": {"legend": {"displayMode": "table", "placement": "right", "width": 350, "calcs": ["lastNotNull"], "showLegend": true, "sortBy": "Last *", "sortDesc": true}}
     },
@@ -139,7 +155,7 @@
       "id": 12, "title": "Container network receive", "type": "timeseries",
       "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
       "gridPos": {"h": 10, "w": 24, "x": 0, "y": 49},
-      "targets": [{"refId": "A", "expr": "sum by (node, name) (rate(container_network_receive_bytes_total{job=\"cadvisor\", node=~\"$node\", image!=\"\", name!=\"\"}[$__rate_interval]))", "legendFormat": "{{node}} / {{name}}"}],
+      "targets": [{"refId": "A", "expr": "sum by (node, name) (label_replace(rate(docker_container_net_rx_bytes{job=\"telegraf\", node=~\"$node\", container_name=~\"$container\"}[$__rate_interval]), \"name\", \"$1\", \"container_name\", \"(.+)\")) or on (node, name) sum by (node, name) (rate(container_network_receive_bytes_total{job=\"cadvisor\", node=~\"$node\", image!=\"\", name!=\"\", name=~\"$container\"}[$__rate_interval]))", "legendFormat": "{{node}} / {{name}}"}],
       "fieldConfig": {"defaults": {"unit": "Bps", "min": 0}, "overrides": []},
       "options": {"legend": {"displayMode": "table", "placement": "right", "width": 350, "calcs": ["lastNotNull"], "showLegend": true, "sortBy": "Last *", "sortDesc": true}}
     },
@@ -147,7 +163,7 @@
       "id": 13, "title": "Container network transmit", "type": "timeseries",
       "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
       "gridPos": {"h": 10, "w": 24, "x": 0, "y": 59},
-      "targets": [{"refId": "A", "expr": "sum by (node, name) (rate(container_network_transmit_bytes_total{job=\"cadvisor\", node=~\"$node\", image!=\"\", name!=\"\"}[$__rate_interval]))", "legendFormat": "{{node}} / {{name}}"}],
+      "targets": [{"refId": "A", "expr": "sum by (node, name) (label_replace(rate(docker_container_net_tx_bytes{job=\"telegraf\", node=~\"$node\", container_name=~\"$container\"}[$__rate_interval]), \"name\", \"$1\", \"container_name\", \"(.+)\")) or on (node, name) sum by (node, name) (rate(container_network_transmit_bytes_total{job=\"cadvisor\", node=~\"$node\", image!=\"\", name!=\"\", name=~\"$container\"}[$__rate_interval]))", "legendFormat": "{{node}} / {{name}}"}],
       "fieldConfig": {"defaults": {"unit": "Bps", "min": 0}, "overrides": []},
       "options": {"legend": {"displayMode": "table", "placement": "right", "width": 350, "calcs": ["lastNotNull"], "showLegend": true, "sortBy": "Last *", "sortDesc": true}}
     }
