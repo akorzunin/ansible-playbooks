@@ -204,10 +204,14 @@ tags. Removing `workstation-hop` removes the generated chained options.
 
 The workstation's `sing-box-hop` account must allow each destination in **both**
 its `authorized_keys` `permitopen` options and its sshd `Match User` `PermitOpen`.
-The deployed allowlist includes nt1 and Cherry SSH only; adding another SSH node
-requires explicitly extending both allowlists and validating/reloading sshd.
-Do not replace these restrictions with unrestricted forwarding. This allowlist
-is managed separately from profile generation; rendering cannot prove reachability.
+`workstation-hop.yaml`, included by the publish playbook, configures both allowlists
+from the validated generated Linux profile's direct SSH exits (nt1 and Cherry when
+published). It uses the existing `workstation-hop` outbound and
+`workstation_ssh_public_key` in Vault, with a dedicated forwarding-only account:
+no shell, commands, PTY, agent/X11/Unix-socket or reverse forwarding. The complete
+sshd configuration is validated before reload. Generate profiles before running
+this playbook separately. Do not replace these restrictions with unrestricted
+forwarding; rendering cannot prove reachability.
 
 Publish with the command below. Extra outbounds are appended to every manual
 selector without changing nt1 defaults, routing or enrollment URLs. Refresh the
@@ -297,8 +301,9 @@ ansible-playbook -i hosts --vault-password-file .ansible_pass \
   playbooks/sing-box-configs/deploy.yaml
 ```
 
-This generates and validates all three profiles on the controller, publishes them
-atomically on the workstation, validates static hosting, adds/reloads the Pi route,
+This generates and validates all three profiles on the controller, configures the
+restricted workstation SSH hop, publishes profiles atomically on the workstation,
+validates static hosting, adds/reloads the Pi route,
 and verifies all HTTPS URLs **without an HTTP proxy**. Existing clients fetch the
 new contents on their next update; they do not need to be re-enrolled.
 
