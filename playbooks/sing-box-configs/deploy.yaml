@@ -18,6 +18,9 @@
       changed_when: true
       no_log: true
 
+- name: Configure the restricted SSH hop before publishing it
+  ansible.builtin.import_playbook: workstation-hop.yaml
+
 - name: Host private profiles on the workstation
   hosts: remote_workstation
   become: true

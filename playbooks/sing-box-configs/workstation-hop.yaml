@@ -1,0 +1,82 @@
+---
+- name: Restrict the workstation SSH hop to nt1
+  hosts: remote_workstation
+  become: true
+  vars:
+    hop_user: sing-box-hop
+  tasks:
+    - name: Load shared hop credentials
+      ansible.builtin.include_vars:
+        file: secrets.vault.yaml
+      no_log: true
+
+    - name: Validate hop identity and forwarding destination
+      ansible.builtin.assert:
+        that:
+          - sing_box_secrets.workstation_ssh.user == hop_user
+          - sing_box_secrets.workstation_ssh.server == ansible_host
+          - sing_box_secrets.workstation_ssh.server_port == ansible_port | int
+          - sing_box_secrets.connections.ssh.server is match('^[0-9.]+$')
+          - sing_box_secrets.workstation_ssh.host_key | length > 0
+          - sing_box_secrets.connections.ssh.host_key | length > 0
+          - sing_box_secrets.workstation_ssh_public_key is match('^ssh-ed25519 ')
+        quiet: true
+      no_log: true
+
+    - name: Create an unprivileged forwarding-only account
+      ansible.builtin.user:
+        name: "{{ hop_user }}"
+        system: true
+        create_home: true
+        shell: /usr/sbin/nologin
+        password: '*'
+        update_password: on_create
+
+    - name: Create a root-managed key directory
+      ansible.builtin.file:
+        path: "/home/{{ hop_user }}/.ssh"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Install the shared client key restricted to nt1 SSH
+      ansible.builtin.copy:
+        dest: "/home/{{ hop_user }}/.ssh/authorized_keys"
+        content: >-
+          restrict,port-forwarding,command="/usr/sbin/nologin",permitopen="{{ sing_box_secrets.connections.ssh.server }}:{{
+          sing_box_secrets.connections.ssh.server_port }}"
+          {{ sing_box_secrets.workstation_ssh_public_key }}
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Validate and install forwarding-only SSH policy
+      ansible.builtin.blockinfile:
+        path: /etc/ssh/sshd_config
+        marker: '# {mark} sing-box workstation hop'
+        validate: /usr/sbin/sshd -t -f %s
+        block: |
+          Match User {{ hop_user }}
+              AuthenticationMethods publickey
+              PasswordAuthentication no
+              KbdInteractiveAuthentication no
+              AllowTcpForwarding local
+              AllowStreamLocalForwarding no
+              AllowAgentForwarding no
+              X11Forwarding no
+              PermitTTY no
+              PermitTunnel no
+              PermitOpen {{ sing_box_secrets.connections.ssh.server }}:{{ sing_box_secrets.connections.ssh.server_port }}
+              MaxSessions 0
+          Match all
+      notify: Reload SSH
+
+    - name: Apply hop policy before publishing profiles
+      ansible.builtin.meta: flush_handlers
+
+  handlers:
+    - name: Reload SSH
+      ansible.builtin.service:
+        name: ssh
+        state: reloaded

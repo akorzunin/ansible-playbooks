@@ -32,13 +32,17 @@ def private_write(path, content):
             temporary.unlink(missing_ok=True)
 
 
-def make_profile(base, connections, order):
+def make_profile(base, connections, order, workstation_ssh):
     profile = copy.deepcopy(base)
-    tags = [connections[kind]["tag"] for kind in order]
+    chained_ssh = {**copy.deepcopy(connections["ssh"]),
+                   "tag": "ssh-via-workstation", "detour": workstation_ssh["tag"]}
+    tags = [connections[kind]["tag"] for kind in order] + [chained_ssh["tag"]]
     profile["outbounds"] = [
         {"type": "selector", "tag": "proxy", "outbounds": tags,
          "default": tags[0], "interrupt_exist_connections": True},
         *[copy.deepcopy(connections[kind]) for kind in order],
+        chained_ssh,
+        copy.deepcopy(workstation_ssh),
         {"type": "direct", "tag": "direct"},
     ]
     route = profile.setdefault("route", {})
@@ -68,15 +72,17 @@ def make_profile(base, connections, order):
     return profile
 
 
-def generate(private_dir, connections, tokens):
+def generate(private_dir, connections, tokens, workstation_ssh):
     if set(connections) != {"vless", "naive", "ssh"}:
         raise ValueError("Vault must contain vless, naive and ssh connections")
     for kind, outbound in connections.items():
         if outbound.get("type") != kind:
             raise ValueError(f"Connection {kind} must have type {kind}")
-    tags = [o["tag"] for o in connections.values()]
-    if len(set(tags)) != 3 or set(tags) & {"auto", "proxy", "direct"}:
-        raise ValueError("Connection tags must be unique and cannot be auto/proxy/direct")
+    if workstation_ssh.get("type") != "ssh" or "detour" in workstation_ssh:
+        raise ValueError("Workstation hop must be a directly dialed SSH outbound")
+    tags = [o["tag"] for o in connections.values()] + [workstation_ssh["tag"]]
+    if len(set(tags)) != 4 or set(tags) & {"auto", "proxy", "direct", "ssh-via-workstation"}:
+        raise ValueError("Connection tags must be unique and cannot use reserved tags")
     # Tokens are shared deployment state, never generated on a fresh controller.
     if set(tokens) != set(ORDERS):
         raise ValueError("Vault must contain tokens for all three platforms")
@@ -91,7 +97,7 @@ def generate(private_dir, connections, tokens):
         rendered = {}
         for platform, order in ORDERS.items():
             base = json.loads((ROOT / "templates" / f"{platform}.json").read_text())
-            rendered[platform] = json.dumps(make_profile(base, connections, order), indent=2) + "\n"
+            rendered[platform] = json.dumps(make_profile(base, connections, order, workstation_ssh), indent=2) + "\n"
             candidate = Path(work) / f"{platform}.json"
             private_write(candidate, rendered[platform])
             # Check with the installed core; platform-specific runtime behavior still
@@ -115,7 +121,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     try:
         data = json.load(sys.stdin)["sing_box_secrets"]
-        generate(args.private_dir, data["connections"], data["tokens"])
+        generate(args.private_dir, data["connections"], data["tokens"], data["workstation_ssh"])
     except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.CalledProcessError):
         # Input/core errors can contain credentials. Never echo them to deployment logs.
         parser.exit(1, "Profile generation failed; check Vault inputs and sing-box locally.\n")

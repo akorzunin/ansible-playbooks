@@ -56,6 +56,12 @@ and a fresh controller never generates replacement tokens.
   probes did not reliably predict usable connections on mobile networks.
 - Android defaults to SSH; select VLESS manually when UDP is needed.
 - Windows/Linux default to VLESS; select Naïve or SSH manually if it fails.
+- All platforms also offer `ssh-via-workstation`: device → workstation SSH on
+  `akorz.duckdns.org:22123` → nt1 SSH → Internet. Select it under `proxy` after
+  refreshing the remote profile. Defaults and the three direct options are unchanged.
+  The inner SSH session remains encrypted to nt1; workstation is only the hop,
+  not the exit. It must stay online, and its own connection to nt1 must be stable.
+  This route is TCP-only, like direct SSH.
 - Manual changes interrupt existing connections. Selector choices are not persisted
   by the core cache; restarting may restore the platform default.
 - Proxied TCP and UDP follow the selected protocol. UDP/443 is no longer rejected.
@@ -75,8 +81,8 @@ and a fresh controller never generates replacement tokens.
 - Rule-set downloads use direct routing.
 - Clash API/group controls bind only to `127.0.0.1:9091`.
 
-These three protocols all use **the same nt1 host**. Protocol selection is not
-redundancy against a complete nt1 outage. Publish a replacement server through
+These three protocols, including SSH via workstation, all use **the same nt1
+exit host**. Protocol selection is not redundancy against a complete nt1 outage. Publish a replacement server through
 the independent config endpoint to recover, or add a second server deliberately.
 
 ## Check whether a request is proxied
@@ -136,9 +142,10 @@ ansible-playbook -i hosts --vault-password-file .ansible_pass \
   playbooks/sing-box-configs/deploy.yaml
 ```
 
-This generates and validates all three profiles on the controller, publishes them
-atomically on the workstation, validates static hosting, adds/reloads the Pi route,
-and verifies all HTTPS URLs **without an HTTP proxy**. Existing clients fetch the
+This generates and validates all three profiles on the controller, configures the
+restricted workstation SSH hop, publishes profiles atomically on the workstation,
+validates static hosting, adds/reloads the workstation edge route, and verifies
+all HTTPS URLs **without an HTTP proxy**. Existing clients fetch the
 new contents on their next update; they do not need to be re-enrolled.
 
 Edit `templates/{android,windows,linux}.json` for platform settings and routing.
@@ -198,6 +205,34 @@ sudo systemctl stop sing-box-profile-update.service
 sudo install -o root -g sing-box -m 640 /etc/sing-box/config.before-remote /etc/sing-box/config.json
 sudo systemctl restart sing-box
 ```
+
+## Workstation SSH hop
+
+`workstation-hop.yaml` is included by the publish playbook. It creates a dedicated
+`sing-box-hop` account on the existing workstation SSH listener; no new public
+port or workstation VPN service is required. The account uses a separate Ed25519
+client key and can open only local TCP forwarding to nt1's SSH IP/port. Shells,
+commands, SFTP, PTYs, agent/X11/Unix-socket forwarding and reverse forwarding are
+disabled. The complete sshd configuration is validated before a reload; existing
+administrator access is unchanged.
+
+Vault stores the outbound in `sing_box_secrets.workstation_ssh` and its public key
+in `sing_box_secrets.workstation_ssh_public_key`. The generator derives the chained
+outbound from `connections.ssh`, so nt1 credentials are not duplicated in Vault.
+Both SSH servers have pinned Ed25519 host keys and explicit host-key algorithms.
+After a server reinstallation, verify and update its pin before republishing.
+
+The hop private key is shared with enrolled clients, like the existing proxy
+credentials; it is not an administrator key. Revoking a profile URL alone does
+not revoke this key. To rotate it, replace both hop key fields in Vault and rerun
+the publish playbook, which replaces the account's authorized key. Previously
+downloaded profiles then lose hop access until refreshed.
+
+An isolated Linux test confirmed the exit IP matches a request made on nt1
+(Netherlands), 12 consecutive HTTPS probes passed, and a 5 MB download completed.
+Shells, forwarding to another destination, and reverse forwarding were rejected.
+These are short controller-side checks, not a guarantee of long-term stability
+from a restricted mobile network; Android/Windows device testing is still needed.
 
 ## Hosting and security
 

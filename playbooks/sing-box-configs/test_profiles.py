@@ -18,17 +18,18 @@ class ProfileTests(unittest.TestCase):
     def setUp(self):
         self.connections = {kind: {"type": kind, "tag": kind} for kind in ("vless", "naive", "ssh")}
         self.tokens = {platform: str(i) * 64 for i, platform in enumerate(generate.ORDERS)}
+        self.workstation_ssh = {"type": "ssh", "tag": "workstation-hop"}
 
     def test_platforms_keep_inbounds_and_use_manual_selection_for_tcp_and_udp(self):
         for platform, order in generate.ORDERS.items():
             with self.subTest(platform=platform):
                 base = json.loads((generate.ROOT / "templates" / f"{platform}.json").read_text())
                 original = json.loads(json.dumps(base))
-                result = generate.make_profile(base, self.connections, order)
+                result = generate.make_profile(base, self.connections, order, self.workstation_ssh)
                 self.assertEqual(base, original)
                 self.assertEqual(result["inbounds"], base["inbounds"])
                 self.assertEqual(result["outbounds"][0]["default"], "ssh" if platform == "android" else "vless")
-                self.assertEqual(result["outbounds"][0]["outbounds"], order)
+                self.assertEqual(result["outbounds"][0]["outbounds"], order + ["ssh-via-workstation"])
                 self.assertFalse(any(o["type"] == "urltest" for o in result["outbounds"]))
                 self.assertTrue(result["outbounds"][0]["interrupt_exist_connections"])
                 self.assertEqual(result["route"]["final"], "proxy")
@@ -54,15 +55,44 @@ class ProfileTests(unittest.TestCase):
                 if platform == "linux":
                     self.assertNotIn("auto_detect_interface", result["route"])
 
+    def test_chain_reuses_nt1_credentials_without_mutating_inputs(self):
+        self.connections["ssh"].update(server="nt1.example", password="test", host_key=["nt1-key"])
+        connections = json.loads(json.dumps(self.connections))
+        hop = dict(self.workstation_ssh)
+        result = generate.make_profile({}, self.connections, generate.ORDERS["linux"], hop)
+        outbounds = {o["tag"]: o for o in result["outbounds"]}
+        self.assertEqual(outbounds["ssh-via-workstation"], {
+            **connections["ssh"], "tag": "ssh-via-workstation", "detour": "workstation-hop",
+        })
+        self.assertEqual(outbounds["workstation-hop"], hop)
+        self.assertNotIn("workstation-hop", outbounds["proxy"]["outbounds"])
+        self.assertEqual(self.connections, connections)
+        self.assertNotIn("detour", hop)
+
+    def test_invalid_hops_are_rejected_before_writing(self):
+        with tempfile.TemporaryDirectory() as work:
+            for hop in (
+                {"type": "direct", "tag": "workstation-hop"},
+                {**self.workstation_ssh, "detour": "proxy"},
+                {**self.workstation_ssh, "tag": "ssh"},
+                {**self.workstation_ssh, "tag": "ssh-via-workstation"},
+                {**self.workstation_ssh, "tag": "proxy"},
+            ):
+                with self.subTest(hop=hop), patch.object(generate.subprocess, "run") as check:
+                    with self.assertRaises(ValueError):
+                        generate.generate(Path(work) / "output", self.connections, self.tokens, hop)
+                    check.assert_not_called()
+                    self.assertFalse((Path(work) / "output").exists())
+
     def test_tokens_stay_stable_and_artifacts_are_private(self):
         with tempfile.TemporaryDirectory() as work:
             output, fresh = Path(work) / "output", Path(work) / "fresh"
             with patch.object(generate.subprocess, "run"):
-                generate.generate(output, self.connections, self.tokens)
+                generate.generate(output, self.connections, self.tokens, self.workstation_ssh)
                 tokens = (output / "tokens.json").read_bytes()
                 urls = (output / "urls.json").read_bytes()
-                generate.generate(output, self.connections, self.tokens)
-                generate.generate(fresh, self.connections, self.tokens)
+                generate.generate(output, self.connections, self.tokens, self.workstation_ssh)
+                generate.generate(fresh, self.connections, self.tokens, self.workstation_ssh)
             self.assertEqual(tokens, (output / "tokens.json").read_bytes())
             self.assertEqual(urls, (output / "urls.json").read_bytes())
             self.assertEqual(urls, (fresh / "urls.json").read_bytes())
@@ -75,24 +105,24 @@ class ProfileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as work:
             output = Path(work) / "output"
             with patch.object(generate.subprocess, "run"):
-                generate.generate(output, self.connections, self.tokens)
+                generate.generate(output, self.connections, self.tokens, self.workstation_ssh)
             before = {p.name: p.read_bytes() for p in output.iterdir()}
             self.connections["naive"]["password"] = "changed"
             with patch.object(generate.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "check")):
                 with self.assertRaises(subprocess.CalledProcessError):
-                    generate.generate(output, self.connections, self.tokens)
+                    generate.generate(output, self.connections, self.tokens, self.workstation_ssh)
             self.assertEqual(before, {p.name: p.read_bytes() for p in output.iterdir()})
 
     def test_missing_or_invalid_tokens_do_not_replace_artifacts(self):
         with tempfile.TemporaryDirectory() as work:
             output = Path(work) / "output"
             with patch.object(generate.subprocess, "run"):
-                generate.generate(output, self.connections, self.tokens)
+                generate.generate(output, self.connections, self.tokens, self.workstation_ssh)
             before = {p.name: p.read_bytes() for p in output.iterdir()}
             for tokens in ({}, {**self.tokens, "linux": "invalid"}):
                 with self.subTest(tokens=tokens), patch.object(generate.subprocess, "run") as check:
                     with self.assertRaises(ValueError):
-                        generate.generate(output, self.connections, tokens)
+                        generate.generate(output, self.connections, tokens, self.workstation_ssh)
                     check.assert_not_called()
                     self.assertEqual(before, {p.name: p.read_bytes() for p in output.iterdir()})
 
@@ -106,7 +136,7 @@ class ProfileTests(unittest.TestCase):
             ):
                 with self.subTest(connections=connections), patch.object(generate.subprocess, "run") as check:
                     with self.assertRaises(ValueError):
-                        generate.generate(Path(work), connections, self.tokens)
+                        generate.generate(Path(work), connections, self.tokens, self.workstation_ssh)
                     check.assert_not_called()
 
 
