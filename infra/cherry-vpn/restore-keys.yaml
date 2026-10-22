@@ -1,0 +1,66 @@
+---
+- name: Restore dedicated Cherry SSH keys on this controller
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars_files:
+    - "{{ playbook_dir }}/../../external_vars.yml"
+  vars:
+    cherry_vpn_keys: "{{ CHERRY_VPN_SSH_KEYS | from_json }}"
+  tasks:
+    - name: Validate shared project and key material without displaying secrets
+      ansible.builtin.assert:
+        that:
+          - CHERRY_PROJECT_ID | int > 0
+          - cherry_vpn_keys.admin_private is search('BEGIN OPENSSH PRIVATE KEY')
+          - cherry_vpn_keys.probe_private is search('BEGIN OPENSSH PRIVATE KEY')
+          - cherry_vpn_keys.admin_public is match('^ssh-ed25519 ')
+          - cherry_vpn_keys.probe_public is match('^ssh-ed25519 ')
+      no_log: true
+
+    - name: Create a private local SSH directory
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/private/ssh"
+        state: directory
+        mode: "0700"
+
+    - name: Restore the dedicated keys without plaintext Ansible output or diffs
+      ansible.builtin.copy:
+        content: "{{ cherry_vpn_keys[item.key] }}"
+        dest: "{{ playbook_dir }}/private/ssh/{{ item.name }}"
+        mode: "0600"
+      loop:
+        - {name: admin, key: admin_private}
+        - {name: admin.pub, key: admin_public}
+        - {name: probe, key: probe_private}
+        - {name: probe.pub, key: probe_public}
+      no_log: true
+      diff: false
+
+    - name: Read the public counterpart of each restored private key
+      ansible.builtin.command:
+        argv:
+          - ssh-keygen
+          - -y
+          - -f
+          - "{{ playbook_dir }}/private/ssh/{{ item }}"
+      loop: [admin, probe]
+      register: cherry_vpn_derived_keys
+      changed_when: false
+      no_log: true
+
+    - name: Verify that the public and private keys match
+      ansible.builtin.assert:
+        that:
+          - >-
+            item.stdout.split()[:2] ==
+            cherry_vpn_keys[item.item ~ '_public'].split()[:2]
+      loop: "{{ cherry_vpn_derived_keys.results }}"
+      no_log: true
+
+    - name: Load the shared project ID into local OpenTofu inputs
+      ansible.builtin.copy:
+        content: "{{ {'project_id': CHERRY_PROJECT_ID | int} | to_nice_json }}\n"
+        dest: "{{ playbook_dir }}/project.auto.tfvars.json"
+        mode: "0600"

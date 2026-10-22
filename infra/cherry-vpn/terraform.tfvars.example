@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars (ignored). Never put the API token in this file.
+# restore-keys.yaml loads CHERRY_PROJECT_ID from external_vars.yml into a separate
+# ignored project.auto.tfvars.json; do not duplicate project_id here.
+region              = "LT-Siauliai"
+ssh_public_key_path = "private/ssh/admin.pub"
+
+# The first-generation smallest VM currently includes more traffic at the same
+# hourly catalogue price. Use B2 only if its region/availability is preferable.
+plan = "B1-1-1gb-20s-shared"

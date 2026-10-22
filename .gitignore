@@ -15,3 +15,15 @@ external_vars.yml
 /playbooks/sing-box-configs/private/
 /playbooks/sing-box-configs/__pycache__/
 /playbooks/ws-logs/tests/__pycache__/
+# Disposable VPN infrastructure: local tools, state, plans and credentials.
+/infra/cherry-vpn/.tools/
+/infra/cherry-vpn/.terraform/
+/infra/cherry-vpn/*.tfstate*
+/infra/cherry-vpn/*.tfplan
+/infra/cherry-vpn/*.tfvars
+/infra/cherry-vpn/*.tfvars.json
+/infra/cherry-vpn/crash*.log
+/infra/cherry-vpn/private/
+/infra/cherry-vpn/cherry-token.vault
+/infra/cherry-vpn/__pycache__/
+/playbooks/vpn-probe/__pycache__/

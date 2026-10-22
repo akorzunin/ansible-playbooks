@@ -21,3 +21,8 @@ MONITORING_GRAFANA_ADMIN_USER: ""
 MONITORING_GRAFANA_ADMIN_PASSWORD: ""
 RUTRACKER_USER: ""
 RUTRACKER_PASS: ""
+# Disposable Cherry VPN project; restore-keys.yaml loads this into OpenTofu.
+CHERRY_PROJECT_ID: 0
+# Store as a !vault string containing JSON with admin_private/admin_public and
+# probe_private/probe_public. Reuse the same keys across trusted controllers.
+CHERRY_VPN_SSH_KEYS: ""

@@ -1,0 +1,69 @@
+---
+- name: Configure a native SSH proxy baseline on the disposable test node only
+  hosts: vpn_test
+  become: true
+  vars:
+    vpn_probe_public_key_path: "{{ playbook_dir }}/../../infra/cherry-vpn/private/ssh/probe.pub"
+  tasks:
+    - name: Require a separate public key for the unprivileged test tunnel
+      ansible.builtin.assert:
+        that:
+          - lookup('ansible.builtin.file', vpn_probe_public_key_path) is match('^ssh-ed25519 ')
+        fail_msg: Restore the dedicated Ed25519 keys with infra/cherry-vpn/restore-keys.yaml first.
+
+    - name: Wait for provider cloud-init to finish
+      ansible.builtin.command: cloud-init status --wait
+      changed_when: false
+
+    - name: Create an unprivileged tunnel account
+      ansible.builtin.user:
+        name: vpnprobe
+        create_home: true
+        shell: /bin/sh
+        password_lock: true
+
+    - name: Create the tunnel account SSH directory
+      ansible.builtin.file:
+        path: /home/vpnprobe/.ssh
+        state: directory
+        owner: vpnprobe
+        group: vpnprobe
+        mode: "0700"
+
+    - name: Authorize only the dedicated tunnel public key
+      ansible.builtin.copy:
+        content: >-
+          no-agent-forwarding,no-X11-forwarding,no-pty
+          {{ lookup('ansible.builtin.file', vpn_probe_public_key_path) | trim }}
+        dest: /home/vpnprobe/.ssh/authorized_keys
+        owner: vpnprobe
+        group: vpnprobe
+        mode: "0600"
+
+    - name: Configure key-only login and a forwarding-only test account
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/00-vpn-probe.conf
+        owner: root
+        group: root
+        mode: "0644"
+        validate: /usr/sbin/sshd -t -f %s
+        content: |
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          PermitRootLogin prohibit-password
+          Match User vpnprobe
+              AllowTcpForwarding local
+              AllowStreamLocalForwarding no
+              AllowAgentForwarding no
+              X11Forwarding no
+              PermitTTY no
+              PermitTunnel no
+              ForceCommand /usr/sbin/nologin
+          Match all
+      notify: Reload SSH
+
+  handlers:
+    - name: Reload SSH
+      ansible.builtin.service:
+        name: ssh
+        state: reloaded

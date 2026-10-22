@@ -6,6 +6,14 @@ See [the monitoring migration and deployment guide](playbooks/ws-logs/README.md)
 Load `monitoring.inventory.yml` alongside the private `hosts` inventory to generate
 scrape targets, provision shared dashboards/alerts, and configure Telegram routing.
 
+## Budget VPN experiment
+
+See [the Cherry Servers/OpenTofu trial guide](infra/cherry-vpn/README.md) for
+credential setup, price guardrails, a disposable SSH proxy and regional probes.
+The trial is paused: Cherry identity verification blocked VM creation. See the
+[checkpoint and resume checklist](infra/cherry-vpn/README.md#paused-checkpoint--2026-10-22).
+Further provisioning requires a fresh reviewed plan and explicit approval.
+
 ## Setup
 
 Link `hosts` and `external_vars.yml` from Dropbox:
