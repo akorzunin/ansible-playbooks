@@ -1,0 +1,78 @@
+---
+- name: Read the host public key through the authenticated administrator connection
+  ansible.builtin.slurp:
+    src: /etc/ssh/ssh_host_ed25519_key.pub
+  register: vpn_node_host_key
+
+- name: Prepare private client connections without the administrator key
+  ansible.builtin.set_fact:
+    vpn_node_client_outbounds:
+      - type: ssh
+        tag: "{{ vpn_node_name }}-ssh"
+        server: "{{ vpn_node_public_address }}"
+        server_port: "{{ ansible_port | default(22) | int }}"
+        user: vpnprobe
+        private_key: "{{ lookup('ansible.builtin.file', vpn_node_ssh_private_key_path) }}"
+        host_key: ["{{ vpn_node_host_key.content | b64decode | trim }}"]
+      - type: naive
+        tag: "{{ vpn_node_name }}-naive"
+        server: "{{ vpn_node_domain }}"
+        server_port: 443
+        username: "{{ vpn_node_credentials.naive_username }}"
+        password: "{{ vpn_node_credentials.naive_password }}"
+        tls:
+          enabled: true
+          server_name: "{{ vpn_node_domain }}"
+      - type: vless
+        tag: "{{ vpn_node_name }}-vless"
+        server: "{{ vpn_node_public_address }}"
+        server_port: 8443
+        uuid: "{{ vpn_node_credentials.vless_uuid }}"
+        flow: xtls-rprx-vision
+        tls:
+          enabled: true
+          server_name: "{{ vpn_node_reality_server_name }}"
+          utls:
+            enabled: true
+            fingerprint: chrome
+          reality:
+            enabled: true
+            public_key: "{{ vpn_node_credentials.reality_public_key }}"
+            short_id: "{{ vpn_node_credentials.reality_short_id }}"
+  no_log: true
+
+- name: Create the private controller client directory
+  ansible.builtin.file:
+    path: "{{ vpn_node_client_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+
+- name: Validate an isolated Linux test profile before exporting connections
+  ansible.builtin.template:
+    src: client-test.json.j2
+    dest: "{{ vpn_node_client_dir }}/{{ vpn_node_name }}-test.json"
+    mode: "0600"
+    validate: sing-box check -c %s
+  delegate_to: localhost
+  become: false
+  no_log: true
+  diff: false
+
+- name: Export connections for the existing remote profile publisher
+  ansible.builtin.copy:
+    content: "{{ vpn_node_client_outbounds | to_nice_json }}\n"
+    dest: "{{ vpn_node_client_dir }}/{{ vpn_node_name }}-outbounds.json"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+  no_log: true
+  diff: false
+
+- name: Report private client artifact locations
+  ansible.builtin.debug:
+    msg:
+      - "Isolated Linux test: {{ vpn_node_client_dir }}/{{ vpn_node_name }}-test.json"
+      - "Publisher input: {{ vpn_node_client_dir }}/{{ vpn_node_name }}-outbounds.json"
+      - "No active client configuration or remote profiles were changed."

@@ -1,11 +1,22 @@
-- name: Disable ssh connect w/ root user
+---
+- name: Require a supported operating system
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.distribution in ['Debian', 'Ubuntu']
+    fail_msg: Bootstrap supports official Debian and Ubuntu images only.
+
+- name: Set node hostname
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Keep hostname resolvable locally
   ansible.builtin.lineinfile:
-    path: /etc/ssh/sshd_config
-    regexp: "^PermitRootLogin"
-    line: "PermitRootLogin no"
-    state: present
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1\s'
+    line: "127.0.1.1 {{ inventory_hostname }}"
+    owner: root
+    group: root
     mode: "0644"
-  notify: Restart ssh service
 
 - name: Update and upgrade apt packages
   ansible.builtin.apt:
@@ -13,14 +24,45 @@
     upgrade: dist
     cache_valid_time: 3600
 
-- name: Install prerequisite packages
+- name: Install prerequisite and security packages
   ansible.builtin.apt:
-    name: "{{ item }}"
+    name:
+      - ca-certificates
+      - curl
+      - python3-apt
+      - python3-pip
+      - python3-requests
+      - sshguard
+      - unattended-upgrades
     state: present
+
+- name: Enable periodic package indexes and unattended security upgrades
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Prevent unattended upgrades from rebooting the server
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/99no-auto-reboot
+    content: 'Unattended-Upgrade::Automatic-Reboot "false";'
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable security services and apt timers
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
   loop:
-    - curl
-    - python3-pip
     - sshguard
+    - apt-daily.timer
+    - apt-daily-upgrade.timer
 
 - name: Ensure apt keyrings directory exists
   ansible.builtin.file:
@@ -30,9 +72,14 @@
     group: root
     mode: "0755"
 
+- name: Read native Debian package architecture
+  ansible.builtin.command: dpkg --print-architecture
+  register: node_dpkg_architecture
+  changed_when: false
+
 - name: Add Docker GPG apt key
   ansible.builtin.get_url:
-    url: https://download.docker.com/linux/ubuntu/gpg
+    url: "https://download.docker.com/linux/{{ ansible_facts.distribution | lower }}/gpg"
     dest: /etc/apt/keyrings/docker.asc
     owner: root
     group: root
@@ -41,22 +88,21 @@
 - name: Add Docker apt repository
   ansible.builtin.apt_repository:
     repo: >-
-      deb [arch={{
-        ansible_facts["architecture"] | regex_replace('x86_64', 'amd64') | regex_replace('aarch64', 'arm64')
-      }} signed-by=/etc/apt/keyrings/docker.asc]
-      https://download.docker.com/linux/ubuntu {{ ansible_facts["distribution_release"] }} stable
+      deb [arch={{ node_dpkg_architecture.stdout }} signed-by=/etc/apt/keyrings/docker.asc]
+      https://download.docker.com/linux/{{ ansible_facts.distribution | lower }}
+      {{ ansible_facts.distribution_release }} stable
+    filename: docker
     state: present
 
 - name: Install Docker packages
   ansible.builtin.apt:
-    name: "{{ item }}"
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
     state: present
-    force: true
-  loop:
-    - docker-ce
-    - docker-ce-cli
-    - containerd.io
-    - docker-compose-plugin
 
 - name: Ensure Docker service is running and enabled
   ansible.builtin.systemd_service:
@@ -64,27 +110,39 @@
     state: started
     enabled: true
 
-- name: Add specified user to the docker group
+- name: Add administrator to the docker group
   ansible.builtin.user:
     name: "{{ ansible_user }}"
     groups: docker
     append: true
   notify: Update groups
 
-- name: Create docker network for monitoring
-  ansible.builtin.command:
-    cmd: docker network create --driver bridge monitoring
-  register: node_docker_network_monitoring_out
-  changed_when: node_docker_network_monitoring_out.rc == 0
-  failed_when: >-
-    node_docker_network_monitoring_out.rc != 0 and
-    'already exists' not in node_docker_network_monitoring_out.stderr
+- name: Create shared Docker networks
+  community.docker.docker_network:
+    name: "{{ item }}"
+  loop:
+    - monitoring
+    - main
 
-- name: Create docker network main
-  ansible.builtin.command:
-    cmd: docker network create --driver bridge main
-  register: node_docker_network_main_out
-  changed_when: node_docker_network_main_out.rc == 0
-  failed_when: >-
-    node_docker_network_main_out.rc != 0 and
-    'already exists' not in node_docker_network_main_out.stderr
+# Key-only sudo was verified in a fresh connection before reaching this task.
+# Prepend before Include/Match directives: OpenSSH uses the first value it reads.
+- name: Disable root SSH and password authentication
+  ansible.builtin.blockinfile:
+    path: /etc/ssh/sshd_config
+    insertbefore: BOF
+    marker: '# {mark} ANSIBLE NODE SSH POLICY'
+    block: |
+      PermitRootLogin no
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PubkeyAuthentication yes
+    validate: /usr/sbin/sshd -t -f %s
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload ssh service
+
+- name: Check whether OS updates require a reboot
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: node_reboot_required

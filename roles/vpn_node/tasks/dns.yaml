@@ -1,0 +1,95 @@
+---
+- name: Require an explicit public IPv4 and a DNS-safe hostname before DNS changes
+  ansible.builtin.assert:
+    that:
+      - vpn_node_domain is match('^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$')
+      - not ansible_check_mode
+
+- name: Validate the public IPv4 before updating DNS
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - -c
+      - >-
+        import ipaddress, sys;
+        address = ipaddress.IPv4Address(sys.argv[1]);
+        assert address.is_global, 'An explicit public IPv4 is required'
+      - "{{ vpn_node_public_address }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+
+- name: Require a single DuckDNS hostname when using the account token
+  ansible.builtin.assert:
+    that: vpn_node_domain is match('^[a-z0-9][a-z0-9-]*\.duckdns\.org$')
+  when:
+    - vpn_node_domain.endswith('.duckdns.org')
+    - vpn_node_duckdns_token | length > 0
+
+- name: Require a decrypted single-line DuckDNS token
+  ansible.builtin.assert:
+    that:
+      - vpn_node_duckdns_token is not search('\\s')
+      - "'$ANSIBLE_VAULT;' not in vpn_node_duckdns_token"
+    fail_msg: DUCKDNS_TOKEN must be decrypted by Ansible; store encrypted scalars using the YAML !vault block tag.
+  when:
+    - vpn_node_domain.endswith('.duckdns.org')
+    - vpn_node_duckdns_token | length > 0
+  no_log: true
+
+- name: Update only this node's DuckDNS IPv4 without logging the token
+  ansible.builtin.uri:
+    method: GET
+    url: >-
+      {{ 'https://www.duckdns.org/update?domains=' ~ vpn_node_domain.split('.')[0] ~
+         '&token=' ~ (vpn_node_duckdns_token | urlencode) ~
+         '&ip=' ~ (vpn_node_public_address | urlencode) ~ '&verbose=true' }}
+    return_content: true
+    use_proxy: false
+    follow_redirects: none
+    validate_certs: true
+    timeout: 30
+    status_code: 200
+  delegate_to: localhost
+  become: false
+  when:
+    - vpn_node_domain.endswith('.duckdns.org')
+    - vpn_node_duckdns_token | length > 0
+  register: vpn_node_duckdns_result
+  failed_when: false
+  changed_when: >-
+    vpn_node_duckdns_result.status | default(0) == 200 and
+    vpn_node_duckdns_result.content | default('') | trim is search('UPDATED$')
+  no_log: true
+
+- name: Require DuckDNS to accept the update without exposing response URLs or tokens
+  ansible.builtin.assert:
+    that:
+      - vpn_node_duckdns_result.status | default(0) == 200
+      - (vpn_node_duckdns_result.content | default('')).splitlines() | first | default('') == 'OK'
+    fail_msg: >-
+      DuckDNS did not accept the update. Register the hostname in the account
+      belonging to DUCKDNS_TOKEN and verify that token locally; do not post it.
+    quiet: true
+  when:
+    - vpn_node_domain.endswith('.duckdns.org')
+    - vpn_node_duckdns_token | length > 0
+
+- name: Wait for public DNS to resolve only to this node before requesting a certificate
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - -c
+      - >-
+        import socket, sys;
+        addresses = {r[4][0] for r in socket.getaddrinfo(sys.argv[2], 443)};
+        assert addresses == {sys.argv[1]}, 'DNS must point only to this IPv4; remove stale A/AAAA records'
+      - "{{ vpn_node_public_address }}"
+      - "{{ vpn_node_domain }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  register: vpn_node_dns_result
+  until: vpn_node_dns_result.rc == 0
+  retries: 30
+  delay: 5

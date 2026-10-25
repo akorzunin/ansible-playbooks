@@ -1,16 +1,33 @@
-- name: Create new user
+---
+- name: Bootstrap Python and sudo on a minimal Debian or Ubuntu image
+  ansible.builtin.raw: |
+    set -eu
+    if ! command -v python3 >/dev/null 2>&1 || ! command -v sudo >/dev/null 2>&1; then
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y python3 sudo
+      echo NODE_BOOTSTRAP_CHANGED
+    fi
+  register: node_python_bootstrap
+  changed_when: "'NODE_BOOTSTRAP_CHANGED' in node_python_bootstrap.stdout"
+
+- name: Create key-only administrator without forcing a UID
   ansible.builtin.user:
     name: "{{ node_user }}"
-    comment: "Ansible user"
-    groups:
-      - sudo
+    comment: Ansible administrator
+    groups: sudo
+    append: true
     shell: /bin/bash
-    uid: 1000
+    create_home: true
     state: present
-    # NOTE: need to install python-passlib on local machine
-    password: "{{ node_pass | password_hash('sha512') }}"
 
-- name: Allow new user to run sudo without a password
+- name: Install administrator SSH public key
+  ansible.posix.authorized_key:
+    user: "{{ node_user }}"
+    key: "{{ node_authorized_key }}"
+    state: present
+
+- name: Allow administrator to use passwordless sudo
   ansible.builtin.copy:
     dest: "/etc/sudoers.d/{{ node_user }}"
     content: "{{ node_user }} ALL=(ALL) NOPASSWD:ALL\n"
@@ -18,12 +35,3 @@
     group: root
     mode: "0440"
     validate: /usr/sbin/visudo -cf %s
-
-- name: Ensure /usr/bin/python symlink points to python3
-  ansible.builtin.file:
-    src: /usr/bin/python3
-    dest: /usr/bin/python
-    owner: root
-    group: root
-    state: link
-    force: true

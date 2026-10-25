@@ -1,6 +1,6 @@
 ---
 collections:
-  # Install a collection from Ansible Galaxy.
+  - name: ansible.posix
   - name: community.docker
   - name: community.general
   - name: community.libvirt

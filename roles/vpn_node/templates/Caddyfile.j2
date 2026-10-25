@@ -1,0 +1,23 @@
+{
+    admin off
+    http_port 8080
+    https_port 8443
+    order forward_proxy before respond
+    servers {
+        protocols h1 h2
+    }
+    log {
+        exclude http.log.error
+    }
+}
+
+# Catch-all first so authenticated CONNECT requests reach the forward proxy.
+:8443, {{ vpn_node_domain }}:8443 {
+    forward_proxy {
+        basic_auth {{ vpn_node_credentials.naive_username }} {{ vpn_node_credentials.naive_password }}
+        hide_ip
+        hide_via
+        probe_resistance
+    }
+    respond "Nothing to see here" 200
+}

@@ -1,42 +1,132 @@
-- name: Prepare node
+---
+- name: Prepare new node inputs
   hosts: localhost
   connection: local
   gather_facts: false
   become: false
-  vars:
-    node_hostname: "{{ nn }}"
+  any_errors_fatal: true
+  vars_files:
+    - "{{ playbook_dir }}/../external_vars.yml"
   vars_prompt:
+    - name: nn
+      prompt: New node name
+      private: false
+    - name: node_address
+      prompt: Server IP or DNS name
+      private: false
     - name: node_root_pass
-      prompt: Enter node root password
+      prompt: Root password (leave empty for a key-based rerun)
       private: true
+      default: ""
   tasks:
     - name: Prepare node
       ansible.builtin.import_role:
         name: node
         tasks_from: prepare_node
 
-- name: Configure node
-  hosts: "{{ nn | default('localhost') ~ '_root' }}"
+- name: Bootstrap administrator using root
+  hosts: node_bootstrap_root
   gather_facts: false
   become: false
-  vars_files:
-    - "{{ lookup('env', 'PWD') }}/external_vars.yml"
+  any_errors_fatal: true
   tasks:
-    - name: Configure node
+    - name: Configure administrator
       ansible.builtin.import_role:
         name: node
         tasks_from: configure_node
-      vars:
-        node_user: "{{ NODE_USER }}"
-        node_pass: "{{ NODE_PASS }}"
 
-- name: Setup node
-  hosts: "{{ nn | default('localhost') }}"
+    - name: Record successful root bootstrap on the controller
+      ansible.builtin.set_fact:
+        node_bootstrap_root_ready: true
+      delegate_to: localhost
+      delegate_facts: true
+
+- name: Verify key access and configure node
+  hosts: node_bootstrap_target
+  gather_facts: false
   become: true
-  vars_files:
-    - "{{ lookup('env', 'PWD') }}/external_vars.yml"
+  any_errors_fatal: true
+  pre_tasks:
+    - name: Require root bootstrap to have succeeded or been explicitly skipped
+      ansible.builtin.assert:
+        that: hostvars['localhost'].node_bootstrap_root_ready | default(false) | bool
+        fail_msg: Root bootstrap failed; fix SSH connectivity before retrying. No node setup will run.
+
+    - name: Verify fresh key-only SSH and passwordless sudo before hardening
+      ansible.builtin.command: /usr/bin/true
+      changed_when: false
+
+    - name: Gather facts after verifying access
+      ansible.builtin.setup:
   tasks:
     - name: Setup node
       ansible.builtin.import_role:
         name: node
         tasks_from: setup_node
+
+    - name: Deploy host and container monitoring
+      ansible.builtin.import_role:
+        name: monitoring_client
+
+    - name: Apply pending service changes before checking metrics
+      ansible.builtin.meta: flush_handlers
+
+    - name: Verify key-only sudo still works after SSH policy reload
+      ansible.builtin.command: /usr/bin/true
+      changed_when: false
+
+    - name: Persist node for future deployments
+      ansible.builtin.import_role:
+        name: node
+        tasks_from: persist_node
+
+    - name: Register the successfully configured node for monitoring
+      ansible.builtin.add_host:
+        name: "{{ inventory_hostname }}"
+        groups: monitored_nodes
+
+    - name: Allow monitoring deployment only after successful setup and inventory persistence
+      ansible.builtin.set_fact:
+        node_bootstrap_ready: true
+      delegate_to: localhost
+      delegate_facts: true
+
+- name: Update shared dashboards alerts and scrape targets
+  ansible.builtin.import_playbook: ../playbooks/ws-logs/deploy.yml
+  when: hostvars['localhost'].node_bootstrap_ready | default(false) | bool
+
+- name: Verify new node monitoring end to end
+  hosts: node_bootstrap_target
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  tasks:
+    - name: Require successful bootstrap before verifying monitoring
+      ansible.builtin.assert:
+        that: hostvars['localhost'].node_bootstrap_ready | default(false) | bool
+        fail_msg: Node setup did not complete; monitoring deployment was skipped.
+
+    - name: Wait for new node host and Docker metrics in Prometheus
+      vars:
+        node_metrics_query: >-
+          up{job="telegraf",node={{ inventory_hostname | to_json }}} == 1
+          and on (node) mem_total{job="telegraf"}
+          and on (node) docker_container_mem_usage{job="telegraf"}
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9090/api/v1/query?query={{ node_metrics_query | urlencode }}"
+        use_proxy: false
+      delegate_to: "{{ groups['monitoring_servers'] | first }}"
+      register: node_metrics
+      until: >-
+        node_metrics.status == 200 and
+        node_metrics.json.status == 'success' and
+        node_metrics.json.data.result | length > 0
+      retries: 18
+      delay: 10
+
+    - name: Show deployment result
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }} is ready: key-only SSH as {{ ansible_user }}, Docker,
+          SSHGuard, unattended security updates, and verified monitoring.
+          Reboot required: {{ node_reboot_required.stat.exists }}.

@@ -1,69 +1,143 @@
 ---
-- name: Configure a native SSH proxy baseline on the disposable test node only
+- name: Prepare key-only administration on the disposable test node
   hosts: vpn_test
+  gather_facts: false
   become: true
   vars:
+    ansible_host_key_checking: true
+    ansible_python_interpreter: /usr/bin/python3
+    vpn_admin_user: vpnadmin
+    vpn_admin_public_key_path: "{{ playbook_dir }}/../../infra/cherry-vpn/private/ssh/admin.pub"
+    vpn_admin_private_key_path: "{{ playbook_dir }}/../../infra/cherry-vpn/private/ssh/admin"
     vpn_probe_public_key_path: "{{ playbook_dir }}/../../infra/cherry-vpn/private/ssh/probe.pub"
   tasks:
-    - name: Require a separate public key for the unprivileged test tunnel
+    - name: Validate separate administrator and tunnel keys before changing the server
       ansible.builtin.assert:
         that:
+          - not ansible_check_mode
+          - groups['vpn_test'] | length == 1
+          - vpn_admin_user is match('^[a-z_][a-z0-9_-]*$')
+          - vpn_admin_user not in ['root', 'vpnprobe']
+          - lookup('ansible.builtin.file', vpn_admin_public_key_path) is match('^ssh-ed25519 ')
           - lookup('ansible.builtin.file', vpn_probe_public_key_path) is match('^ssh-ed25519 ')
-        fail_msg: Restore the dedicated Ed25519 keys with infra/cherry-vpn/restore-keys.yaml first.
+          - lookup('ansible.builtin.file', vpn_admin_public_key_path).split()[1] != lookup('ansible.builtin.file', vpn_probe_public_key_path).split()[1]
+        fail_msg: Restore dedicated keys with infra/cherry-vpn/restore-keys.yaml. Bootstrap requires a real run.
 
-    - name: Wait for provider cloud-init to finish
-      ansible.builtin.command: cloud-init status --wait
+    - name: Wait for cloud-init or accept the provider's explicitly disabled image
+      ansible.builtin.raw: |
+        rc=0
+        status=$(cloud-init status --wait) || rc=$?
+        printf '%s\n' "$status"
+        if [ "$rc" -eq 0 ]; then exit 0; fi
+        # Cherry disables cloud-init after deployment; do not mistake this for
+        # a degraded/failed run. Accept only its marker and exact disabled status.
+        if [ "$rc" -eq 2 ] && [ -e /etc/cloud/cloud-init.disabled ] &&
+           [ "$status" = 'status: disabled' ] && command -v python3 >/dev/null; then
+          exit 0
+        fi
+        exit "$rc"
       changed_when: false
 
-    - name: Create an unprivileged tunnel account
+    - name: Gather facts after cloud-init completes
+      ansible.builtin.setup:
+
+    - name: Require Debian for the security update policy
+      ansible.builtin.assert:
+        that: ansible_facts.distribution == 'Debian'
+
+    - name: Install sudo and unattended security updates
+      ansible.builtin.apt:
+        name: [sudo, unattended-upgrades]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Create a key-only administrator
       ansible.builtin.user:
-        name: vpnprobe
+        name: "{{ vpn_admin_user }}"
+        groups: sudo
+        append: true
+        shell: /bin/bash
         create_home: true
-        shell: /bin/sh
         password_lock: true
 
-    - name: Create the tunnel account SSH directory
+    - name: Create administrator SSH directory
       ansible.builtin.file:
-        path: /home/vpnprobe/.ssh
+        path: "/home/{{ vpn_admin_user }}/.ssh"
         state: directory
-        owner: vpnprobe
-        group: vpnprobe
+        owner: "{{ vpn_admin_user }}"
+        group: "{{ vpn_admin_user }}"
         mode: "0700"
 
-    - name: Authorize only the dedicated tunnel public key
+    - name: Authorize the dedicated administrator key
       ansible.builtin.copy:
-        content: >-
-          no-agent-forwarding,no-X11-forwarding,no-pty
-          {{ lookup('ansible.builtin.file', vpn_probe_public_key_path) | trim }}
-        dest: /home/vpnprobe/.ssh/authorized_keys
-        owner: vpnprobe
-        group: vpnprobe
+        content: "{{ lookup('ansible.builtin.file', vpn_admin_public_key_path) | trim }}\n"
+        dest: "/home/{{ vpn_admin_user }}/.ssh/authorized_keys"
+        owner: "{{ vpn_admin_user }}"
+        group: "{{ vpn_admin_user }}"
         mode: "0600"
 
-    - name: Configure key-only login and a forwarding-only test account
+    - name: Allow key-only administrator to use passwordless sudo
       ansible.builtin.copy:
-        dest: /etc/ssh/sshd_config.d/00-vpn-probe.conf
+        dest: "/etc/sudoers.d/{{ vpn_admin_user }}"
+        content: "{{ vpn_admin_user }} ALL=(ALL) NOPASSWD:ALL\n"
         owner: root
         group: root
-        mode: "0644"
-        validate: /usr/sbin/sshd -t -f %s
-        content: |
-          PasswordAuthentication no
-          KbdInteractiveAuthentication no
-          PermitRootLogin prohibit-password
-          Match User vpnprobe
-              AllowTcpForwarding local
-              AllowStreamLocalForwarding no
-              AllowAgentForwarding no
-              X11Forwarding no
-              PermitTTY no
-              PermitTunnel no
-              ForceCommand /usr/sbin/nologin
-          Match all
-      notify: Reload SSH
+        mode: "0440"
+        validate: /usr/sbin/visudo -cf %s
 
-  handlers:
-    - name: Reload SSH
-      ansible.builtin.service:
-        name: ssh
-        state: reloaded
+    - name: Add a fresh administrator connection without reusing the root SSH session
+      ansible.builtin.add_host:
+        name: "{{ inventory_hostname }}_admin"
+        groups: vpn_test_admin
+        ansible_connection: ssh
+        ansible_host: "{{ ansible_host }}"
+        ansible_port: "{{ ansible_port | default(22) }}"
+        ansible_user: "{{ vpn_admin_user }}"
+        ansible_password: ""
+        ansible_become_password: ""
+        ansible_ssh_private_key_file: "{{ vpn_admin_private_key_path }}"
+        ansible_ssh_common_args: "{{ ansible_ssh_common_args | default('') }}"
+        ansible_host_key_checking: true
+        ansible_ssh_args: >-
+          -o ControlMaster=no -o ControlPath=none -o IdentitiesOnly=yes
+          -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o BatchMode=yes
+        ansible_python_interpreter: /usr/bin/python3
+        vpn_node_domain: "{{ vpn_node_domain | default(omit) }}"
+        vpn_node_reality_server_name: "{{ vpn_node_reality_server_name | default(omit) }}"
+
+- name: Verify non-root administration before restricting SSH
+  hosts: vpn_test_admin
+  gather_facts: false
+  become: true
+  become_flags: -n
+  vars:
+    ansible_host_key_checking: true
+    vpn_node_ssh_public_key_path: "{{ vpn_probe_public_key_path | default(playbook_dir ~ '/../../infra/cherry-vpn/private/ssh/probe.pub') }}"
+  tasks:
+    - name: Verify the fresh connection is non-root without sudo
+      ansible.builtin.command: id -u
+      become: false
+      register: vpn_admin_identity
+      changed_when: false
+      failed_when: vpn_admin_identity.rc != 0 or vpn_admin_identity.stdout | int == 0
+
+    - name: Verify passwordless sudo before disabling root SSH
+      ansible.builtin.command: id -u
+      register: vpn_sudo_identity
+      changed_when: false
+      failed_when: vpn_sudo_identity.rc != 0 or vpn_sudo_identity.stdout != '0'
+
+    # Root and non-root access were tested on separate fresh connections above.
+    # Reuse only the verified administrator's socket; reset_connection below the
+    # SSH reload still forces the post-hardening access test onto a new session.
+    - name: Enable administrator multiplexing after the fresh sudo checks
+      ansible.builtin.set_fact:
+        ansible_ssh_args: >-
+          -o ControlMaster=auto -o ControlPersist=60s -o IdentitiesOnly=yes
+          -o PreferredAuthentications=publickey -o PasswordAuthentication=no -o BatchMode=yes
+
+    - name: Apply the reusable SSH baseline after verifying administrator access
+      ansible.builtin.import_role:
+        name: vpn_node
+        tasks_from: ssh

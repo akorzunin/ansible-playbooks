@@ -19,7 +19,7 @@ ROOT = STACK.parents[1]
 
 class MonitoringTests(unittest.TestCase):
     def setUp(self):
-        inventory = yaml.safe_load((ROOT / "monitoring.inventory.yml").read_text())
+        inventory = yaml.safe_load((ROOT / "monitoring.inventory.yml.example").read_text())
         children = inventory["all"]["children"]
         self.groups = {
             name: list(group.get("hosts", {})) for name, group in children.items()
@@ -167,19 +167,13 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(self.hostvars["remote_pi"]["monitoring_client_telegraf_image"], "telegraf:1.40.2")
         self.assertEqual(self.hostvars["remote_pi"]["monitoring_client_telegraf_bind_address"], "192.168.1.58")
 
-    def test_vps_allowlists_cover_observed_dynamic_public_addresses(self):
-        observed = [
-            "178.141.4.135", "178.141.43.157", "178.141.53.28", "178.141.32.176",
-            "178.141.87.75", "178.141.68.207", "178.141.13.19", "178.141.30.3",
-            "178.141.1.78", "178.141.26.167", "178.141.56.152", "178.141.35.199",
-        ]
+    def test_example_vps_allowlists_restrict_public_access_to_scraper(self):
         for host in ("nk1", "nt1"):
             sources = self.hostvars[host]["monitoring_telegraf_allowed_sources"]
-            self.assertIn("178.141.0.0/17", sources)
+            self.assertIn("198.51.100.5/32", sources)
             networks = [ipaddress.ip_network(source) for source in sources]
-            for address in observed:
-                self.assertTrue(any(ipaddress.ip_address(address) in network for network in networks))
-            for address in ("178.141.128.0", "178.142.35.199"):
+            self.assertTrue(any(ipaddress.ip_address("198.51.100.5") in network for network in networks))
+            for address in ("198.51.100.6", "203.0.113.5"):
                 self.assertFalse(any(ipaddress.ip_address(address) in network for network in networks))
 
     def test_client_retirement_requires_per_node_metrics_and_backup(self):

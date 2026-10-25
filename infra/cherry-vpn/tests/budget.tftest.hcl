@@ -12,6 +12,11 @@ mock_provider "cherryservers" {
 }
 
 variables {
+  state_encryption_passphrase = "mock-only-passphrase-never-for-live-state"
+  ssh_host_key = {
+    private = "-----BEGIN OPENSSH PRIVATE KEY-----\nmock-provider-only-not-a-real-key\n-----END OPENSSH PRIVATE KEY-----\n"
+    public  = "ssh-ed25519 AAAATEST mock-host"
+  }
   project_id          = 123456
   region              = "LT-Siauliai"
   ssh_public_key_path = "tests/admin.pub"
@@ -22,12 +27,26 @@ run "small_hourly_node" {
 
   assert {
     condition = (
+      cherryservers_server.vpn.image == "debian_13_64bit" &&
       cherryservers_server.vpn.cycle == "hourly" &&
       cherryservers_server.vpn.spot_instance == false &&
       cherryservers_server.vpn.allow_reinstall == false &&
       cherryservers_server.vpn.plan == "B1-1-1gb-20s-shared"
     )
-    error_message = "The test must remain a smallest, non-spot hourly VM without implicit reinstalls."
+    error_message = "The test must remain a smallest Debian 13, non-spot hourly VM without implicit reinstalls."
+  }
+}
+
+run "pre_pinned_cloud_init" {
+  command = plan
+
+  assert {
+    condition = (
+      jsondecode(trimprefix(base64decode(cherryservers_server.vpn.user_data), "#cloud-config\n")).ssh_keys.ed25519_private == var.ssh_host_key.private &&
+      jsondecode(trimprefix(base64decode(cherryservers_server.vpn.user_data), "#cloud-config\n")).ssh_keys.ed25519_public == var.ssh_host_key.public &&
+      jsondecode(trimprefix(base64decode(cherryservers_server.vpn.user_data), "#cloud-config\n")).ssh_pwauth == false
+    )
+    error_message = "Cloud-init must install the pre-pinned host identity without enabling password SSH."
   }
 }
 

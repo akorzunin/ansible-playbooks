@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -53,6 +55,91 @@ class ProfileTests(unittest.TestCase):
                     self.assertEqual([i["type"] for i in result["inbounds"]], ["tun"])
                 if platform == "linux":
                     self.assertNotIn("auto_detect_interface", result["route"])
+
+    def test_second_server_is_selectable_without_changing_defaults_or_enrollment(self):
+        with tempfile.TemporaryDirectory() as work, patch.object(generate.subprocess, "run"):
+            output = Path(work)
+            generate.generate(output, self.connections, self.tokens)
+            urls = (output / "urls.json").read_bytes()
+            extra = [{"type": "ssh", "tag": "cherry-ssh", "server": "192.0.2.10", "user": "vpnprobe"}]
+            original = json.loads(json.dumps(extra))
+            generate.generate(output, self.connections, self.tokens, extra)
+            self.assertEqual(extra, original)
+            self.assertEqual(urls, (output / "urls.json").read_bytes())
+            for platform, order in generate.ORDERS.items():
+                result = json.loads((output / f"{platform}.json").read_text())
+                selector = result["outbounds"][0]
+                self.assertEqual(selector["outbounds"], order + ["cherry-ssh"])
+                self.assertEqual(selector["default"], order[0])
+                self.assertEqual(result["outbounds"][-2], extra[0])
+            extra[0]["server"] = "192.0.2.11"
+            generate.generate(output, self.connections, self.tokens, extra)
+            updated = json.loads((output / "linux.json").read_text())
+            self.assertEqual(updated["outbounds"][-2]["server"], "192.0.2.11")
+            self.assertEqual(urls, (output / "urls.json").read_bytes())
+            # Removing the trial node must remove it from every selector as well.
+            generate.generate(output, self.connections, self.tokens)
+            removed = json.loads((output / "linux.json").read_text())
+            self.assertNotIn("cherry-ssh", removed["outbounds"][0]["outbounds"])
+
+    def test_invalid_extra_outbounds_preserve_existing_profiles(self):
+        with tempfile.TemporaryDirectory() as work, patch.object(generate.subprocess, "run") as check:
+            output = Path(work)
+            generate.generate(output, self.connections, self.tokens)
+            before = {p.name: p.read_bytes() for p in output.iterdir()}
+            for extra in (
+                None, {}, ["ssh"], [{"tag": "cherry"}],
+                [{"type": "ssh", "tag": "ssh"}],
+                [{"type": "ssh", "tag": "proxy"}],
+                [{"type": "ssh", "tag": ""}],
+                [{"type": "ssh", "tag": []}],
+                [{"type": "ssh", "tag": "cherry"}] * 2,
+            ):
+                with self.subTest(extra=extra):
+                    check.reset_mock()
+                    with self.assertRaises(ValueError):
+                        generate.generate(output, self.connections, self.tokens, extra)
+                    check.assert_not_called()
+                    self.assertEqual(before, {p.name: p.read_bytes() for p in output.iterdir()})
+
+    def test_failed_extra_outbound_core_check_preserves_existing_profiles(self):
+        with tempfile.TemporaryDirectory() as work:
+            output = Path(work)
+            with patch.object(generate.subprocess, "run"):
+                generate.generate(output, self.connections, self.tokens)
+            before = {p.name: p.read_bytes() for p in output.iterdir()}
+            with patch.object(generate.subprocess, "run", side_effect=subprocess.CalledProcessError(1, "check")):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    generate.generate(output, self.connections, self.tokens,
+                                      [{"type": "unknown", "tag": "cherry"}])
+            self.assertEqual(before, {p.name: p.read_bytes() for p in output.iterdir()})
+
+    def test_cli_combines_vault_and_role_outbounds_and_rejects_bad_files(self):
+        with tempfile.TemporaryDirectory() as work:
+            directory = Path(work)
+            core = directory / "sing-box"
+            core.write_text("#!/bin/sh\nexit 0\n")
+            core.chmod(0o700)
+            output = directory / "output"
+            exported = directory / "cherry-outbounds.json"
+            exported.write_text(json.dumps([{"type": "ssh", "tag": "cherry-ssh"}]))
+            payload = json.dumps({"sing_box_secrets": {
+                "connections": self.connections, "tokens": self.tokens,
+                "extra_outbounds": [{"type": "naive", "tag": "another-node"}],
+            }})
+            command = [sys.executable, str(generate.ROOT / "generate.py"),
+                       "--private-dir", str(output), "--extra-outbounds-file", str(exported)]
+            environment = {**os.environ, "PATH": str(directory) + os.pathsep + os.environ["PATH"]}
+            result = subprocess.run(command, input=payload, capture_output=True, text=True, env=environment)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            profile = json.loads((output / "linux.json").read_text())
+            self.assertEqual(profile["outbounds"][0]["outbounds"][-2:], ["another-node", "cherry-ssh"])
+            before = {p.name: p.read_bytes() for p in output.iterdir()}
+            exported.write_text('{"password": "DO_NOT_LOG_FIXTURE"}')
+            result = subprocess.run(command, input=payload, capture_output=True, text=True, env=environment)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertNotIn("DO_NOT_LOG_FIXTURE", result.stdout + result.stderr)
+            self.assertEqual(before, {p.name: p.read_bytes() for p in output.iterdir()})
 
     def test_tokens_stay_stable_and_artifacts_are_private(self):
         with tempfile.TemporaryDirectory() as work:

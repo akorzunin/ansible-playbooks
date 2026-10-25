@@ -1,0 +1,204 @@
+---
+- name: Create the private controller download cache
+  ansible.builtin.file:
+    path: "{{ lookup('env', 'HOME') }}/.cache/ansible-vpn-node"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+
+- name: Download checksum-pinned upstream Naive server without compiling
+  ansible.builtin.get_url:
+    url: https://github.com/klzgrad/forwardproxy/releases/download/v2.11.7-naive2/caddy-forwardproxy-naive.tar.xz
+    dest: "{{ lookup('env', 'HOME') }}/.cache/ansible-vpn-node/naive-2.11.7-naive2.tar.xz"
+    checksum: sha256:c273dc07dd79c5919f97639cbdcb559d40ce90475dbd8aac80641b0a8c8065ff
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+
+- name: Extract the pinned Naive server in the controller cache
+  ansible.builtin.unarchive:
+    src: "{{ lookup('env', 'HOME') }}/.cache/ansible-vpn-node/naive-2.11.7-naive2.tar.xz"
+    dest: "{{ lookup('env', 'HOME') }}/.cache/ansible-vpn-node"
+    remote_src: true
+  delegate_to: localhost
+  become: false
+
+- name: Create an unprivileged container service account
+  ansible.builtin.user:
+    name: vpnproxy
+    system: true
+    home: /var/lib/vpn-node
+    create_home: false
+    shell: /usr/sbin/nologin
+
+- name: Read the numeric container user and group
+  ansible.builtin.getent:
+    database: passwd
+    key: vpnproxy
+
+- name: Create private deployment and build directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - /srv/deploy/vpn-node
+    - /srv/deploy/vpn-node/build
+
+- name: Preserve certificate and ACME state across container recreation
+  ansible.builtin.file:
+    path: /var/lib/vpn-node
+    state: directory
+    owner: vpnproxy
+    group: vpnproxy
+    mode: "0700"
+
+- name: Stage the minimal Naive Docker build definition
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/srv/deploy/vpn-node/build/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: [Dockerfile, .dockerignore]
+  register: vpn_node_build_files
+
+- name: Stage the verified Naive binary in the isolated build context
+  ansible.builtin.copy:
+    src: "{{ lookup('env', 'HOME') }}/.cache/ansible-vpn-node/caddy-forwardproxy-naive/caddy"
+    dest: /srv/deploy/vpn-node/build/server
+    owner: root
+    group: root
+    mode: "0755"
+  register: vpn_node_server_binary
+
+- name: Stage the host CA bundle in the build context
+  ansible.builtin.copy:
+    src: /etc/ssl/certs/ca-certificates.crt
+    dest: /srv/deploy/vpn-node/build/ca-certificates.crt
+    remote_src: true
+    owner: root
+    group: root
+    mode: "0644"
+  register: vpn_node_ca_file
+
+- name: Build the versioned Naive scratch image from the verified binary
+  community.docker.docker_image:
+    name: vpn-node-naive:2.11.7-naive2
+    source: build
+    build:
+      path: /srv/deploy/vpn-node/build
+      pull: false
+    force_source: "{{ vpn_node_build_files.changed or vpn_node_server_binary.changed or vpn_node_ca_file.changed }}"
+
+- name: Pull the digest-pinned upstream sing-box 1.14.4 VLESS server
+  community.docker.docker_image:
+    name: ghcr.io/sagernet/sing-box@sha256:0788ffbddab2c68a99a2dd4780bbc50902f159af6f589df3ee74a8389d278279
+    source: pull
+
+- name: Stage private proxy configuration candidates
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/srv/deploy/vpn-node/{{ item }}.candidate"
+    owner: root
+    group: vpnproxy
+    mode: "0640"
+  loop: [Caddyfile, vless.json]
+  no_log: true
+  diff: false
+
+- name: Validate Naive configuration in its pinned container before activation
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --network=none
+      - --read-only
+      - --cap-drop=ALL
+      - --security-opt=no-new-privileges:true
+      - --tmpfs=/tmp
+      - --env=XDG_DATA_HOME=/tmp
+      - --env=XDG_CONFIG_HOME=/tmp
+      - --user={{ ansible_facts.getent_passwd.vpnproxy[1] }}:{{ ansible_facts.getent_passwd.vpnproxy[2] }}
+      - --volume=/srv/deploy/vpn-node/Caddyfile.candidate:/etc/vpn/Caddyfile:ro
+      - vpn-node-naive:2.11.7-naive2
+      - validate
+      - --config=/etc/vpn/Caddyfile
+      - --adapter=caddyfile
+  changed_when: false
+  no_log: true
+
+- name: Validate VLESS configuration in its pinned container before activation
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --network=none
+      - --read-only
+      - --cap-drop=ALL
+      - --security-opt=no-new-privileges:true
+      - --user={{ ansible_facts.getent_passwd.vpnproxy[1] }}:{{ ansible_facts.getent_passwd.vpnproxy[2] }}
+      - --volume=/srv/deploy/vpn-node/vless.json.candidate:/etc/vpn/vless.json:ro
+      - ghcr.io/sagernet/sing-box@sha256:0788ffbddab2c68a99a2dd4780bbc50902f159af6f589df3ee74a8389d278279
+      - check
+      - -c=/etc/vpn/vless.json
+  changed_when: false
+  no_log: true
+
+- name: Install validated Compose configuration
+  ansible.builtin.template:
+    src: compose.yaml.j2
+    dest: /srv/deploy/vpn-node/compose.yaml
+    owner: root
+    group: root
+    mode: "0600"
+    validate: docker compose -f %s config --quiet
+
+# Syntax-only activation guard; add health-gated rollback before unattended replacement.
+- name: Activate the validated proxy configuration files
+  ansible.builtin.copy:
+    src: "/srv/deploy/vpn-node/{{ item }}.candidate"
+    dest: "/srv/deploy/vpn-node/{{ item }}"
+    remote_src: true
+    owner: root
+    group: vpnproxy
+    mode: "0640"
+  loop: [Caddyfile, vless.json]
+  register: vpn_node_active_configs
+  no_log: true
+  diff: false
+
+- name: Start the dedicated VPN containers
+  community.docker.docker_compose_v2:
+    project_src: /srv/deploy/vpn-node
+    project_name: vpn-node
+    state: present
+    pull: never
+    recreate: "{{ 'always' if vpn_node_active_configs.changed else 'auto' }}"
+  no_log: true
+
+- name: Wait for both public TLS listeners
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ item }}"
+    timeout: 60
+  loop: [443, 8443]
+
+# Node-side readiness is separate from ISP reachability. Regional client checks
+# must gate publication; a successful self-check is not proof of a usable VPN path.
+- name: Verify the public Naive certificate and HTTPS site on the node
+  ansible.builtin.uri:
+    url: "https://{{ vpn_node_domain }}/"
+    use_proxy: false
+    validate_certs: true
+    status_code: 200
+    timeout: 15
+  register: vpn_node_https
+  until: vpn_node_https.status | default(0) == 200
+  retries: 12
+  delay: 10

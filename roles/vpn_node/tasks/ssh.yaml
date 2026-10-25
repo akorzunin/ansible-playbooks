@@ -1,0 +1,126 @@
+---
+- name: Install unattended Debian security upgrades
+  ansible.builtin.apt:
+    name: unattended-upgrades
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Enable daily package indexes and unattended upgrades
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+- name: Limit unattended upgrades to Debian security without automatic reboots
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/99vpn-security
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      #clear Unattended-Upgrade::Allowed-Origins;
+      #clear Unattended-Upgrade::Origins-Pattern;
+      Unattended-Upgrade::Origins-Pattern {
+          "codename=${distro_codename}-security,label=Debian-Security";
+      };
+      Unattended-Upgrade::Automatic-Reboot "false";
+
+- name: Enable the daily apt timers
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+  loop: [apt-daily.timer, apt-daily-upgrade.timer]
+
+- name: Create an unprivileged tunnel account
+  ansible.builtin.user:
+    name: vpnprobe
+    create_home: true
+    shell: /bin/sh
+    password_lock: true
+
+- name: Create the tunnel account SSH directory
+  ansible.builtin.file:
+    path: /home/vpnprobe/.ssh
+    state: directory
+    owner: vpnprobe
+    group: vpnprobe
+    mode: "0700"
+
+- name: Authorize only the dedicated tunnel public key
+  ansible.builtin.copy:
+    content: >-
+      no-agent-forwarding,no-X11-forwarding,no-pty
+      {{ lookup('ansible.builtin.file', vpn_node_ssh_public_key_path) | trim }}
+    dest: /home/vpnprobe/.ssh/authorized_keys
+    owner: vpnprobe
+    group: vpnprobe
+    mode: "0600"
+
+# Prepend before provider Include/Match directives: OpenSSH uses the first value.
+- name: Disable root SSH and restrict the tunnel account after verifying sudo
+  ansible.builtin.blockinfile:
+    path: /etc/ssh/sshd_config
+    insertbefore: BOF
+    marker: '# {mark} ANSIBLE VPN SSH POLICY'
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+    block: |
+      PubkeyAuthentication yes
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin no
+  notify: Reload SSH
+
+# Keep Match blocks after provider globals; Match all would otherwise turn
+# later global settings into conditional overrides of the policy above.
+- name: Restrict tunnel sessions after all global SSH configuration
+  ansible.builtin.blockinfile:
+    path: /etc/ssh/sshd_config
+    insertafter: EOF
+    marker: '# {mark} ANSIBLE VPN TUNNEL POLICY'
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+    block: |
+      Match User vpnprobe
+          AllowTcpForwarding local
+          AllowStreamLocalForwarding no
+          AllowAgentForwarding no
+          X11Forwarding no
+          PermitTTY no
+          PermitTunnel no
+          MaxSessions 0
+          ForceCommand /usr/sbin/nologin
+      Match all
+  notify: Reload SSH
+
+- name: Remove the superseded baseline SSH drop-in
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d/00-vpn-probe.conf
+    state: absent
+  notify: Reload SSH
+
+- name: Validate the complete SSH configuration
+  ansible.builtin.command: /usr/sbin/sshd -t
+  changed_when: false
+
+- name: Apply validated SSH policy now
+  ansible.builtin.meta: flush_handlers
+
+- name: Close the administrator connection to verify access after reload
+  ansible.builtin.meta: reset_connection
+
+- name: Verify sudo still works on a new connection after SSH reload
+  ansible.builtin.command: id -u
+  register: vpn_node_reloaded_identity
+  changed_when: false
+  failed_when: vpn_node_reloaded_identity.rc != 0 or vpn_node_reloaded_identity.stdout != '0'

@@ -1,0 +1,20 @@
+---
+- name: Validate VPN inputs before changing the node
+  ansible.builtin.import_tasks: validate.yaml
+
+# DNS moves before ACME/services are ready; stage certificates and a health-gated
+# DNS switch before using this workflow for zero-downtime automatic rotation.
+- name: Update and verify the node DNS record
+  ansible.builtin.import_tasks: dns.yaml
+
+- name: Configure security updates and native SSH forwarding
+  ansible.builtin.import_tasks: ssh.yaml
+
+- name: Install Docker on the dedicated Debian node
+  ansible.builtin.import_tasks: docker.yaml
+
+- name: Package and configure the pinned proxy servers
+  ansible.builtin.import_tasks: proxies.yaml
+
+- name: Export verified client connections for the profile publisher
+  ansible.builtin.import_tasks: clients.yaml

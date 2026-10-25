@@ -1,8 +1,154 @@
-- name: Add temporary host to access node as root
+---
+# Unreachable hosts do not stop later plays targeting different hosts.
+- name: Reset bootstrap completion gates on the controller
+  ansible.builtin.set_fact:
+    node_bootstrap_root_ready: "{{ node_root_pass | length == 0 }}"
+    node_bootstrap_ready: false
+
+- name: Validate bootstrap inputs and inventory
+  ansible.builtin.assert:
+    that:
+      - not ansible_check_mode
+      - ansible_limit is not defined
+      - nn is match('^[a-z][a-z0-9-]{0,62}$')
+      - node_address is match('^[a-zA-Z0-9][a-zA-Z0-9.:-]*$')
+      - node_user is match('^[a-z_][a-z0-9_-]*$')
+      - node_user != 'root'
+      - node_port | int > 0 and node_port | int < 65536
+      - nn not in groups or nn in groups.get('bootstrap_' ~ nn, [])
+      - nn not in hostvars or nn in groups.get('bootstrap_' ~ nn, [])
+      - nn not in groups.get('retired_nodes', [])
+      - groups.get('monitoring_servers', []) | length == 1
+      - groups.get('monitored_nodes', []) | length > 0
+    fail_msg: >-
+      Use a new DNS-safe node name and both -i ./hosts -i ./monitoring.inventory.yml.
+      Existing unmanaged names are refused to avoid overwriting another machine.
+      Bootstrap requires a real run without --limit (it also updates the monitoring server).
+
+- name: Require Telegram alert credentials before changing the server
+  ansible.builtin.assert:
+    that:
+      - MONITORING_TELEGRAM_BOT_TOKEN | default('') | length > 0
+      - MONITORING_TELEGRAM_CHAT_ID | default('') | string is match('^-?[0-9]+$')
+    fail_msg: Configure monitoring Telegram credentials in external_vars.yml first.
+  no_log: true
+
+- name: Require the expected YAML inventory layout before inserting managed entries
+  ansible.builtin.assert:
+    that:
+      - "lookup('file', node_inventory_file) is search('(?m)^\\S[^\\n]*:\\s*$')"
+      - "lookup('file', node_monitoring_inventory_file) is search('(?m)^    # Retain SSH records')"
+    fail_msg: Bootstrap expects the private YAML hosts inventory and the repository monitoring overlay layout.
+
+- name: Read administrator public key
+  ansible.builtin.set_fact:
+    node_authorized_key: "{{ lookup('file', node_public_key_file) | trim }}"
+
+- name: Validate administrator public key
+  ansible.builtin.assert:
+    that:
+      - node_authorized_key is match('^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp[0-9]+) [A-Za-z0-9+/=]+( .*)?$')
+    fail_msg: Set node_public_key_file to a single OpenSSH public key.
+
+- name: Check private key and monitoring environment exist locally
+  ansible.builtin.stat:
+    path: "{{ item }}"
+    get_checksum: false
+    get_mime: false
+    get_attributes: false
+  loop:
+    - "{{ node_private_key_file }}"
+    - "{{ monitoring_env_file | default(playbook_dir ~ '/../playbooks/ws-logs/.env') }}"
+    - "{{ node_inventory_file }}"
+    - "{{ node_monitoring_inventory_file }}"
+  register: node_local_files
+
+- name: Require local deployment files
+  ansible.builtin.assert:
+    that: item.stat.exists
+    fail_msg: "Required local file is missing: {{ item.item }}"
+  loop: "{{ node_local_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  no_log: true
+
+- name: Request monitoring scraper source CIDRs when not configured
+  ansible.builtin.pause:
+    prompt: Enter allowed monitoring scraper source CIDRs (comma separated; use the actual egress or VPN address)
+  register: node_sources_prompt
+  when: node_monitoring_allowed_sources | length == 0
+
+- name: Resolve monitoring source allowlist
+  ansible.builtin.set_fact:
+    node_allowed_sources: >-
+      {{ node_monitoring_allowed_sources if node_monitoring_allowed_sources | length > 0
+         else node_sources_prompt.user_input.split(',') | map('trim') | reject('equalto', '') | list }}
+
+- name: Require restricted monitoring sources
+  ansible.builtin.assert:
+    that:
+      - node_allowed_sources is sequence and node_allowed_sources is not string
+      - node_allowed_sources | length > 0
+      - "'0.0.0.0/0' not in node_allowed_sources"
+      - "'::/0' not in node_allowed_sources"
+    fail_msg: Configure a non-empty CIDR list, not unrestricted public metrics access.
+
+- name: Validate scraper CIDRs using the controller standard library
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - -c
+      - >-
+        import ipaddress, json, sys;
+        networks = [ipaddress.ip_network(value, strict=False) for value in json.loads(sys.argv[1])];
+        assert all(network.prefixlen > 0 for network in networks), 'Unrestricted metrics access is not allowed'
+      - "{{ node_allowed_sources | to_json }}"
+  changed_when: false
+
+- name: Wait for the server to present an SSH banner before bootstrap
+  ansible.builtin.wait_for:
+    host: "{{ node_address }}"
+    port: "{{ node_port | int }}"
+    search_regex: '^SSH-'
+    connect_timeout: 5
+    timeout: 30
+    msg: >-
+      No SSH banner from {{ node_address }}:{{ node_port }}. Check the server IP,
+      SSH port, provider firewall and console before retrying; authentication has not started.
+  tags: node_ssh_readiness
+
+- name: Add temporary root connection only when a password is supplied
   ansible.builtin.add_host:
-    hostname: "{{ node_hostname ~ '_root' }}"
-    ansible_host: "{{ hostvars[node_hostname]['ansible_host'] }}"
-    ansible_port: "{{ hostvars[node_hostname]['ansible_port'] }}"
+    name: "{{ nn }}_root"
+    groups: node_bootstrap_root
+    ansible_connection: ssh
+    ansible_host: "{{ node_address }}"
+    ansible_port: "{{ node_port | int }}"
     ansible_user: root
-    ansible_ssh_pass: "{{ node_root_pass }}"
+    ansible_password: "{{ node_root_pass }}"
+    ansible_ssh_args: -o PreferredAuthentications=password,keyboard-interactive -o PubkeyAuthentication=no
     ansible_python_interpreter: /usr/bin/python3
+    node_user: "{{ node_user }}"
+    node_authorized_key: "{{ node_authorized_key }}"
+  no_log: true
+  when: node_root_pass | length > 0
+
+- name: Add key-only administrator connection
+  ansible.builtin.add_host:
+    name: "{{ nn }}"
+    groups: node_bootstrap_target
+    ansible_connection: ssh
+    ansible_host: "{{ node_address }}"
+    ansible_port: "{{ node_port | int }}"
+    ansible_user: "{{ node_user }}"
+    ansible_password: ""
+    ansible_become_password: ""
+    ansible_ssh_private_key_file: "{{ node_private_key_file }}"
+    # A separate alias and disabled multiplexing ensure this cannot reuse root's session.
+    ansible_ssh_args: -o ControlMaster=no -o ControlPath=none -o IdentitiesOnly=yes -o PreferredAuthentications=publickey -o PasswordAuthentication=no
+    ansible_python_interpreter: /usr/bin/python3
+    monitoring_node: "{{ nn }}"
+    monitoring_enabled: true
+    monitoring_availability_alert: true
+    monitoring_client_telegraf_port: 9273
+    monitoring_telegraf_allowed_sources: "{{ node_allowed_sources }}"

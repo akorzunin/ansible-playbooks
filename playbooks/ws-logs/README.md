@@ -12,8 +12,11 @@ Always load both inventories:
 -i ./hosts -i ./monitoring.inventory.yml
 ```
 
-`hosts` remains your private Dropbox inventory. `monitoring.inventory.yml` is a
-tracked overlay with **one entry per machine**, not both local and remote aliases.
+`hosts` remains your private Dropbox inventory. `monitoring.inventory.yml` is an
+ignored private overlay with **one entry per machine**, not both local and remote aliases.
+For a new setup, copy `monitoring.inventory.yml.example` to that path and replace
+the documentation-only scraper CIDR with your actual egress IP or VPN /32. Keep
+an existing overlay unchanged and back it up privately.
 It monitors `workstation`, `pi`, `nk1`, and `nt1`. `kr1`, `sw1`, and `pl1` are retired:
 no targets and no exporter deployment, even if accidentally added to `monitored_nodes`.
 Their private SSH records are not deleted.
@@ -26,13 +29,15 @@ hostname for SSH but `monitoring_address: 192.168.1.58` for LAN scrapes from the
 workstation, and publishes metrics only on that LAN address.
 
 Remote agents require `monitoring_telegraf_allowed_sources`. The Pi allows the
-workstation's LAN address; nk1/nt1 allow `178.141.0.0/17`, the smallest single CIDR
-covering the workstation's observed dynamic public addresses. This spans
-`178.141.0.0`–`178.141.127.255` (32,768 addresses), so other subscribers in that
-range can also read metrics. Loopback and local Docker bridge sources are also
-allowed. Requests from other public sources receive HTTP 403. **Future ISP
-assignments outside this range still require updating both VPS allowlists in
-`monitoring.inventory.yml` and redeploying those clients.** Prefer a stable VPN
+workstation's LAN address; nk1/nt1 share the privately configured workstation
+source allowlist. Prefer a stable VPN /32: allowing a dynamic ISP pool also lets
+other subscribers in that pool read metrics. Loopback and local Docker bridge
+sources are also allowed. Requests from other public sources receive HTTP 403.
+**Future ISP assignments outside the configured sources require updating
+`monitoring_workstation_allowed_sources` in `monitoring.inventory.yml` and
+redeploying those clients.** nk1/nt1 share that list, and bootstrap uses it by
+default for new nodes (saving a per-node copy). Update saved copies too when the
+source changes. Prefer a stable VPN
 source for host-only access. No firewall rules are modified. The workstation
 agent has no published host port; its endpoint stays inside the Compose network.
 
@@ -209,6 +214,11 @@ targets. No test notification is sent by Ansible. Alerts in
 dashboard variables.
 
 ## Adding, disabling, and retiring nodes
+
+For a fresh Debian/Ubuntu server, use the [automated node bootstrap](../../node/init.md):
+it installs Docker/security updates/SSHGuard, saves SSH and monitoring inventory,
+deploys Telegraf, updates this stack, and verifies the new scrape target.
+The manual steps below remain useful for existing Docker hosts.
 
 1. Add SSH details to the private `hosts` inventory.
 2. Add the same host to `monitored_nodes` in `monitoring.inventory.yml`.

@@ -32,13 +32,15 @@ def private_write(path, content):
             temporary.unlink(missing_ok=True)
 
 
-def make_profile(base, connections, order):
+def make_profile(base, connections, order, extra_outbounds=()):
     profile = copy.deepcopy(base)
     tags = [connections[kind]["tag"] for kind in order]
+    tags.extend(outbound["tag"] for outbound in extra_outbounds)
     profile["outbounds"] = [
         {"type": "selector", "tag": "proxy", "outbounds": tags,
          "default": tags[0], "interrupt_exist_connections": True},
         *[copy.deepcopy(connections[kind]) for kind in order],
+        *copy.deepcopy(extra_outbounds),
         {"type": "direct", "tag": "direct"},
     ]
     route = profile.setdefault("route", {})
@@ -68,14 +70,21 @@ def make_profile(base, connections, order):
     return profile
 
 
-def generate(private_dir, connections, tokens):
+def generate(private_dir, connections, tokens, extra_outbounds=()):
     if set(connections) != {"vless", "naive", "ssh"}:
         raise ValueError("Vault must contain vless, naive and ssh connections")
     for kind, outbound in connections.items():
         if outbound.get("type") != kind:
             raise ValueError(f"Connection {kind} must have type {kind}")
-    tags = [o["tag"] for o in connections.values()]
-    if len(set(tags)) != 3 or set(tags) & {"auto", "proxy", "direct"}:
+    if not isinstance(extra_outbounds, (list, tuple)) or any(
+        not isinstance(outbound, dict) or not isinstance(outbound.get("type"), str)
+        or not outbound["type"] for outbound in extra_outbounds
+    ):
+        raise ValueError("Extra outbounds must be a list of sing-box outbound objects")
+    tags = [o.get("tag") for o in [*connections.values(), *extra_outbounds]]
+    if any(not isinstance(tag, str) or not tag for tag in tags):
+        raise ValueError("Connection tags must be nonempty strings")
+    if len(set(tags)) != len(tags) or set(tags) & {"auto", "proxy", "direct"}:
         raise ValueError("Connection tags must be unique and cannot be auto/proxy/direct")
     # Tokens are shared deployment state, never generated on a fresh controller.
     if set(tokens) != set(ORDERS):
@@ -91,7 +100,7 @@ def generate(private_dir, connections, tokens):
         rendered = {}
         for platform, order in ORDERS.items():
             base = json.loads((ROOT / "templates" / f"{platform}.json").read_text())
-            rendered[platform] = json.dumps(make_profile(base, connections, order), indent=2) + "\n"
+            rendered[platform] = json.dumps(make_profile(base, connections, order, extra_outbounds), indent=2) + "\n"
             candidate = Path(work) / f"{platform}.json"
             private_write(candidate, rendered[platform])
             # Check with the installed core; platform-specific runtime behavior still
@@ -112,10 +121,15 @@ def generate(private_dir, connections, tokens):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--private-dir", type=Path, default=ROOT / "private")
+    parser.add_argument("--extra-outbounds-file", type=Path,
+                        help="Private JSON list exported by the vpn_node role")
     args = parser.parse_args()
     try:
         data = json.load(sys.stdin)["sing_box_secrets"]
-        generate(args.private_dir, data["connections"], data["tokens"])
+        extra = data.get("extra_outbounds", [])
+        if args.extra_outbounds_file:
+            extra = extra + json.loads(args.extra_outbounds_file.read_text())
+        generate(args.private_dir, data["connections"], data["tokens"], extra)
     except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.CalledProcessError):
         # Input/core errors can contain credentials. Never echo them to deployment logs.
         parser.exit(1, "Profile generation failed; check Vault inputs and sing-box locally.\n")

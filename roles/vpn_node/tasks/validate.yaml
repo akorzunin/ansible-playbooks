@@ -1,0 +1,53 @@
+---
+- name: Require a dedicated Debian x86 node and valid public names
+  ansible.builtin.assert:
+    that:
+      - not ansible_check_mode
+      - ansible_facts.distribution == 'Debian'
+      - ansible_facts.architecture == 'x86_64'
+      - ansible_user != 'root'
+      - ansible_host_key_checking | default(false) | bool
+      - vpn_node_name is match('^[a-z][a-z0-9-]{0,62}$')
+      - vpn_node_domain is match('^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$')
+      - vpn_node_reality_server_name is match('^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$')
+    fail_msg: Use a dedicated Debian x86_64 node with verified non-root sudo access, strict host-key checking and a DNS hostname.
+
+- name: Require shared Vault credentials before changing the node
+  ansible.builtin.assert:
+    that:
+      - vpn_node_credentials.naive_username is match('^[a-zA-Z0-9_-]+$')
+      - vpn_node_credentials.naive_password is match('^[a-zA-Z0-9_-]{24,}$')
+      - vpn_node_credentials.vless_uuid is match('^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$')
+      - vpn_node_credentials.reality_private_key is match('^[a-zA-Z0-9_-]{43}$')
+      - vpn_node_credentials.reality_public_key is match('^[a-zA-Z0-9_-]{43}$')
+      - vpn_node_credentials.reality_short_id is match('^[0-9a-f]{16}$')
+      - lookup('ansible.builtin.file', vpn_node_ssh_public_key_path) is match('^ssh-ed25519 ')
+    fail_msg: Prepare shared credentials with infra/cherry-vpn/prepare-secrets.py and restore the dedicated SSH keys.
+  no_log: true
+
+- name: Derive the tunnel public key from the controller private key
+  ansible.builtin.command:
+    argv: [ssh-keygen, -y, -f, "{{ vpn_node_ssh_private_key_path }}"]
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  register: vpn_node_derived_key
+  no_log: true
+
+- name: Require the client tunnel key to match the authorized key
+  ansible.builtin.assert:
+    that: vpn_node_derived_key.stdout.split()[:2] == lookup('ansible.builtin.file', vpn_node_ssh_public_key_path).split()[:2]
+  no_log: true
+
+- name: Verify non-root administration without sudo
+  ansible.builtin.command: id -u
+  become: false
+  register: vpn_node_identity
+  changed_when: false
+  failed_when: vpn_node_identity.rc != 0 or vpn_node_identity.stdout | int == 0
+
+- name: Verify passwordless sudo before restricting SSH
+  ansible.builtin.command: id -u
+  register: vpn_node_sudo_identity
+  changed_when: false
+  failed_when: vpn_node_sudo_identity.rc != 0 or vpn_node_sudo_identity.stdout != '0'

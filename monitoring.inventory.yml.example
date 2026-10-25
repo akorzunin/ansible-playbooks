@@ -1,6 +1,13 @@
 ---
+# Copy to monitoring.inventory.yml (ignored) and configure private source CIDRs.
 # Overlay for ./hosts: one entry per machine
 all:
+  vars:
+    monitoring_workstation_allowed_sources: &workstation_scraper_sources
+      - 127.0.0.1/32
+      - 172.16.0.0/12
+      # Documentation-only address; replace with your scraper's egress IP or VPN /32.
+      - 198.51.100.5/32
   children:
     monitoring_servers:
       hosts:
@@ -28,18 +35,10 @@ all:
             - 192.168.1.132/32
         nk1:
           monitoring_availability_alert: true
-          monitoring_telegraf_allowed_sources:
-            - 127.0.0.1/32
-            - 172.16.0.0/12
-            # Observed dynamic ISP pool, not host identity; use a VPN /32 for host-only access.
-            - 178.141.0.0/17
+          monitoring_telegraf_allowed_sources: *workstation_scraper_sources
         nt1:
           monitoring_availability_alert: true
-          monitoring_telegraf_allowed_sources:
-            - 127.0.0.1/32
-            - 172.16.0.0/12
-            # Observed dynamic ISP pool, not host identity; use a VPN /32 for host-only access.
-            - 178.141.0.0/17
+          monitoring_telegraf_allowed_sources: *workstation_scraper_sources
     # Retain SSH records in ./hosts, but never scrape or deploy exporters here.
     retired_nodes:
       hosts:

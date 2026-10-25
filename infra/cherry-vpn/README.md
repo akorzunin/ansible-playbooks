@@ -1,17 +1,124 @@
 # Budget VPN experiment
 
-First stage: one disposable hourly VM, a native SSH proxy baseline, and local
-observation. Existing nt1, application servers, client profiles and monitoring
-are not changed. No automatic allocation, rotation, profile publication or
-Telegram dependency is introduced.
+Supervised trial: one disposable hourly VM, native SSH forwarding, and optional
+Dockerized Naïve and VLESS/REALITY, with Linux as the first client. Existing nt1,
+application servers, active client configuration and monitoring have not been
+changed. No automatic allocation, rotation, profile publication or Telegram
+dependency is introduced.
 
 SSH is a cheap **baseline**, not an obfuscation solution. If it is blocked or
 unstable, test Naïve on the same VM next; do not buy a larger VM to solve filtering.
 UDP and sustained-throughput testing are not covered by this initial baseline.
 
+## Current status
+
+One Debian 13 B1 VM is **running** in `NL-Amsterdam`, DNS
+`akorz-dyn1.duckdns.org`. It replaced the Lithuania server **destroy-first**,
+retaining the administrator public-key record and
+state-encryption secret but generating a fresh server identity. There is no
+intentional overlap or automatic allocation/expiry; the user supervises spend.
+
+The host identity was generated before provisioning, encrypted in the shared
+Vault, installed by cloud-init and pinned from the applied encrypted state.
+Strict SSH verification succeeded; no console, password bootstrap, or first-use
+fingerprint acceptance was needed. State and new saved plans use enforced
+PBKDF2/AES-GCM encryption. Back up `secrets.vault.yaml`: losing its state passphrase
+makes them unreadable. Never start from empty state to recover a lost controller.
+
+The [`vpn_node` role](../../roles/vpn_node/README.md) has deployed verified
+non-root `vpnadmin` sudo access, disabled root/password SSH, enabled unattended
+Debian security updates without automatic reboots, restricted the `vpnprobe`
+account, and started Dockerized Naïve and sing-box VLESS/REALITY. Naïve obtained
+a valid Let's Encrypt certificate; node-side HTTPS returns 200. A host firewall
+is not configured. Cherry's image marks cloud-init disabled after provisioning;
+bootstrap accepts only that explicit marker/status with Python already available.
+
+**Amsterdam Linux result:** all six direct checks passed (SSH, Naïve and VLESS,
+two HTTPS sites), with the VM's egress IPv4 for all three protocols. A second
+six-check run using the fetched, published Linux profile in an isolated core also
+passed. Direct pinned SSH administration works without the old proxy transport.
+Lithuania previously failed all direct checks but passed the SSH-forwarded
+reference; its results were retained separately. These observations do not prove
+which ISP/transit/filtering component caused the difference.
+
+`cherry-ssh`, `cherry-naive` and `cherry-vless` are now published alongside nt1 in
+all three existing private platform profiles. HTTPS contents match local generated
+files, URLs/tokens and nt1 defaults are unchanged. Already-enrolled devices receive
+the new choices on refresh; selection is manual, not automatic failover.
+
+**This workstation was not enrolled**, by explicit user choice. Its original
+`ssh-via-workstation` selection/local fallback remains active, no enrollment file
+was created and its update timer remains inactive. Published-profile testing used
+a temporary isolated core, not the active service. Private configs/results are
+in `private/`. UDP, sustained stability, other client platforms and autonomous
+replacement remain unverified.
+
+The catalogue quote remains EUR 0.015/hour; the server API has reported a EUR 0.02
+hourly unit price. The user accepted API pricing; these fields are not a verified
+all-inclusive bill. The DuckDNS token's missing YAML `!vault |` marker was corrected
+without changing its encrypted ciphertext or `external_vars.yml` symlink.
+
+## Secure automatic bootstrap
+
+For a new deployment only, create `secrets.vault.yaml` with `prepare-secrets.py`.
+For an existing deployment **reuse that encrypted file** and add/retain its
+bootstrap identity and random state-encryption passphrase:
+
+```sh
+python infra/cherry-vpn/prepare-bootstrap.py
+# Only for existing plaintext DEFAULT LOCAL state, with one active controller:
+bash infra/cherry-vpn/tofu.sh migrate-state
+```
+
+Preparation is idempotent. Migration first encrypts and verifies recovery copies
+in `private/pre-encryption-*.vault`, then rewrites the unchanged snapshot through
+OpenTofu's encrypted state writer and verifies resource IDs/outputs/lineage. It
+never disables encryption enforcement, accepts plaintext as a normal fallback,
+or changes cloud resources. Use the wrapper only; its local controller lock also
+protects migration. Non-default backends/workspaces need a separate migration.
+
+The shared Vault now includes `vpn_bootstrap.state_passphrase` and
+`vpn_bootstrap.ssh_host_key`. Administrator/probe private keys still never enter
+OpenTofu. The **server host private key does** enter cloud-init and therefore the
+encrypted state/plans, as explicitly chosen for automated host authentication.
+Cherry and guest root can access it. Encryption protects storage, not a compromised
+controller/cloud account. Keep `.ansible_pass` separate from state/shared ciphertext.
+Avoid debug logs and decrypted `show -json`/`state pull` files; these can expose
+secret material despite at-rest encryption. Old plaintext plans are rejected and
+must never be reused. A raw binary invocation bypasses the wrapper's controller lock.
+
+Plan/review/apply as below. After apply, generate the pin and private inventory:
+
+```sh
+bash infra/cherry-vpn/tofu.sh inventory
+# If direct administration is blocked, explicitly select a controller transport:
+bash infra/cherry-vpn/tofu.sh inventory \
+  --proxy-command 'nc -X connect -x 127.0.0.1:12334 %h %p'
+ansible-playbook -i infra/cherry-vpn/private/inventory.yaml \
+  --vault-password-file .ansible_pass infra/cherry-vpn/deploy.yaml
+```
+
+Inventory generation reads the **applied** host key from encrypted state and
+rejects a different merely prepared/pending key. It writes mode-0600 strict
+`known_hosts` without trusting a scan, plus JSON-formatted YAML inventory. Preserve
+its `cherry_server_id`; reruns retain a saved `vpnadmin` user and controller proxy
+for the same VM. Switch the inventory from root to `vpnadmin` after bootstrap.
+Do not put an idle timeout on `nc`; SSH keepalives protect long installs.
+
+For a deliberate future replacement, prepare a fresh identity with
+`prepare-bootstrap.py --rotate-host-key` (the encryption passphrase is retained),
+then create/review a fresh `plan -replace=cherryservers_server.vpn`. Confirm actions
+are **delete, create** only for the VM before applying. Re-run inventory generation,
+Ansible, isolated direct client tests, and only then publish. Replacement destroys
+the old node first and interrupts traffic; there is no unattended rotation.
+The encrypted shared Vault and latest encrypted state must travel together to a
+new controller; neither independently reconstructs the existing deployment.
+
 ## Paused checkpoint — 2026-10-22
 
-Provisioning is blocked by Cherry's team-owner identity verification requirement.
+Historical checkpoint, superseded by the current status above.
+
+Provisioning was blocked by Cherry's team-owner identity verification requirement.
 The attempted apply on 2026-10-21 returned HTTP 403:
 
 ```text
@@ -43,9 +150,9 @@ Local continuation material is intentionally **not in Git**:
 
 ### Resume checklist
 
-1. Resolve account verification with Cherry, or explicitly choose another provider
-   and adapt the infrastructure before ordering anything. Do not assume another
-   Cherry plan avoids the account restriction.
+1. Verification is confirmed working for the tested order, and the user has
+   confirmed pricing is acceptable. Recheck live pricing before a new order;
+   catalogue guardrails are not an all-inclusive spending cap.
 2. Restore the encrypted inputs and **current state** on a single controller.
    Do not re-enroll the keys or start with empty state. With the original state,
    the next plan should retain the existing SSH-key record.
@@ -61,9 +168,10 @@ Local continuation material is intentionally **not in Git**:
 The longer-term design remains one permanent application server plus a disposable
 VPN node, OpenTofu for resources, Ansible for configuration, and regional probes.
 Independent recovery/config delivery and external Telegram sending are required
-before autonomous recovery. Naïve deployment on the test node, sustained/UDP tests,
-profile integration, supervised replacement and automatic rotation are **not yet
-implemented**. Do not treat this checkpoint as working VPN redundancy.
+before autonomous recovery. The role, encrypted pre-pinned bootstrap and one
+supervised destroy-first replacement are now verified live. Direct regional
+reachability, sustained/UDP tests and client refresh remain unresolved. Automatic
+rotation is **not implemented**. Do not treat this checkpoint as working VPN redundancy.
 
 ## Cost and limits
 
@@ -72,7 +180,7 @@ plans at **EUR 0.015/hour before tax** (1 vCPU, 1 GB RAM, 20 GB SSD):
 
 - Six hours: EUR 0.09 compute.
 - One day: EUR 0.36 compute.
-- Thirty days: EUR 10.80 compute. Do not leave a short experiment running all month.
+- Thirty days: EUR 10.80 compute.
 
 Recheck the live catalogue and the account's actual billing before ordering:
 
@@ -86,14 +194,15 @@ These figures are not an all-inclusive quote or a USD conversion.
 
 OpenTofu refuses larger plans, non-EUR/unknown hourly catalogue pricing, rates
 over EUR 0.015/hour, and regions without stock. It creates one VM and one SSH
-public-key record only. There are no extra IP orders, volumes, snapshots, Docker,
-Portainer, log stacks or paid monitoring services.
+public-key record only. There are no extra IP orders, volumes, snapshots,
+Portainer, log stacks or paid monitoring services. OpenTofu does not install
+software; the optional full Ansible role installs Docker and two proxy containers.
 
 **This is not a hard total spending cap or an automatic expiry.** Taxes, traffic,
 account-specific charges and running time still matter. There is no automatic
-retry. A deliberate replacement can briefly run two nodes. Start with a six-hour
-session, set a reminder, and destroy the test node afterward. Power-off is not a
-reliable way to stop billing. Do not enable automatic balance top-up for this test.
+retry. Replacement is destroy-first to avoid overlapping compute spend. The operator monitors
+node count and ongoing spend; destroy nodes when the trial ends. Power-off is not
+a reliable way to stop billing. Do not enable automatic balance top-up for this test.
 
 ## Provide Cherry access — without posting secrets in chat
 
@@ -173,7 +282,6 @@ Restore the same keys and project ID on each trusted controller:
 ```sh
 ansible-playbook -i localhost, --vault-password-file .ansible_pass \
   infra/cherry-vpn/restore-keys.yaml
-cp infra/cherry-vpn/terraform.tfvars.example infra/cherry-vpn/terraform.tfvars
 ```
 
 The playbook suppresses key output/diffs, verifies the key pairs, and writes local
@@ -185,16 +293,50 @@ is required; run the playbook again to restore them. It also writes ignored
 
 Edit `terraform.tfvars` to choose a stocked region. `LT-Siauliai` is an initial
 nearby candidate, not proof of regional reachability. Only the administrator
-**public** key is uploaded through OpenTofu; neither private key enters state.
+**public** key is uploaded as an authorized key through OpenTofu; neither the
+administrator nor probe private key enters state. The distinct server host
+private key is deliberately included in encrypted cloud-init/state, as described above.
 Use the separate unprivileged probe key for tunneling.
 
-For another controller, securely transfer/sync `external_vars.yml`, the encrypted
-`cherry-token.vault`, the Vault password separately, and the latest OpenTofu
-state. Recreate `terraform.tfvars` with the same region/plan. **Shared SSH keys do
-not replace state**: without the current state a fresh apply can order a duplicate
-server. Use one active controller at a time; do not use a live Dropbox-synced state
-file as a substitute for cross-controller locking. Transfer state only between
-stopped sessions and back it up securely.
+### Dropbox inputs and switching controllers
+
+On the current controller, these ignored paths are symlinks into
+`~/Dropbox/ssh/cherry-vpn/`:
+
+- `cherry-token.vault`: Vault-encrypted API token.
+- `terraform.tfvars`: selected plan, region and local public-key path.
+
+The shared directory is mode 0700 and these files are mode 0600. The existing
+`external_vars.yml` symlink already shares the Vault-encrypted SSH keys and
+project ID. Keep `.ansible_pass` separate from Dropbox and transfer it securely.
+
+On a fresh controller, after Dropbox has synced and the existing
+`external_vars.yml` link is restored, create these links from the repository root
+(only when the destinations do not already exist):
+
+```sh
+ln -s "$HOME/Dropbox/ssh/cherry-vpn/cherry-token.vault" infra/cherry-vpn/cherry-token.vault
+ln -s "$HOME/Dropbox/ssh/cherry-vpn/terraform.tfvars" infra/cherry-vpn/terraform.tfvars
+```
+
+Then run `restore-keys.yaml` above to recreate local `private/ssh/` and
+`project.auto.tfvars.json`. Do not sync the restored plaintext private keys.
+Without shared inputs, initialize `terraform.tfvars` from the example only if it
+does not already exist; copying over a symlink would overwrite the shared input.
+
+**Shared SSH keys do not replace state**: without the current state a fresh apply
+can order a duplicate server or re-enroll the SSH key. Keep live
+`terraform.tfstate` and its backups local, not symlinked into Dropbox. Finish all
+operations on the old controller, securely transfer the latest state (encrypt
+any cloud backup), and only then operate on the new controller. Use one active
+controller at a time; Dropbox is not a cross-controller lock. For regular
+multi-controller operation, migrate to a locking, encrypted remote backend.
+
+Keep saved plans local and generate a fresh reviewed plan after switching
+controllers. Regenerate the private inventory and trusted `private/known_hosts`
+from the applied encrypted state with `tofu.sh inventory` after restoring the
+same Vault inputs and SSH keys. Preserve/reapply controller-specific transport
+options and the verified administrator username. Never promote an old scan.
 
 ## Review, then provision — billable actions start at apply
 
@@ -220,6 +362,13 @@ private inventory and tools are ignored by Git. `.terraform.lock.hcl` is tracked
 Do not run this project from two controllers simultaneously.
 
 ## Configure the native SSH baseline
+
+For new pre-pinned instances, use `tofu.sh inventory` above and skip the following
+legacy pin/inventory setup. Strict SSH authentication already has the expected
+public key from the applied encrypted state. The baseline playbook below still
+works; the full `infra/cherry-vpn/deploy.yaml` also deploys the Docker proxies.
+
+### Legacy instances without a pre-provisioned host identity
 
 Before connecting, compare the server's SSH host-key fingerprint with the one
 shown through a trusted provider console (`ssh-keygen -lf
@@ -257,10 +406,47 @@ ansible-playbook -i infra/cherry-vpn/private/inventory.yaml \
   playbooks/vpn-probe/deploy.yaml
 ```
 
-The playbook waits for cloud-init, creates a locked-password unprivileged account,
-authorizes its separate key, and disables password/interactive authentication.
-The account permits local TCP forwarding but no shell sessions, remote TCP
-forwarding, agent forwarding or TTY. Root key-based administration remains.
+The playbook waits for cloud-init before gathering facts, installs sudo and
+unattended-upgrades, and creates `vpnadmin` with the existing administrator key.
+It verifies non-root login and passwordless sudo in a fresh, non-multiplexed SSH
+connection **before** disabling root SSH and password/interactive authentication.
+It then enables daily Debian security upgrades (no automatic reboot), restricts
+the separate `vpnprobe` account to local TCP forwarding without shell/subsystem
+sessions, remote/Unix-socket forwarding, agent forwarding or TTY, and verifies
+sudo again after reloading SSH. SSH host-key checking is forced on despite the
+repository-wide default. No Docker or monitoring stack is installed.
+
+After success, change `ansible_user: root` to `ansible_user: vpnadmin` in the
+private inventory before rerunning the playbook. The administrator key is
+unchanged. If verification fails, do not disable root manually; investigate via
+the trusted provider console. Reboots needed for security updates remain manual.
+A host firewall and automatic shutdown are not implemented.
+
+## Add the trial node to automatically updated client profiles
+
+The generator in `playbooks/sing-box-configs/` accepts an optional
+`sing_box_secrets.extra_outbounds` list in its existing encrypted
+`secrets.vault.yaml`. Add the verified Cherry outbound there **after** isolated
+connectivity testing, then run the existing profile publish playbook. All three
+platform selectors gain the Cherry entry, while nt1 entries, defaults, routing,
+private enrollment URLs and tokens remain unchanged. Already-enrolled clients
+receive the new option on their next refresh; select Cherry explicitly to test it.
+No URLTest or automatic switching is enabled.
+
+For the SSH baseline, use sing-box's `ssh` outbound with `user: vpnprobe`, the
+public server address, the probe private-key **contents** in `private_key`, and
+the independently verified server public host key in `host_key`. Never distribute
+the administrator private key. Published profiles contain the tunnel credential:
+only use the existing private HTTPS enrollment URLs. This trial credential is
+shared across enrolled devices; per-device revocation needs separate keys/accounts.
+SSH provides TCP only, even on a TUN client; working UDP needs another protocol.
+Do not disable host-key verification to make enrollment work.
+
+See the [profile guide](../../playbooks/sing-box-configs/README.md#additional-vpn-nodes)
+for publishing and removal. Merely applying OpenTofu does not deploy the proxy,
+update Vault, or publish profiles. Remove the Cherry outbound and republish before
+destroying a trial node. After replacement, update its address and verified host
+key in Vault and republish. This is a supervised workflow, not automatic rotation.
 
 ## Observe without changing the active VPN
 
@@ -312,6 +498,7 @@ have allocated a resource before the client received its response. Do not blindl
 retry. Reconcile/import any orphan into this state before further allocation.
 Do not delete local state until billing cleanup is verified.
 
-Next milestone, only after a successful regional test: Naïve on this same VM,
-then a supervised replacement drill, then remote-profile integration. Automatic
-rotation and an external controller remain deliberately disabled for the $10 trial.
+Next milestone: run the full role on one VM, test all three protocols from Linux,
+publish the verified outbounds alongside nt1, and confirm an existing remote
+profile refresh receives them. Then perform a supervised replacement drill.
+Automatic rotation and an external controller remain disabled.

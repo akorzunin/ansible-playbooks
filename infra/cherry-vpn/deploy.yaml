@@ -1,0 +1,25 @@
+---
+# Establish and verify key-only sudo access before running the full reusable role.
+- name: Bootstrap the isolated node and verify administrator access
+  ansible.builtin.import_playbook: ../../playbooks/vpn-probe/deploy.yaml
+
+- name: Deploy all three VPN protocols on the verified Cherry administrator connection
+  hosts: vpn_test_admin
+  become: true
+  become_flags: -n
+  vars:
+    ansible_host_key_checking: true
+    vpn_node_name: cherry
+    vpn_node_domain: akorz-dyn1.duckdns.org
+  pre_tasks:
+    - name: Load shared external variables for DuckDNS
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../../external_vars.yml"
+      no_log: true
+
+    - name: Load shared VPN credentials without exposing them in logs
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/secrets.vault.yaml"
+      no_log: true
+  roles:
+    - vpn_node

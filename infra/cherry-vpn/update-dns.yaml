@@ -1,0 +1,23 @@
+---
+- name: Point the dedicated dynamic DuckDNS hostname at the new node
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    vpn_node_domain: akorz-dyn1.duckdns.org
+  tasks:
+    - name: Load shared DuckDNS credentials
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../../external_vars.yml"
+      no_log: true
+
+    - name: Require the shared DuckDNS token before making changes
+      ansible.builtin.assert:
+        that: DUCKDNS_TOKEN | default('') | length > 0
+      no_log: true
+
+    - name: Update and verify only the dedicated node hostname
+      ansible.builtin.import_role:
+        name: vpn_node
+        tasks_from: dns

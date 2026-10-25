@@ -1,0 +1,8 @@
+---
+node_user: "{{ NODE_USER | default('ansible') }}"
+node_port: 22
+node_public_key_file: "{{ lookup('env', 'HOME') }}/.ssh/id_ed25519.pub"
+node_private_key_file: "{{ node_public_key_file | regex_replace('\\.pub$', '') }}"
+node_inventory_file: "{{ playbook_dir }}/../hosts"
+node_monitoring_inventory_file: "{{ playbook_dir }}/../monitoring.inventory.yml"
+node_monitoring_allowed_sources: "{{ NODE_MONITORING_ALLOWED_SOURCES | default(monitoring_workstation_allowed_sources | default([]), true) }}"

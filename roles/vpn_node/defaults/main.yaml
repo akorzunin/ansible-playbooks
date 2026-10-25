@@ -1,0 +1,10 @@
+---
+# Required credentials come from a shared Vault, never freshly generated per node.
+vpn_node_domain: ""
+vpn_node_duckdns_token: "{{ DUCKDNS_TOKEN | default('') | trim }}"
+vpn_node_name: "{{ inventory_hostname }}"
+vpn_node_public_address: "{{ ansible_host }}"
+vpn_node_reality_server_name: www.google.com
+vpn_node_ssh_public_key_path: "{{ role_path }}/../../infra/cherry-vpn/private/ssh/probe.pub"
+vpn_node_ssh_private_key_path: "{{ role_path }}/../../infra/cherry-vpn/private/ssh/probe"
+vpn_node_client_dir: "{{ role_path }}/../../infra/cherry-vpn/private"

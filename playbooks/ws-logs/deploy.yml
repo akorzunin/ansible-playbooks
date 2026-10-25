@@ -2,6 +2,7 @@
 - name: Deploy inventory-managed monitoring
   hosts: monitoring_servers
   become: false
+  any_errors_fatal: true
   vars:
     remote_install_path: "{{ ansible_facts.env.HOME }}/deploy/ws-logs"
     monitoring_env_file: "{{ playbook_dir }}/.env"

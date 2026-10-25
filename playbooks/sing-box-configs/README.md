@@ -20,7 +20,8 @@ will **not** subscribe it to updates. A refresh/reconnect may be required to app
 updates while connected, depending on the client. Android battery restrictions
 can delay background updates.
 
-Profiles target sing-box 1.14+ and were checked with the controller's 1.14.1.
+Profiles target sing-box 1.14+ and the current generated profiles were checked
+with the controller's 1.14.2.
 Remote rule-set downloads use explicit `http_client: {"engine": "go"}` instead
 of deprecated `download_detour` or implicit default clients. This client dials
 directly without a detour; `{}` would select the deprecated implicit client,
@@ -39,7 +40,18 @@ rejected. Linux successfully applied an update and skipped an unchanged one.
 Isolated connection tests from this Linux machine passed for Naïve and SSH;
 VLESS timed out despite its TCP port being reachable. Its settings match the
 supplied Windows profile, so VLESS connectivity (and consequently UDP) needs
-separate investigation; hosting/config distribution itself is working.
+separate investigation; hosting/config distribution itself is working. Those
+observations refer to the earlier nt1-only trial, not the new Cherry VLESS endpoint.
+
+Current Cherry publication: `cherry-ssh`, `cherry-naive` and `cherry-vless` are
+available alongside nt1 through the same private URLs/tokens, with existing nt1
+defaults retained. All three public platform files matched generated contents.
+The fetched Linux profile passed six isolated direct checks (three protocols,
+two HTTPS targets) with the Amsterdam node's egress. This workstation was **not
+enrolled** by user choice: its active local `ssh-via-workstation` fallback and
+inactive updater timer remain unchanged. Refresh already-enrolled remote profiles
+to see the new options; merely having these published does not enroll a local
+JSON file or automatically switch protocols.
 
 Each platform currently has one token, shared by devices using that platform.
 For independent revocation per device, issue separate tokens before sharing with
@@ -78,6 +90,47 @@ and a fresh controller never generates replacement tokens.
 These three protocols all use **the same nt1 host**. Protocol selection is not
 redundancy against a complete nt1 outage. Publish a replacement server through
 the independent config endpoint to recover, or add a second server deliberately.
+
+## Additional VPN nodes
+
+Optionally add `sing_box_secrets.extra_outbounds` to `secrets.vault.yaml`: a list
+of complete sing-box outbound objects for additional nodes. The existing
+`connections` mapping remains unchanged. Every outbound needs a unique,
+nonempty `tag` that does not collide with nt1 or `auto`/`proxy`/`direct`.
+The installed sing-box core validates all platforms before any local profile
+is replaced. Keep private keys/passwords in Vault, not templates or command-line
+arguments. SSH outbounds must pin the independently verified server `host_key`;
+only distribute an unprivileged tunnel key, never an administrator key.
+
+Publish with the command below. Extra outbounds are appended to every manual
+selector without changing nt1 defaults, routing or enrollment URLs. Refresh the
+client's existing remote profile and explicitly select the trial node. On Linux,
+start `sing-box-profile-update.service` to refresh immediately; Android/Windows
+use the app's remote-profile refresh. An imported local JSON file does not update.
+There is no automatic failover or evidence of connectivity from generation alone.
+
+After a supervised replacement, edit the extra outbound's endpoint, credentials
+and pinned host key in Vault, then republish. Before destroying a trial node,
+remove its outbound and republish; clients still need to refresh/select nt1.
+Omitting the list restores nt1-only profiles. OpenTofu does not change this Vault
+file or publish on its own. See the [Cherry trial guide](../../infra/cherry-vpn/README.md).
+
+The [`vpn_node` role](../../roles/vpn_node/README.md) can export a private JSON
+list with SSH, Naïve and VLESS connections. Publish that list without modifying
+the shared profile Vault:
+
+```sh
+ansible-playbook -i hosts --vault-password-file .ansible_pass \
+  playbooks/sing-box-configs/deploy.yaml \
+  -e sing_box_extra_outbounds_file=infra/cherry-vpn/private/cherry-outbounds.json
+```
+
+The file entries are appended to any Vault `extra_outbounds`; duplicate tags are
+rejected. Keep supplying the file on subsequent publishes, or copy its list into
+the encrypted Vault and omit the flag. Publishing without either source removes
+the trial entries. File-based inputs remain controller-local and must be
+regenerated with the role after a controller/VM change. This is supervised
+publication, not an automatically reconciled resource catalogue.
 
 ## Check whether a request is proxied
 

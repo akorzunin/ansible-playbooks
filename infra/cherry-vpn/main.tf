@@ -3,6 +3,23 @@
 terraform {
   required_version = ">= 1.9.0, < 2.0.0"
 
+  encryption {
+    key_provider "pbkdf2" "vpn" {
+      passphrase = var.state_encryption_passphrase
+    }
+    method "aes_gcm" "vpn" {
+      keys = key_provider.pbkdf2.vpn
+    }
+    state {
+      method   = method.aes_gcm.vpn
+      enforced = true
+    }
+    plan {
+      method   = method.aes_gcm.vpn
+      enforced = true
+    }
+  }
+
   required_providers {
     cherryservers = {
       source  = "cherryservers/cherryservers"
@@ -37,12 +54,23 @@ resource "cherryservers_server" "vpn" {
   plan            = var.plan
   region          = var.region
   hostname        = "vpn-test"
-  image           = "debian_12_64bit"
+  image           = "debian_13_64bit"
   cycle           = "hourly"
   spot_instance   = false
   allow_reinstall = false
   ssh_key_ids     = [cherryservers_ssh_key.admin.id]
-  user_data       = base64encode("#cloud-config\npackage_update: true\npackages:\n  - python3\nssh_pwauth: false\n")
+  # JSON is valid cloud-config YAML and lets the wrapper inspect applied pins
+  # without a separate YAML dependency. The host private key is sensitive and
+  # necessarily reaches Cherry/cloud-init; state and saved plans are encrypted.
+  user_data = base64encode("#cloud-config\n${jsonencode({
+    package_update = true
+    packages       = ["python3"]
+    ssh_pwauth     = false
+    ssh_keys = {
+      ed25519_private = var.ssh_host_key.private
+      ed25519_public  = var.ssh_host_key.public
+    }
+  })}\n")
 
   tags = {
     purpose    = "vpn-budget-test"
@@ -50,8 +78,9 @@ resource "cherryservers_server" "vpn" {
   }
 
   lifecycle {
-    # A manual replacement can briefly run two nodes; there is no automatic rotation.
-    create_before_destroy = true
+    # One-node spending ceiling: accept downtime, rather than overlapping VMs.
+    # Add health-gated overlap only when redundant capacity/spend is approved.
+    create_before_destroy = false
 
     precondition {
       condition = try(

@@ -1,3 +1,31 @@
+variable "state_encryption_passphrase" {
+  description = "Shared random Vault-backed passphrase; supplied only through the wrapper environment. Back it up separately from state."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = length(var.state_encryption_passphrase) >= 32
+    error_message = "Use the shared random bootstrap encryption secret, not a short password."
+  }
+}
+
+variable "ssh_host_key" {
+  description = "Pre-generated Ed25519 server identity from shared Vault, installed by cloud-init. Host private material is retained only in encrypted plans/state."
+  type = object({
+    private = string
+    public  = string
+  })
+  sensitive = true
+
+  validation {
+    condition = (
+      startswith(var.ssh_host_key.private, "-----BEGIN OPENSSH PRIVATE KEY-----") &&
+      startswith(var.ssh_host_key.public, "ssh-ed25519 ")
+    )
+    error_message = "Prepare an Ed25519 SSH host identity with prepare-bootstrap.py first."
+  }
+}
+
 variable "project_id" {
   description = "Existing dedicated, disposable Cherry Servers project; never the applications project."
   type        = number
@@ -30,6 +58,6 @@ variable "region" {
 }
 
 variable "ssh_public_key_path" {
-  description = "Local path to a dedicated administrator PUBLIC key. Private keys stay outside OpenTofu."
+  description = "Local path to the dedicated administrator PUBLIC key. Administrator/probe private keys stay outside OpenTofu."
   type        = string
 }

@@ -1,6 +1,8 @@
 DNS_HOME: example.org
 DNS_SW1: example.org
 DNS_PL1: example.org
+# Store the account token as a correctly tagged !vault | scalar in external_vars.yml.
+DUCKDNS_TOKEN: ""
 HOST_LOCAL_WS_IP: 0.0.0.0
 HOST_LOCAL_PI_IP: 0.0.0.0
 HOST_SW1_IP: 0.0.0.0
@@ -11,6 +13,11 @@ V2RAYA_ADMIN_USERNAME: example
 V2RAYA_ADMIN_PASSWORD: example
 V2RAYA_NODE_URL: "vless://uuid@example.com:443?type=tcp&security=reality&pbk=public-key&sni=example.com&fp=chrome&sid=short-id#node"
 ARR_TELEGRAM_BOT_TOKEN: ""
+# Bootstrap defaults; key files default to ~/.ssh/id_ed25519[.pub]. No user password needed.
+NODE_USER: ansible
+# Actual source CIDRs seen by the agent (workstation egress IP or VPN /32).
+# Leave empty to reuse monitoring.inventory.yml's workstation allowlist. Never allow 0.0.0.0/0.
+NODE_MONITORING_ALLOWED_SOURCES: []
 # Store real values as !vault strings in external_vars.yml.
 # Uptime Kuma reuses AUTH_PASS and these monitoring Telegram credentials.
 MONITORING_TELEGRAM_BOT_TOKEN: ""

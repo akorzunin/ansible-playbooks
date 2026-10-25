@@ -1,7 +1,7 @@
-- name: Restart ssh service
+- name: Reload ssh service
   ansible.builtin.service:
     name: ssh.service
-    state: restarted
+    state: reloaded
 
 - name: Update groups
   ansible.builtin.meta: reset_connection

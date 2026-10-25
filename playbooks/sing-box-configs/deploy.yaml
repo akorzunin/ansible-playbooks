@@ -13,7 +13,11 @@
 
     - name: Render profiles from shared Vault credentials and tokens
       ansible.builtin.command:
-        argv: [python3, "{{ playbook_dir }}/generate.py"]
+        argv: >-
+          {{ ['python3', playbook_dir ~ '/generate.py'] +
+             (['--extra-outbounds-file', sing_box_extra_outbounds_file]
+              if sing_box_extra_outbounds_file | default('') | length > 0 else []) }}
+        chdir: "{{ playbook_dir }}/../.."
         stdin: "{{ {'sing_box_secrets': sing_box_secrets} | to_json }}"
       changed_when: true
       no_log: true

@@ -1,0 +1,21 @@
+{{ {
+    'log': {'level': 'warn'},
+    'inbounds': [{
+        'type': 'vless',
+        'listen': '0.0.0.0',
+        'listen_port': 8443,
+        'users': [{'uuid': vpn_node_credentials.vless_uuid, 'flow': 'xtls-rprx-vision'}],
+        'tls': {
+            'enabled': true,
+            'server_name': vpn_node_reality_server_name,
+            'reality': {
+                'enabled': true,
+                'handshake': {'server': vpn_node_reality_server_name, 'server_port': 443},
+                'private_key': vpn_node_credentials.reality_private_key,
+                'short_id': [vpn_node_credentials.reality_short_id]
+            }
+        }
+    }],
+    'outbounds': [{'type': 'direct', 'tag': 'direct'}],
+    'route': {'final': 'direct'}
+} | to_nice_json }}

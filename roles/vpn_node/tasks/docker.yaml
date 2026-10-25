@@ -1,0 +1,46 @@
+---
+- name: Install Docker apt prerequisites
+  ansible.builtin.apt:
+    name: [ca-certificates, python3-apt, python3-requests]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create Docker apt key directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the official Docker repository key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/debian/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure the official Debian Docker repository
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/docker.list
+    owner: root
+    group: root
+    mode: "0644"
+    content: >
+      deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc]
+      https://download.docker.com/linux/debian {{ ansible_facts.distribution_release }} stable
+  register: vpn_node_docker_repository
+
+- name: Install Docker Engine and Compose
+  ansible.builtin.apt:
+    name: [docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin, docker-compose-plugin]
+    state: present
+    update_cache: "{{ vpn_node_docker_repository.changed }}"
+
+- name: Enable Docker
+  ansible.builtin.systemd_service:
+    name: docker
+    state: started
+    enabled: true
