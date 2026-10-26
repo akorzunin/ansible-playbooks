@@ -1,3 +1,8 @@
 - autocleanup for arr bot
 - prioritize 1 ep if downloading series
 - check why encoding doesnt use GPU
+- alerts for loadavg and other
+- write entry for cherry-server in hosts file for manual connect
+- need to be able to use tf state from different mashines
+- probe: rewrite in go, mb put in other repo
+  - what probe should do? (monitoring, exposing metrics, notifications, deploying, upd sing box configs, dns updates, etc)
