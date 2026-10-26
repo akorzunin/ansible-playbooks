@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -44,6 +45,53 @@ class ProbeTests(unittest.TestCase):
     def test_single_destination_failure_does_not_suggest_reallocation(self):
         self.assertEqual(probe.classify([{"ok": True}], [{"ok": True}, {"ok": False}], 5, 3),
                          ("degraded_destination_or_path", 0))
+
+    def test_atomic_metrics_snapshot_replaces_old_values_and_tracks_freshness(self):
+        row = {
+            "time": "2026-01-01T00:00:00+00:00",
+            "controls": [{"ok": True}, {"ok": True}],
+            "proxies": {name: {"checks": {target: {"ok": True} for target in ("gstatic", "cloudflare")}}
+                        for name in ("ssh", "naive", "vless")},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "metrics.prom"
+            probe.write_metrics(path, row)
+            healthy = path.read_text()
+            self.assertIn("vpn_probe_timestamp_seconds 1767225600.0", healthy)
+            self.assertIn("vpn_probe_controls_ok 1", healthy)
+            self.assertEqual(healthy.count('vpn_probe_success{'), 6)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o644)
+            row["controls"][0]["ok"] = False
+            row["proxies"]["ssh"]["checks"]["gstatic"]["ok"] = False
+            probe.write_metrics(path, row)
+            self.assertIn("vpn_probe_controls_ok 0", path.read_text())
+            self.assertIn('vpn_probe_success{protocol="ssh",target="gstatic"} 0', path.read_text())
+            self.assertFalse(path.with_suffix(".tmp").exists())
+
+    def test_metrics_only_cli_does_not_require_unbounded_jsonl_log(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "metrics.prom"
+            with patch("sys.argv", ["probe.py", "--proxy", "ssh=socks5h://127.0.0.1:22340",
+                                    "--control-url", "https://example.com", "--control-url", "https://example.org",
+                                    "--metrics-output", str(path)]), patch.object(probe, "request", return_value={"ok": True}), patch("builtins.print"):
+                probe.main()
+            self.assertIn("vpn_probe_controls_ok 1", path.read_text())
+            self.assertEqual(list(Path(directory).iterdir()), [path])
+
+    def test_continuous_mode_collects_more_than_one_round(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "metrics.prom"
+            with patch("sys.argv", ["probe.py", "--proxy", "ssh=socks5h://127.0.0.1:22340",
+                                    "--control-url", "https://example.com", "--control-url", "https://example.org",
+                                    "--metrics-output", str(path), "--continuous", "--interval", "60"]), \
+                    patch.object(probe, "request", return_value={"ok": True}) as request, \
+                    patch.object(probe.time, "sleep", side_effect=[None, None, RuntimeError("stop")]), \
+                    patch.object(probe, "write_metrics", wraps=probe.write_metrics) as metrics, \
+                    patch("builtins.print"), self.assertRaisesRegex(RuntimeError, "stop"):
+                probe.main()
+            self.assertEqual(metrics.call_count, 2)
+            self.assertEqual(request.call_count, 8)
+            self.assertTrue(path.exists())
 
     @patch.object(probe.subprocess, "run")
     def test_direct_curl_ignores_environment_and_curlrc(self, run):

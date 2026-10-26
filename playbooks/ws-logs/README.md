@@ -213,6 +213,17 @@ targets. No test notification is sent by Ansible. Alerts in
 `grafana/provisioning/alerting/rules.yml` must preserve node labels and cannot use
 dashboard variables.
 
+### Cherry VPN reachability
+
+Cherry's [monitoring workflow](../../infra/cherry-vpn/README.md#monitoring-and-suspected-blocking)
+adds host/container metrics and isolated workstation SSH/Naïve/VLESS checks, without
+changing the active client. When `monitoring_vpn_probe_enabled: true` is saved on
+the monitoring workstation, Telegraf reads its atomic probe snapshot and Grafana
+provisions three additional Telegram alerts: persistent protocol failure with
+healthy direct controls, failing controls (inconclusive), and missing/stale probes.
+These indicate suspected reachability problems, not proof of a ban. Replacement
+is manual. The workstation cannot send notifications while it is offline.
+
 ## Adding, disabling, and retiring nodes
 
 For a fresh Debian/Ubuntu server, use the [automated node bootstrap](../../node/init.md):

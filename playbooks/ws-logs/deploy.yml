@@ -138,6 +138,13 @@
         mode: "0644"
       register: monitoring_prometheus_config
 
+    - name: Render optional workstation VPN alerts
+      ansible.builtin.template:
+        src: grafana/provisioning/alerting/vpn-rules.yml.j2
+        dest: "{{ remote_install_path }}/grafana/provisioning/alerting/vpn-rules.yml"
+        mode: "0644"
+      register: monitoring_vpn_rules
+
     - name: Render Telegram contact point
       ansible.builtin.template:
         src: grafana/provisioning/alerting/contact-points.yml.j2
@@ -200,7 +207,7 @@
         monitoring_public_config.changed or monitoring_environment.changed or
         monitoring_prometheus_config.changed or monitoring_contact_point.changed or
         monitoring_dashboards.changed or monitoring_removed_dashboards.changed or
-        monitoring_telegraf_config.changed
+        monitoring_telegraf_config.changed or monitoring_vpn_rules.changed
 
     - name: Wait for Grafana database readiness
       ansible.builtin.uri:

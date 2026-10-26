@@ -13,6 +13,13 @@
   # Container IDs/status strings change often; keep numeric metrics and stable tags.
   string_as_label = false
 
+{% if monitoring_vpn_probe_enabled | default(false) | bool %}
+# Read the probe container's atomic snapshot; the timestamp exposes a stalled runner.
+[[inputs.file]]
+  files = ["/hostfs/var/lib/vpn-monitor/metrics.prom"]
+  data_format = "prometheus"
+{% endif %}
+
 [[inputs.cpu]]
   percpu = true
   totalcpu = true

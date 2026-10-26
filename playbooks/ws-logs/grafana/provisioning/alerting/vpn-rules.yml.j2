@@ -1,0 +1,99 @@
+apiVersion: 1
+{% if not monitoring_vpn_probe_enabled | default(false) | bool %}
+deleteRules:
+  - orgId: 1
+    uid: monitoring-vpn-path
+  - orgId: 1
+    uid: monitoring-vpn-probe-stale
+  - orgId: 1
+    uid: monitoring-vpn-controls
+{% else %}
+{% set rules = [
+  {
+    'uid': 'monitoring-vpn-path',
+    'title': 'Cherry VPN protocol unreachable',
+    'summary': 'Cherry protocol {{ $labels.protocol }} fails from the workstation',
+    'description': 'Both HTTPS destinations fail through this protocol while two direct controls pass. Suspected path filtering, server or client failure; not proof of an IP ban. Compare other protocols and inspect the isolated client. Replacement remains manual.',
+    'expr': 'max by (protocol) (vpn_probe_success{job="telegraf"}) and on () (min(vpn_probe_controls_ok{job="telegraf"}) == 1) and on () (time() - max(vpn_probe_timestamp_seconds{job="telegraf"}) < 180)',
+    'comparison': 'lt', 'threshold': 1, 'pending': '2m'
+  },
+  {
+    'uid': 'monitoring-vpn-probe-stale',
+    'title': 'Cherry VPN probe unavailable',
+    'summary': 'Workstation VPN observations are missing or stale',
+    'description': 'No completed probe for over three minutes. Check the workstation, the cherry-vpn-monitor Compose project and Telegraf. Grafana cannot send alerts while the workstation hosting Grafana is itself offline; an external dead-man monitor is needed for that case.',
+    'expr': '(time() - max(vpn_probe_timestamp_seconds{job="telegraf"})) or vector(1000000000)',
+    'comparison': 'gt', 'threshold': 180, 'pending': '1m'
+  },
+  {
+    'uid': 'monitoring-vpn-controls',
+    'title': 'Cherry VPN checks inconclusive',
+    'summary': 'Workstation direct internet controls are failing',
+    'description': 'At least one direct control fails. VPN-path alerts are suppressed because local connectivity or a blocked control site makes the result inconclusive. Verify control URLs from this ISP and check OS routing/TUN bypass.',
+    'expr': 'min(vpn_probe_controls_ok{job="telegraf"}) and on () (time() - max(vpn_probe_timestamp_seconds{job="telegraf"}) < 180)',
+    'comparison': 'lt', 'threshold': 1, 'pending': '2m'
+  }
+] %}
+groups:
+  - orgId: 1
+    name: Cherry VPN reachability
+    folder: Monitoring
+    interval: 1m
+    rules:
+{% for rule in rules %}
+      - uid: {{ rule.uid }}
+        title: {{ rule.title }}
+        condition: B
+        for: {{ rule.pending }}
+        noDataState: OK
+        execErrState: Error
+        isPaused: false
+        labels:
+          severity: warning
+          managed_by: ansible
+          node: cherry
+        annotations:
+          summary: {{ rule.summary | to_json }}
+          description: {{ rule.description | to_json }}
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: monitoring-prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: monitoring-prometheus
+              expr: {{ rule.expr | to_json }}
+              instant: true
+              range: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: A
+              conditions:
+                - type: query
+                  query:
+                    params: [B]
+                  reducer:
+                    type: last
+                    params: []
+                  evaluator:
+                    type: {{ rule.comparison }}
+                    params: [{{ rule.threshold }}]
+                  operator:
+                    type: and
+{% endfor %}
+{% endif %}

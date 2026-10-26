@@ -2,9 +2,10 @@
 
 Supervised trial: one disposable hourly VM, native SSH forwarding, and optional
 Dockerized Naïve and VLESS/REALITY, with Linux as the first client. Existing nt1,
-application servers, active client configuration and monitoring have not been
-changed. No automatic allocation, rotation, profile publication or Telegram
-dependency is introduced.
+application servers and active client configuration are kept separate. Full
+deployment now also registers Cherry in the existing monitoring stack and installs
+isolated workstation probes with Grafana/Telegram alerts. No automatic allocation,
+rotation or profile publication is introduced.
 
 SSH is a cheap **baseline**, not an obfuscation solution. If it is blocked or
 unstable, test Naïve on the same VM next; do not buy a larger VM to solve filtering.
@@ -58,6 +59,90 @@ hourly unit price. The user accepted API pricing; these fields are not a verifie
 all-inclusive bill. The DuckDNS token's missing YAML `!vault |` marker was corrected
 without changing its encrypted ciphertext or `external_vars.yml` symlink.
 
+## Monitoring and suspected blocking
+
+Implemented in [`monitoring.yaml`](monitoring.yaml); **not a claim of live deployment**.
+It is included at the end of `deploy.yaml`. For an already bootstrapped node, deploy
+monitoring alone from the repository root:
+
+```sh
+ansible-playbook -i hosts -i monitoring.inventory.yml \
+  -i infra/cherry-vpn/private/inventory.yaml \
+  --vault-password-file .ansible_pass infra/cherry-vpn/monitoring.yaml
+```
+
+Restore/generate the applied private inventory and dedicated keys first. The
+controller also needs `private/cherry-outbounds.json`, exported by `deploy.yaml`;
+the playbook rejects a profile for another server IP. Do not reconstruct host pins
+with `ssh-keyscan`. Load all three inventories for full deployment too. Run without
+`--limit` or `--check`: this workflow configures Cherry **and** the workstation.
+
+Requirements: existing Docker/Compose on Cherry and the workstation, passwordless
+`vpnadmin` sudo, workstation sudo, the existing monitoring `.env` and Vault-backed
+Telegram credentials. The workstation client uses a pinned Naïve-capable sing-box
+image; the probe image packages Python and curl. Neither needs host-installed binaries. Metrics source CIDRs come
+from `monitoring_workstation_allowed_sources`; verify these match the workstation's
+actual scraper egress. Port 9273 remains source-restricted, not open to everyone.
+
+What is checked:
+
+- **Host/container metrics:** the existing Telegraf role, shared node dashboard,
+  disk alert and two-minute collector-unreachable Telegram alert, with stable
+  `node="cherry"`. Exporter failure alone is **not** evidence of a VPN ban.
+- **Real protocol requests:** a separate Compose project deployed through the
+  existing `deploy_compose` role runs unprivileged `client` and `probe` containers.
+  They share a network namespace: only the probe reaches the client's loopback
+  listeners on ports 22340–22342; no ports are published to the workstation.
+  Every minute the probe uses Cherry's pinned SSH key,
+  Naïve credentials/TLS and VLESS/REALITY credentials. Curl requests gstatic and
+  Cloudflare HTTPS through each protocol (six checks, including remote DNS).
+  There is no direct outbound fallback, TUN or modification of the active client.
+- **Direct controls:** HTTPS to `example.com` and `www.wikipedia.org`, without
+  curlrc or inherited proxy variables. Both must pass. Verify these sites are
+  reachable directly from the affected ISP; adjust the probe Compose arguments if
+  necessary. Controls use ordinary Docker egress. Host TUN/routing can still carry
+  these requests: verify a direct bypass
+  before treating them as independent controls.
+- **Grafana alerts:** both destinations failing for a protocol for two minutes
+  while controls pass triggers *Cherry VPN protocol unreachable*. Partial
+  destination failure is visible in metrics but does not assert path failure.
+  Failed controls produce *checks inconclusive* instead. A missing/stalled probe
+  produces *probe unavailable* after three minutes plus a one-minute pending period.
+  Evaluation and existing Telegram grouping add delivery latency.
+
+These observations indicate a **suspected path/server/client failure**, never
+proof of an IP ban. Compare protocols, inspect the server and repeat from another
+network before replacing anything. **Automatic replacement is still not implemented.**
+The workstation runs Grafana and the probes: if it is offline, it cannot notify you.
+Use an external dead-man monitor if workstation-outage notifications are required.
+
+The playbook saves a managed block in the private monitoring overlay (with backup),
+so ordinary `ws-logs/deploy.yml` runs retain Cherry and probe alerts without loading
+its private inventory. Rerun full Cherry deployment after replacement to refresh
+its metrics address, host pin and isolated probe credentials. It verifies Cherry's
+host/container metrics and all six probe series in Prometheus; this checks collection,
+not that VPN requests passed. Inspect `vpn_probe_success` and test the existing
+**Monitoring Telegram** contact point in Grafana after deployment.
+
+Diagnostics on the workstation:
+
+```sh
+cd /srv/deploy/cherry-vpn-monitor
+docker compose ps
+docker compose logs --since 15m client probe
+curl -sG http://127.0.0.1:9090/api/v1/query --data-urlencode 'query=vpn_probe_success'
+```
+
+No test Telegram message is sent automatically. Credentials live under root-only
+`/etc/vpn-monitor/`, outside the Compose deployment directory. The mode-0600 client
+file belongs to the container's unprivileged UID 65534 and is mounted read-only into
+only the client; the probe has no credential mount. Observations in
+`/var/lib/vpn-monitor/metrics.prom` contain no credentials. To disable probes, run
+`docker compose down` in `/srv/deploy/cherry-vpn-monitor`, set the saved workstation
+`monitoring_vpn_probe_enabled: false`, and redeploy the monitoring stack; it removes
+only the three VPN-specific Grafana rules. Retire Cherry separately through the
+normal monitoring inventory process if destroying the VM.
+
 ## Secure automatic bootstrap
 
 For a new deployment only, create `secrets.vault.yaml` with `prepare-secrets.py`.
@@ -94,7 +179,8 @@ bash infra/cherry-vpn/tofu.sh inventory
 # If direct administration is blocked, explicitly select a controller transport:
 bash infra/cherry-vpn/tofu.sh inventory \
   --proxy-command 'nc -X connect -x 127.0.0.1:12334 %h %p'
-ansible-playbook -i infra/cherry-vpn/private/inventory.yaml \
+ansible-playbook -i hosts -i monitoring.inventory.yml \
+  -i infra/cherry-vpn/private/inventory.yaml \
   --vault-password-file .ansible_pass infra/cherry-vpn/deploy.yaml
 ```
 

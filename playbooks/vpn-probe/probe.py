@@ -2,7 +2,9 @@
 """Observe direct controls and explicit loopback proxies; never switch or buy anything."""
 import argparse
 import concurrent.futures
+import contextlib
 import datetime
+import itertools
 import json
 import os
 from pathlib import Path
@@ -86,15 +88,36 @@ def classify(controls, checks, streak, threshold):
     return ("suspected_path_failure" if streak >= threshold else "failing"), streak
 
 
+def write_metrics(path, row):
+    """Atomically publish the last completed round, never a partial scrape."""
+    lines = [
+        '# TYPE vpn_probe_timestamp_seconds gauge',
+        f'vpn_probe_timestamp_seconds {datetime.datetime.fromisoformat(row["time"]).timestamp()}',
+        '# TYPE vpn_probe_controls_ok gauge',
+        f'vpn_probe_controls_ok {int(all(check["ok"] for check in row["controls"]))}',
+        '# TYPE vpn_probe_success gauge',
+    ]
+    for name, result in row["proxies"].items():
+        for target, check in result["checks"].items():
+            lines.append(f'vpn_probe_success{{protocol="{name}",target="{target}"}} {int(check["ok"])}')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text("\n".join(lines) + "\n")
+    temporary.chmod(0o644)
+    temporary.replace(path)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--proxy", action="append", required=True, type=proxy_argument)
     parser.add_argument("--control-url", action="append", required=True, type=https_argument,
                         help="Repeat for at least two HTTPS sites reachable directly from this ISP")
     parser.add_argument("--rounds", type=int, default=1)
+    parser.add_argument("--continuous", action="store_true", help="Run until stopped instead of limiting rounds")
     parser.add_argument("--interval", type=float, default=30)
     parser.add_argument("--failure-threshold", type=int, default=3)
-    parser.add_argument("--output", type=Path, required=True, help="Append-only local JSONL observations")
+    parser.add_argument("--output", type=Path, help="Append-only local JSONL observations")
+    parser.add_argument("--metrics-output", type=Path, help="Atomically replaced Prometheus textfile")
     args = parser.parse_args()
     if args.rounds < 1 or args.interval < 0 or args.failure_threshold < 1:
         parser.error("rounds/threshold must be positive and interval nonnegative")
@@ -104,13 +127,18 @@ def main():
     if len(proxies) != len(args.proxy):
         parser.error("Proxy names must be unique")
 
+    if not args.output and not args.metrics_output:
+        parser.error("At least one of --output or --metrics-output is required")
     os.umask(0o077)
-    args.output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     streaks = dict.fromkeys(proxies, 0)
     started = time.monotonic()
-    with args.output.open("a") as output, concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-        args.output.chmod(0o600)
-        for round_no in range(args.rounds):
+    with (args.output.open("a") if args.output else contextlib.nullcontext()) as output, concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        if args.output:
+            args.output.chmod(0o600)
+        rounds = itertools.count() if args.continuous else range(args.rounds)
+        for round_no in rounds:
             time.sleep(max(0, started + round_no * args.interval - time.monotonic()))
             control_jobs = [pool.submit(request, url) for url in args.control_url]
             proxy_jobs = {
@@ -126,8 +154,11 @@ def main():
                 state, streaks[name] = classify(controls, list(checks.values()), streaks[name], args.failure_threshold)
                 row["proxies"][name] = {"state": state, "failure_streak": streaks[name], "checks": checks}
             line = json.dumps(row)
-            output.write(line + "\n")
-            output.flush()
+            if output:
+                output.write(line + "\n")
+                output.flush()
+            if args.metrics_output:
+                write_metrics(args.metrics_output, row)
             print(line, flush=True)
 
 

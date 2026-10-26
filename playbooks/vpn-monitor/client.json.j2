@@ -1,0 +1,18 @@
+{# One Cherry node, fixed dedicated ports; allocate ports if adding more nodes. #}
+{{ {
+    'log': {'level': 'warn'},
+    'inbounds': [
+        {'type': 'mixed', 'tag': 'monitor-ssh', 'listen': '127.0.0.1', 'listen_port': 22340},
+        {'type': 'mixed', 'tag': 'monitor-naive', 'listen': '127.0.0.1', 'listen_port': 22341},
+        {'type': 'mixed', 'tag': 'monitor-vless', 'listen': '127.0.0.1', 'listen_port': 22342}
+    ],
+    'outbounds': cherry_monitor_outbounds,
+    'route': {
+        'rules': [
+            {'inbound': ['monitor-ssh'], 'action': 'route', 'outbound': 'cherry-ssh'},
+            {'inbound': ['monitor-naive'], 'action': 'route', 'outbound': 'cherry-naive'},
+            {'inbound': ['monitor-vless'], 'action': 'route', 'outbound': 'cherry-vless'}
+        ],
+        'final': 'cherry-ssh'
+    }
+} | to_nice_json }}

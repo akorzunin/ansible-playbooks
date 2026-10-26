@@ -76,7 +76,9 @@
         status_code: 204
       changed_when: true
       loop: "{{ monitoring_old_alerts.json }}"
-      when: item.uid != 'monitoring-node-offline'
+      when: >-
+        item.uid not in ['monitoring-node-offline', 'monitoring-disk-space-low',
+        'monitoring-vpn-path', 'monitoring-vpn-probe-stale', 'monitoring-vpn-controls']
       no_log: true
 
     - name: Delete legacy dashboards

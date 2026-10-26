@@ -23,3 +23,6 @@
       no_log: true
   roles:
     - vpn_node
+
+- name: Register metrics and deploy workstation reachability alerts
+  ansible.builtin.import_playbook: monitoring.yaml

@@ -1,0 +1,117 @@
+---
+# Existing, bootstrapped Cherry only. No allocation or active-client changes.
+- name: Validate Cherry monitoring inputs before changing either host
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  tasks:
+    - name: Require both shared inventories and the applied Cherry inventory
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+          - ansible_limit is not defined
+          - groups.get('vpn_test', []) | length == 1
+          - groups.get('monitoring_servers', []) | length == 1
+          - groups.get('monitored_nodes', []) | length > 0
+          - monitoring_workstation_allowed_sources | default([]) | length > 0
+          - (groups['monitoring_servers'] | first) in groups['monitored_nodes']
+        fail_msg: Load hosts, monitoring.inventory.yml and private/inventory.yaml; run without --limit or --check.
+
+    - name: Require the exported three-protocol client profile
+      ansible.builtin.assert:
+        that:
+          - cherry_monitor_outbounds | map(attribute='tag') | list == ['cherry-ssh', 'cherry-naive', 'cherry-vless']
+          - cherry_monitor_outbounds[0].server == hostvars[groups['vpn_test'] | first].ansible_host
+        fail_msg: Run the Cherry deployment first to export private/cherry-outbounds.json.
+      vars:
+        cherry_monitor_outbounds: "{{ lookup('file', playbook_dir ~ '/private/cherry-outbounds.json') | from_json }}"
+      no_log: true
+
+- name: Install Cherry host and container metrics
+  hosts: vpn_test
+  become: true
+  any_errors_fatal: true
+  vars:
+    ansible_user: vpnadmin
+    ansible_host_key_checking: true
+    monitoring_node: cherry
+    monitoring_telegraf_allowed_sources: "{{ monitoring_workstation_allowed_sources }}"
+  roles:
+    - monitoring_client
+  post_tasks:
+    - name: Flush collector changes before verification
+      ansible.builtin.meta: flush_handlers
+
+    - name: Register Cherry for this monitoring deployment
+      ansible.builtin.add_host:
+        name: "{{ inventory_hostname }}"
+        groups: monitored_nodes
+        ansible_user: vpnadmin
+        ansible_host_key_checking: true
+        monitoring_node: cherry
+        monitoring_enabled: true
+        monitoring_availability_alert: true
+        monitoring_client_telegraf_port: 9273
+        monitoring_telegraf_allowed_sources: "{{ monitoring_workstation_allowed_sources }}"
+
+    # A top-level group extends monitored_nodes without rewriting private YAML.
+    - name: Persist Cherry membership and workstation probe enablement
+      ansible.builtin.blockinfile:
+        path: "{{ playbook_dir }}/../../monitoring.inventory.yml"
+        marker: "# {mark} ANSIBLE CHERRY MONITORING"
+        block: |
+          cherry_monitoring:
+            children:
+              monitored_nodes:
+                hosts:
+                  {{ inventory_hostname }}:
+                    ansible_host: {{ ansible_host | to_json }}
+                    ansible_user: vpnadmin
+                    ansible_port: {{ ansible_port | default(22) | int }}
+                    ansible_host_key_checking: true
+                    ansible_ssh_private_key_file: {{ ansible_ssh_private_key_file | to_json }}
+                    ansible_ssh_common_args: {{ ansible_ssh_common_args | to_json }}
+                    monitoring_node: cherry
+                    monitoring_enabled: true
+                    monitoring_availability_alert: true
+                    monitoring_client_telegraf_port: 9273
+                    monitoring_telegraf_allowed_sources: {{ monitoring_workstation_allowed_sources | to_json }}
+          cherry_probe:
+            hosts:
+              {{ groups['monitoring_servers'] | first }}:
+                monitoring_vpn_probe_enabled: true
+        backup: true
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+
+- name: Deploy isolated workstation client and probes with the shared Compose role
+  ansible.builtin.import_playbook: ../../playbooks/vpn-monitor/deploy.yaml
+
+- name: Update shared monitoring targets and Grafana alerts
+  ansible.builtin.import_playbook: ../../playbooks/ws-logs/deploy.yml
+
+- name: Verify Cherry monitoring end to end
+  hosts: monitoring_servers
+  gather_facts: false
+  tasks:
+    - name: Wait for host metrics and all six protocol checks in Prometheus
+      vars:
+        cherry_monitor_query: >-
+          (up{job="telegraf",node="cherry"} == 1)
+          and on () (count(vpn_probe_success) == 6)
+          and on () (time() - max(vpn_probe_timestamp_seconds) < 180)
+          and on (node) mem_total{job="telegraf"}
+          and on (node) docker_container_mem_usage{job="telegraf"}
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9090/api/v1/query?query={{ cherry_monitor_query | urlencode }}"
+        use_proxy: false
+      register: cherry_monitor_result
+      until: >-
+        cherry_monitor_result.status == 200 and
+        cherry_monitor_result.json.status == 'success' and
+        cherry_monitor_result.json.data.result | length > 0
+      retries: 18
+      delay: 10

@@ -1,0 +1,84 @@
+---
+- name: Deploy isolated workstation VPN checks with Compose
+  hosts: monitoring_servers
+  become: true
+  any_errors_fatal: true
+  vars:
+    deploy_compose_dir: /srv/deploy
+    deploy_compose_service_name: cherry-vpn-monitor
+  tasks:
+    - name: Create the deployment directory using the shared Compose role
+      ansible.builtin.include_role:
+        name: deploy_compose
+        tasks_from: mkdir
+
+    # The shared role recursively sets deployment-directory permissions. Keep
+    # credentials outside that tree so redeployment cannot make them public.
+    - name: Create root-only client configuration directory
+      ansible.builtin.file:
+        path: /etc/vpn-monitor
+        state: directory
+        owner: root
+        group: root
+        mode: "0700"
+
+    - name: Create the probe snapshot directory for the unprivileged container
+      ansible.builtin.file:
+        path: /var/lib/vpn-monitor
+        state: directory
+        owner: "65534"
+        group: "65534"
+        mode: "0755"
+
+    - name: Render and validate the isolated client using the pinned container image
+      ansible.builtin.template:
+        src: client.json.j2
+        dest: /etc/vpn-monitor/client.json
+        owner: "65534"
+        group: "65534"
+        mode: "0600"
+        validate: >-
+          docker run --rm --network=none
+          -v %s:/etc/vpn/client.json:ro
+          ghcr.io/sagernet/sing-box@sha256:0788ffbddab2c68a99a2dd4780bbc50902f159af6f589df3ee74a8389d278279
+          check -c /etc/vpn/client.json
+      vars:
+        cherry_monitor_outbounds: "{{ lookup('file', playbook_dir ~ '/../../infra/cherry-vpn/private/cherry-outbounds.json') | from_json }}"
+      no_log: true
+      diff: false
+
+    - name: Stage the small Python and curl probe image build
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/{{ item }}"
+        mode: "0644"
+      loop: [Dockerfile, .dockerignore]
+      register: vpn_monitor_build
+
+    - name: Install the shared observation-only probe
+      ansible.builtin.copy:
+        src: ../vpn-probe/probe.py
+        dest: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}/probe.py"
+        mode: "0644"
+
+    - name: Inspect the existing probe image
+      community.docker.docker_image_info:
+        name: cherry-vpn-probe:python3.14
+      register: vpn_monitor_image
+
+    - name: Build the probe image when missing or its build changes
+      ansible.builtin.command:
+        argv: [docker, build, -t, "cherry-vpn-probe:python3.14", .]
+        chdir: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}"
+      when: vpn_monitor_build.changed or not vpn_monitor_image.images
+      changed_when: true
+
+    # Force-recreation is scoped to this separate project and refreshes both
+    # containers sharing a network namespace when credentials change.
+    - name: Deploy the isolated client and probe using the shared Compose role
+      ansible.builtin.include_role:
+        name: deploy_compose
+
+    - name: Enable probe collection and Grafana rules for this deployment
+      ansible.builtin.set_fact:
+        monitoring_vpn_probe_enabled: true

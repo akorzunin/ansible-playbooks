@@ -74,7 +74,8 @@ persistent connection. Dependence on the active local VPN is not an autonomous
 recovery path. After pinning:
 
 ```sh
-ansible-playbook -i infra/cherry-vpn/private/inventory.yaml \
+ansible-playbook -i hosts -i monitoring.inventory.yml \
+  -i infra/cherry-vpn/private/inventory.yaml \
   --vault-password-file .ansible_pass infra/cherry-vpn/deploy.yaml
 ```
 
