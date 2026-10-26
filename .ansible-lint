@@ -9,7 +9,7 @@ exclude_paths:
   - .github
   - todo_playbooks
   - playbooks/install_nvidia_driver.yaml
-  # Generated local inventory and private operational playbooks, not source files.
+  # Local deployment inputs; recursive discovery does not inherit root .gitignore rules.
   - infra/cherry-vpn/private/
   # Application configs, not Ansible content.
   - '**/compose.yaml'
