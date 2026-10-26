@@ -10,6 +10,10 @@ repos:
     hooks:
       - id: ansible-lint
         language_version: python3.14
+        pass_filenames: true
+        always_run: false
+        types: [yaml]
+        require_serial: true
   - repo: https://github.com/Lucas-C/pre-commit-hooks
     rev: v1.5.5
     hooks:

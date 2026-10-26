@@ -68,10 +68,25 @@ Run playbook locally
     ansible-playbook --vault-password-file=.ansible_pass ./playbooks/playbook_name.yaml -i localhost, -c local
     ```
 
-Run all checks locally (ansible-lint runs offline, so install collections first):
+The local pre-commit hook lints only staged YAML files. CI runs the hooks against
+all tracked files. Changed-file linting can miss issues caused by shared role or
+configuration changes; use the full-repo check below when needed.
+
+Ansible-lint runs offline, so install collections first:
 
 ```sh
 ansible-galaxy collection install -r requirements.yml
+```
+
+Run the ansible-lint hook against all tracked YAML files locally:
+
+```sh
+pre-commit run ansible-lint --all-files
+```
+
+Or run all hooks against the full repo, as CI does:
+
+```sh
 pre-commit run --all-files
 ```
 
