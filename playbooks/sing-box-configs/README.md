@@ -68,6 +68,9 @@ and a fresh controller never generates replacement tokens.
   probes did not reliably predict usable connections on mobile networks.
 - Android defaults to SSH; select VLESS manually when UDP is needed.
 - Windows/Linux default to VLESS; select Naïve or SSH manually if it fails.
+- `ssh-via-workstation` and `cherry-ssh-via-workstation` reach the corresponding
+  SSH server through the workstation. Both are TCP-only; `workstation-hop` is an
+  internal transport, not a selectable exit. Defaults remain unchanged.
 - Manual changes interrupt existing connections. Selector choices are not persisted
   by the core cache; restarting may restore the platform default.
 - Proxied TCP and UDP follow the selected protocol. UDP/443 is no longer rejected.
@@ -102,6 +105,20 @@ is replaced. Keep private keys/passwords in Vault, not templates or command-line
 arguments. SSH outbounds must pin the independently verified server `host_key`;
 only distribute an unprivileged tunnel key, never an administrator key.
 
+The Vault also contains a pinned `workstation-hop` SSH outbound in `extra_outbounds`.
+When it is present, generation clones each non-detoured SSH exit (including nodes
+supplied through `--extra-outbounds-file`) as `<tag>-via-workstation`, preserving
+its credentials and host-key pin and adding `detour: workstation-hop`. The hop
+itself is omitted from the selector. Generated tags must not collide with supplied
+tags. Removing `workstation-hop` removes the generated chained options.
+
+The workstation's `sing-box-hop` account must allow each destination in **both**
+its `authorized_keys` `permitopen` options and its sshd `Match User` `PermitOpen`.
+The deployed allowlist includes nt1 and Cherry SSH only; adding another SSH node
+requires explicitly extending both allowlists and validating/reloading sshd.
+Do not replace these restrictions with unrestricted forwarding. This allowlist
+is managed separately from profile generation; rendering cannot prove reachability.
+
 Publish with the command below. Extra outbounds are appended to every manual
 selector without changing nt1 defaults, routing or enrollment URLs. Refresh the
 client's existing remote profile and explicitly select the trial node. On Linux,
@@ -112,7 +129,8 @@ There is no automatic failover or evidence of connectivity from generation alone
 After a supervised replacement, edit the extra outbound's endpoint, credentials
 and pinned host key in Vault, then republish. Before destroying a trial node,
 remove its outbound and republish; clients still need to refresh/select nt1.
-Omitting the list restores nt1-only profiles. OpenTofu does not change this Vault
+Omitting additional-node outbounds restores nt1-only exits (plus the workstation
+hop when configured). OpenTofu does not change this Vault
 file or publish on its own. See the [Cherry trial guide](../../infra/cherry-vpn/README.md).
 
 The [`vpn_node` role](../../roles/vpn_node/README.md) can export a private JSON

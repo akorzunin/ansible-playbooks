@@ -82,6 +82,51 @@ class ProfileTests(unittest.TestCase):
             removed = json.loads((output / "linux.json").read_text())
             self.assertNotIn("cherry-ssh", removed["outbounds"][0]["outbounds"])
 
+    def test_workstation_hop_adds_chained_ssh_for_nt1_and_cherry(self):
+        self.connections["ssh"].update(server="192.0.2.1", host_key=["nt1-key"])
+        cherry = {"type": "ssh", "tag": "cherry-ssh", "server": "192.0.2.2",
+                  "host_key": ["cherry-key"], "private_key": "cherry-private-key"}
+        hop = {"type": "ssh", "tag": "workstation-hop", "server": "workstation.example",
+               "host_key": ["workstation-key"]}
+        extra = [hop, cherry, {"type": "naive", "tag": "cherry-naive"}]
+        original = json.loads(json.dumps(extra))
+        with tempfile.TemporaryDirectory() as work, patch.object(generate.subprocess, "run"):
+            output = Path(work)
+            generate.generate(output, self.connections, self.tokens, extra)
+            for platform, order in generate.ORDERS.items():
+                profile = json.loads((output / f"{platform}.json").read_text())
+                selector = profile["outbounds"][0]
+                self.assertEqual(selector["default"], order[0])
+                self.assertEqual(selector["outbounds"], order + [
+                    "cherry-ssh", "cherry-naive", "ssh-via-workstation", "cherry-ssh-via-workstation",
+                ])
+                by_tag = {o["tag"]: o for o in profile["outbounds"]}
+                self.assertEqual(by_tag["workstation-hop"], hop)
+                for source in (self.connections["ssh"], cherry):
+                    self.assertEqual(by_tag[source["tag"] + "-via-workstation"], {
+                        **source, "tag": source["tag"] + "-via-workstation", "detour": "workstation-hop",
+                    })
+            self.assertEqual(extra, original)
+            generate.generate(output, self.connections, self.tokens, extra[1:])
+            for platform in generate.ORDERS:
+                profile = json.loads((output / f"{platform}.json").read_text())
+                self.assertFalse(any(o["tag"].endswith("-via-workstation") for o in profile["outbounds"]))
+                self.assertFalse(any(o["tag"] == "workstation-hop" for o in profile["outbounds"]))
+
+    def test_generated_chain_tag_collision_preserves_existing_profiles(self):
+        with tempfile.TemporaryDirectory() as work, patch.object(generate.subprocess, "run") as check:
+            output = Path(work)
+            generate.generate(output, self.connections, self.tokens)
+            before = {p.name: p.read_bytes() for p in output.iterdir()}
+            check.reset_mock()
+            with self.assertRaises(ValueError):
+                generate.generate(output, self.connections, self.tokens, [
+                    {"type": "ssh", "tag": "workstation-hop"},
+                    {"type": "ssh", "tag": "ssh-via-workstation", "detour": "workstation-hop"},
+                ])
+            check.assert_not_called()
+            self.assertEqual(before, {p.name: p.read_bytes() for p in output.iterdir()})
+
     def test_invalid_extra_outbounds_preserve_existing_profiles(self):
         with tempfile.TemporaryDirectory() as work, patch.object(generate.subprocess, "run") as check:
             output = Path(work)
@@ -94,6 +139,7 @@ class ProfileTests(unittest.TestCase):
                 [{"type": "ssh", "tag": ""}],
                 [{"type": "ssh", "tag": []}],
                 [{"type": "ssh", "tag": "cherry"}] * 2,
+                [{"type": "direct", "tag": "workstation-hop"}],
             ):
                 with self.subTest(extra=extra):
                     check.reset_mock()

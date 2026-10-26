@@ -35,7 +35,8 @@ def private_write(path, content):
 def make_profile(base, connections, order, extra_outbounds=()):
     profile = copy.deepcopy(base)
     tags = [connections[kind]["tag"] for kind in order]
-    tags.extend(outbound["tag"] for outbound in extra_outbounds)
+    tags.extend(outbound["tag"] for outbound in extra_outbounds
+                if outbound["tag"] != "workstation-hop")
     profile["outbounds"] = [
         {"type": "selector", "tag": "proxy", "outbounds": tags,
          "default": tags[0], "interrupt_exist_connections": True},
@@ -81,6 +82,19 @@ def generate(private_dir, connections, tokens, extra_outbounds=()):
         or not outbound["type"] for outbound in extra_outbounds
     ):
         raise ValueError("Extra outbounds must be a list of sing-box outbound objects")
+    extra_outbounds = list(extra_outbounds)
+    hops = [o for o in extra_outbounds if o.get("tag") == "workstation-hop"]
+    if hops:
+        if any(o["type"] != "ssh" for o in hops):
+            raise ValueError("workstation-hop must be an SSH outbound")
+        # Keep the intermediate hop private to chained SSH outbounds, not selectable.
+        for outbound in [*connections.values(), *extra_outbounds]:
+            if (outbound["type"] == "ssh" and outbound.get("tag") != "workstation-hop"
+                    and not outbound.get("detour")):
+                chained = copy.deepcopy(outbound)
+                chained["tag"] = f"{outbound.get('tag', '')}-via-workstation"
+                chained["detour"] = "workstation-hop"
+                extra_outbounds.append(chained)
     tags = [o.get("tag") for o in [*connections.values(), *extra_outbounds]]
     if any(not isinstance(tag, str) or not tag for tag in tags):
         raise ValueError("Connection tags must be nonempty strings")
