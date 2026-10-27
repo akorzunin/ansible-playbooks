@@ -11,6 +11,9 @@
       {{ (lookup('ansible.builtin.file', playbook_dir + '/private/linux.json') | from_json).outbounds |
          selectattr('type', 'equalto', 'ssh') | rejectattr('tag', 'equalto', 'workstation-hop') |
          rejectattr('detour', 'defined') | list }}
+    hop_permit_open: >-
+      {{ hop_destinations | map(attribute='server') |
+         zip(hop_destinations | map(attribute='server_port')) | map('join', ':') | join(' ') }}
   tasks:
     - name: Load shared hop credentials
       ansible.builtin.include_vars:
@@ -85,8 +88,7 @@
               X11Forwarding no
               PermitTTY no
               PermitTunnel no
-              PermitOpen {% for destination in hop_destinations %}{{ destination.server }}:{{ destination.server_port }}{{ ' ' if not loop.last else '' }}{% endfor %}
-
+              PermitOpen {{ hop_permit_open }}
               MaxSessions 0
           Match all
       notify: Reload SSH

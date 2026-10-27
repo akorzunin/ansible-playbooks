@@ -59,13 +59,14 @@ class MonitoringTests(unittest.TestCase):
 
     def test_active_nodes_ports_and_alert_opt_in(self):
         targets = self.targets("telegraf")
-        self.assertEqual(set(targets), {"workstation", "pi", "nk1", "nt1"})
+        self.assertEqual(set(targets), {"workstation", "pi", "nk1", "nt1", "dyn1"})
         self.assertEqual(targets["workstation"]["targets"], ["telegraf:9273"])
         self.assertEqual(targets["pi"]["targets"], ["192.168.1.58:9273"])
         self.assertEqual(targets["nk1"]["targets"], ["nk1.example.test:9273"])
         self.assertEqual(targets["nt1"]["targets"], ["nt1.example.test:9273"])
+        self.assertEqual(targets["dyn1"]["targets"], ["dyn1.example.test:9273"])
         opted_in = {node for node, target in targets.items() if target["labels"]["availability_alert"] == "true"}
-        self.assertEqual(opted_in, {"nk1", "nt1"})
+        self.assertEqual(opted_in, {"nk1", "nt1", "dyn1"})
         jobs = {job["job_name"] for job in self.prometheus()["scrape_configs"]}
         self.assertEqual(jobs, {"prometheus", "telegraf", "nvidia-gpu-exporter"})
 
@@ -73,7 +74,7 @@ class MonitoringTests(unittest.TestCase):
         for host in self.groups["retired_nodes"]:
             self.groups["monitored_nodes"].append(host)
             self.hostvars[host] = copy.deepcopy(self.hostvars["nk1"])
-        self.assertEqual(set(self.targets("telegraf")), {"workstation", "pi", "nk1", "nt1"})
+        self.assertEqual(set(self.targets("telegraf")), {"workstation", "pi", "nk1", "nt1", "dyn1"})
 
     def test_disabled_nodes_are_not_scraped(self):
         for disabled in (False, "false"):
@@ -158,7 +159,7 @@ class MonitoringTests(unittest.TestCase):
 
     def test_remote_agents_have_stable_hostnames_and_source_restrictions(self):
         template = self.environment.from_string((ROOT / "roles/monitoring_client/templates/telegraf.conf.j2").read_text())
-        for host in ("remote_pi", "nk1", "nt1"):
+        for host in ("remote_pi", "nk1", "nt1", "dyn1"):
             variables = self.hostvars[host]
             config = tomllib.loads(template.render(**variables, inventory_hostname=host))
             self.assertEqual(config["agent"]["hostname"], variables.get("monitoring_node", host))
@@ -168,7 +169,7 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(self.hostvars["remote_pi"]["monitoring_client_telegraf_bind_address"], "192.168.1.58")
 
     def test_example_vps_allowlists_restrict_public_access_to_scraper(self):
-        for host in ("nk1", "nt1"):
+        for host in ("nk1", "nt1", "dyn1"):
             sources = self.hostvars[host]["monitoring_telegraf_allowed_sources"]
             self.assertIn("198.51.100.5/32", sources)
             networks = [ipaddress.ip_network(source) for source in sources]

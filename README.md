@@ -37,16 +37,29 @@ Further provisioning requires a fresh reviewed plan and explicit approval.
 
 ## Setup
 
-Link `hosts` and `external_vars.yml` from Dropbox:
+Link private inputs from Dropbox (existing files are never overwritten):
 
     ./install.sh
 
 The script checks `~/Dropbox/ssh` and the Termux path
 `~/storage/shared/Dropbox/ssh`. Set `DROPBOX_SSH_DIR` to use another path.
+It links `hosts` and `external_vars.yml` into the repository root. When the
+Dropbox `cherry-vpn/` directory exists, it also links `cherry-token.vault` and
+`terraform.tfvars` from there into `infra/cherry-vpn/`. Both Cherry files must be
+present in that case; without that directory, Ansible-only setup still works.
 
-Create password file
+For OpenTofu, also follow the [controller handoff checklist](infra/cherry-vpn/README.md#dropbox-inputs-and-switching-controllers):
+install OpenTofu, regenerate local SSH keys/project inputs, then run
+`bash infra/cherry-vpn/tofu.sh restore-state` to copy the synced encrypted Dropbox
+snapshot locally. Run `bash infra/cherry-vpn/tofu.sh backup-state` after operations
+on the old machine and wait for sync before switching. Use only one machine at a
+time. The installer itself does not provision infrastructure or copy state.
 
-    ansible-vault create .ansible_pass
+Securely transfer the existing Vault password to `.ansible_pass` on each trusted
+controller (plaintext password file, not a Vault-encrypted file). Keep it out of
+Dropbox and Git, separate from the encrypted secrets:
+
+    chmod 600 .ansible_pass
 
 Check connection to all hosts
 
@@ -75,19 +88,20 @@ configuration changes; use the full-repo check below when needed.
 Ansible-lint runs offline, so install collections first:
 
 ```sh
+python -m unittest discover -s tests -p 'test_*.py'
 ansible-galaxy collection install -r requirements.yml
 ```
 
 Run the ansible-lint hook against all tracked YAML files locally:
 
 ```sh
-pre-commit run ansible-lint --all-files
+uvx prek run ansible-lint --all-files
 ```
 
 Or run all hooks against the full repo, as CI does:
 
 ```sh
-pre-commit run --all-files
+uvx prek run --all-files
 ```
 
 The isolated hook uses collections in `~/.ansible/collections`, not the system

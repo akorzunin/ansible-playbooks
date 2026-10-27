@@ -53,9 +53,14 @@ def environment(command, args):
     return env, data
 
 
+def encrypted_content(content):
+    data = json.loads(content)
+    return (isinstance(data, dict) and bool(data.get("encryption_version") and data.get("encrypted_data"))
+            and "resources" not in data)
+
+
 def encrypted(path):
-    data = json.loads(path.read_bytes())
-    return bool(data.get("encryption_version") and data.get("encrypted_data")) and "resources" not in data
+    return encrypted_content(path.read_bytes())
 
 
 def archive_plaintext(path):
@@ -76,21 +81,59 @@ def archive_plaintext(path):
         raise ValueError("Migration backup verification failed")
 
 
-def migrate(executable, env):
-    # This helper owns only the default local backend/workspace, not arbitrary
-    # backend migrations. Refuse alternate state locations rather than guessing.
-    if any(env.get(key) for key in ("TF_DATA_DIR", "TF_CLI_ARGS", "TF_CLI_ARGS_state")):
-        raise ValueError("Migration requires the default local CLI/data paths")
+def require_local_state(env):
+    # Snapshot transfer/migration owns only the default local backend/workspace.
+    if any(value for key, value in env.items()
+           if key in {"TF_DATA_DIR", "TF_CLI_ARGS"} or key.startswith("TF_CLI_ARGS_")):
+        raise ValueError("State recovery requires the default local CLI/data paths")
     workspace_file = ROOT / ".terraform/environment"
     if env.get("TF_WORKSPACE", "default") != "default" or (
         workspace_file.exists() and workspace_file.read_text().strip() != "default"
     ):
-        raise ValueError("Migration requires the default workspace")
+        raise ValueError("State recovery requires the default workspace")
     metadata_file = ROOT / ".terraform/terraform.tfstate"
     if metadata_file.exists():
         backend = json.loads(metadata_file.read_bytes()).get("backend") or {}
         if backend.get("type") not in (None, "local") or (backend.get("config") or {}).get("path") not in (None, "", "terraform.tfstate"):
-            raise ValueError("Use a backend-specific migration for non-default state storage")
+            raise ValueError("Use backend-specific recovery for non-default state storage")
+
+
+def transfer_state(command, env):
+    require_local_state(env)
+    if (ROOT / ".terraform.tfstate.lock.info").exists() or (ROOT / "private/migration-original.tfstate").exists():
+        raise ValueError("Resolve the existing state lock or migration before transferring state")
+    override = env.get("DROPBOX_SSH_DIR")
+    candidates = [Path(override)] if override else [
+        Path.home() / "Dropbox/ssh", Path.home() / "storage/shared/Dropbox/ssh",
+    ]
+    shared = next((path / "cherry-vpn" for path in candidates if path.is_dir()), None)
+    if shared is None or not shared.is_dir():
+        raise ValueError("Dropbox cherry-vpn directory not found; run install.sh or set DROPBOX_SSH_DIR")
+    source_dir, target_dir = (ROOT, shared) if command == "backup-state" else (shared, ROOT)
+    pending = []
+    for name in ("terraform.tfstate.backup", "terraform.tfstate"):
+        source, target = source_dir / name, target_dir / name
+        if source.is_symlink() or target.is_symlink():
+            raise ValueError("State snapshots must be regular files, not symlinks")
+        if name.endswith(".backup") and not source.exists():
+            continue
+        content = source.read_text()
+        if not encrypted_content(content):
+            raise ValueError("Only encrypted OpenTofu state can be transferred")
+        if command == "restore-state" and target.exists() and target.read_text() != content:
+            raise ValueError("Different local state exists; archive it outside the state paths before restoring")
+        pending.append((target, content))
+    # One active controller only: Dropbox sync has no distributed locking.
+    # Use a locking remote backend if simultaneous controllers are needed.
+    for target, content in pending:
+        private_write(target, content)
+    print("Encrypted state backed up to Dropbox." if command == "backup-state" else "Encrypted state restored locally.")
+    print("Wait for Dropbox sync before switching machines; use only one controller at a time.")
+    return 0
+
+
+def migrate(executable, env):
+    require_local_state(env)
     state = ROOT / "terraform.tfstate"
     backup = ROOT / "terraform.tfstate.backup"
     pending = ROOT / "private/migration-original.tfstate"
@@ -143,6 +186,7 @@ def private_write(path, content):
         try:
             temporary.write(content)
             temporary.flush()
+            os.fsync(temporary.fileno())
             os.replace(pending, path)
         finally:
             pending.unlink(missing_ok=True)
@@ -195,14 +239,24 @@ def main(args):
     if not args:
         raise ValueError("An OpenTofu command is required")
     command = args[0]
-    env, data = environment(command, args)
-    if data is not None:
+    transfer = command in {"backup-state", "restore-state"}
+    env, data = (dict(os.environ), None) if transfer else environment(command, args)
+    if data is not None or transfer:
         # One local controller lock; use a locking remote backend before allowing
         # multiple controllers. Raw binary invocations must not bypass this lock.
         (ROOT / "private").mkdir(mode=0o700, exist_ok=True)
         lock = (ROOT / "private/controller.lock").open("a")
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         os.set_inheritable(lock.fileno(), True)
+    if transfer:
+        if len(args) != 1:
+            raise ValueError("State transfer commands take no arguments")
+        try:
+            return transfer_state(command, env)
+        except (OSError, ValueError) as error:
+            # These path/validation messages contain no state contents or credentials.
+            print(f"State transfer refused: {error}", file=sys.stderr)
+            return 1
     executable = str(ROOT / ".tools/tofu") if (ROOT / ".tools/tofu").is_file() else shutil.which("tofu")
     if not executable:
         raise ValueError("Install OpenTofu first")

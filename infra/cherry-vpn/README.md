@@ -26,6 +26,12 @@ fingerprint acceptance was needed. State and new saved plans use enforced
 PBKDF2/AES-GCM encryption. Back up `secrets.vault.yaml`: losing its state passphrase
 makes them unreadable. Never start from empty state to recover a lost controller.
 
+Monitoring was added separately on 2026-10-26: Telegraf runs in
+`/srv/monitoring/telegraf`, and the existing workstation Prometheus scrapes this VM
+as `dyn1`. Shared dashboards, node-availability and disk-space alerts cover it.
+VPN containers were not restarted. Monitoring membership is manual: update it
+when replacing/deleting the VM; see the [monitoring guide](../../playbooks/ws-logs/README.md).
+
 The [`vpn_node` role](../../roles/vpn_node/README.md) has deployed verified
 non-root `vpnadmin` sudo access, disabled root/password SSH, enabled unattended
 Debian security updates without automatic reboots, restricted the `vpnprobe`
@@ -386,8 +392,8 @@ Use the separate unprivileged probe key for tunneling.
 
 ### Dropbox inputs and switching controllers
 
-On the current controller, these ignored paths are symlinks into
-`~/Dropbox/ssh/cherry-vpn/`:
+`install.sh` links these ignored paths into `infra/cherry-vpn/` from
+`~/Dropbox/ssh/cherry-vpn/` (or `$DROPBOX_SSH_DIR/cherry-vpn/`):
 
 - `cherry-token.vault`: Vault-encrypted API token.
 - `terraform.tfvars`: selected plan, region and local public-key path.
@@ -396,27 +402,82 @@ The shared directory is mode 0700 and these files are mode 0600. The existing
 `external_vars.yml` symlink already shares the Vault-encrypted SSH keys and
 project ID. Keep `.ansible_pass` separate from Dropbox and transfer it securely.
 
-On a fresh controller, after Dropbox has synced and the existing
-`external_vars.yml` link is restored, create these links from the repository root
-(only when the destinations do not already exist):
+The Dropbox layout is:
 
-```sh
-ln -s "$HOME/Dropbox/ssh/cherry-vpn/cherry-token.vault" infra/cherry-vpn/cherry-token.vault
-ln -s "$HOME/Dropbox/ssh/cherry-vpn/terraform.tfvars" infra/cherry-vpn/terraform.tfvars
+```text
+ssh/
+  hosts
+  external_vars.yml
+  cherry-vpn/
+    cherry-token.vault
+    terraform.tfvars
+    terraform.tfstate          # encrypted snapshot, not a live backend
+    terraform.tfstate.backup   # encrypted recovery snapshot, when present
 ```
 
+On a fresh controller, wait for Dropbox to sync, then run from the repository root:
+
+```sh
+./install.sh
+# Alternatively: DROPBOX_SSH_DIR=/path/to/Dropbox/ssh ./install.sh
+```
+
+This restores all four links. Reruns retain correct links and refuse to overwrite
+any existing file or different/broken link. When adopting existing local Cherry
+inputs, securely move them into the Dropbox layout first, checking for existing
+shared copies rather than overwriting them. Both Cherry inputs are required when
+`cherry-vpn/` exists; when absent, the installer reports skipping OpenTofu links.
+
+Install OpenTofu as described above and securely restore `.ansible_pass` separately.
+`secrets.vault.yaml`, containing the state-encryption secret and host identity, is
+already tracked as Vault ciphertext; use the revision matching the deployed node.
+Do not generate new credentials to recover an existing deployment.
+
 Then run `restore-keys.yaml` above to recreate local `private/ssh/` and
-`project.auto.tfvars.json`. Do not sync the restored plaintext private keys.
+`project.auto.tfvars.json` with paths for this checkout, and run
+`bash infra/cherry-vpn/tofu.sh init -backend=false` to download the pinned provider.
+Do not sync `.terraform/`, `.tools/`, or the restored plaintext private keys.
 Without shared inputs, initialize `terraform.tfvars` from the example only if it
 does not already exist; copying over a symlink would overwrite the shared input.
 
 **Shared SSH keys do not replace state**: without the current state a fresh apply
-can order a duplicate server or re-enroll the SSH key. Keep live
-`terraform.tfstate` and its backups local, not symlinked into Dropbox. Finish all
-operations on the old controller, securely transfer the latest state (encrypt
-any cloud backup), and only then operate on the new controller. Use one active
-controller at a time; Dropbox is not a cross-controller lock. For regular
-multi-controller operation, migrate to a locking, encrypted remote backend.
+can order a duplicate server or re-enroll the SSH key. Store encrypted snapshots
+in Dropbox, while OpenTofu continues using regular local files (not symlinks).
+
+After finishing operations on the old controller, including any failed apply
+that might have changed state, publish the latest snapshot:
+
+```sh
+bash infra/cherry-vpn/tofu.sh backup-state
+```
+
+Wait for Dropbox to finish uploading, stop using the old controller, and wait for
+sync on the new controller. After the setup/restore-keys/init steps above, run:
+
+```sh
+bash infra/cherry-vpn/tofu.sh restore-state
+bash infra/cherry-vpn/tofu.sh state list
+```
+
+Transfer commands use the same Dropbox directory discovery as `install.sh`.
+For a custom directory, pass the same **absolute** `DROPBOX_SSH_DIR` to each
+command. They need neither OpenTofu nor the Vault password just to copy ciphertext.
+Only the default local backend/workspace is supported. Both the current state
+and its backup (when present) must already be encrypted; plaintext is refused.
+Writes are atomic per file and mode 0600. No SSH private keys, plans or Vault
+passwords are copied.
+
+`restore-state` refuses to replace any different local state or backup. When
+returning to a previously used machine, deliberately archive its old local state
+and backup under `private/` first, then restore the synced snapshot. Never discard
+an unbacked-up newer local state. `backup-state` explicitly replaces the shared
+snapshots, so do not run it from a stale controller. It is not automatic: back up
+after every operation that changes state and before switching machines.
+
+Use one active controller at a time. The wrapper's local lock protects transfer
+against local wrapper operations, but **Dropbox is not a cross-controller lock**
+and cannot prove sync is complete or prevent stale-controller uploads. For
+simultaneous controllers, use a locking, encrypted remote backend instead.
 
 Keep saved plans local and generate a fresh reviewed plan after switching
 controllers. Regenerate the private inventory and trusted `private/known_hosts`

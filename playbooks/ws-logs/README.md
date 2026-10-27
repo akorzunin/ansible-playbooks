@@ -17,25 +17,26 @@ ignored private overlay with **one entry per machine**, not both local and remot
 For a new setup, copy `monitoring.inventory.yml.example` to that path and replace
 the documentation-only scraper CIDR with your actual egress IP or VPN /32. Keep
 an existing overlay unchanged and back it up privately.
-It monitors `workstation`, `pi`, `nk1`, and `nt1`. `kr1`, `sw1`, and `pl1` are retired:
+It monitors `workstation`, `pi`, `nk1`, `nt1`, and the current Cherry VPN VM `dyn1`.
+`kr1`, `sw1`, and `pl1` are retired:
 no targets and no exporter deployment, even if accidentally added to `monitored_nodes`.
 Their private SSH records are not deleted.
 
 `monitoring_address` overrides `ansible_host` when Prometheus needs a different
 address (for example, a VPN address). `monitoring_node` is a stable human-readable
-label. All four nodes use Telegraf. The workstation uses Compose DNS
+label. All five nodes use Telegraf. The workstation uses Compose DNS
 (`telegraf:9273`); remote agents publish port 9273. `remote_pi` uses the public
 hostname for SSH but `monitoring_address: 192.168.1.58` for LAN scrapes from the
 workstation, and publishes metrics only on that LAN address.
 
 Remote agents require `monitoring_telegraf_allowed_sources`. The Pi allows the
-workstation's LAN address; nk1/nt1 share the privately configured workstation
+workstation's LAN address; nk1/nt1/dyn1 share the privately configured workstation
 source allowlist. Prefer a stable VPN /32: allowing a dynamic ISP pool also lets
 other subscribers in that pool read metrics. Loopback and local Docker bridge
 sources are also allowed. Requests from other public sources receive HTTP 403.
 **Future ISP assignments outside the configured sources require updating
 `monitoring_workstation_allowed_sources` in `monitoring.inventory.yml` and
-redeploying those clients.** nk1/nt1 share that list, and bootstrap uses it by
+redeploying those clients.** nk1/nt1/dyn1 share that list, and bootstrap uses it by
 default for new nodes (saving a per-node copy). Update saved copies too when the
 source changes. Prefer a stable VPN
 source for host-only access. No firewall rules are modified. The workstation
@@ -123,7 +124,7 @@ second Grafana against an empty directory and mistake it for a migration.
 
 ## Telegraf collectors
 
-All monitored nodes use Telegraf 1.40.2. Workstation, nk1, and nt1 use the Alpine
+All monitored nodes use Telegraf 1.40.2. Workstation, nk1, nt1, and dyn1 use the Alpine
 image; the 32-bit ARMv7 Pi uses `telegraf:1.40.2` (Debian), because the Alpine tag
 does not publish ARMv7 images. One template,
 `roles/monitoring_client/templates/telegraf.conf.j2`, supplies every agent's
@@ -173,7 +174,7 @@ still double-count VPN traffic.
 Verify after deployment:
 
 1. Check `docker compose logs --tail=50 telegraf` in `~/deploy/ws-logs`.
-2. Check `up{job="telegraf"}` is `1` for all four nodes, with no node-exporter or
+2. Check `up{job="telegraf"}` is `1` for all five nodes, with no node-exporter or
    cAdvisor scrape targets remaining.
 3. Check every shared dashboard panel for each node, and check the disk alert
    query still returns every node's writable root filesystem.
@@ -193,7 +194,7 @@ up{job=~"nodeexporter|telegraf", availability_alert="true"}
 ```
 
 Each series below 1 for two minutes creates an alert for its `node`. Currently only
-`nt1` and `nk1` opt in. An unreachable exporter/network also triggers it; this is a
+`nt1`, `nk1`, and `dyn1` opt in. An unreachable exporter/network also triggers it; this is a
 reachability check, not proof the machine is powered off. cAdvisor failure alone
 does not page you. Missing all query data and evaluation failures generate Grafana
 NoData/Error alerts, routed to Telegram too.
@@ -225,6 +226,14 @@ These indicate suspected reachability problems, not proof of a ban. Replacement
 is manual. The workstation cannot send notifications while it is offline.
 
 ## Adding, disabling, and retiring nodes
+
+`dyn1` is the existing Amsterdam Cherry VM, not an automatically allocated target.
+Its key-only SSH record is saved in private `hosts`, retaining the dedicated admin
+key and strict host-key pin from `infra/cherry-vpn/private/inventory.yaml`.
+Telegraf runs separately from its VPN containers. On VM replacement, update the
+private connection and verified host pin, then redeploy the collector and server.
+On VM deletion, remove `dyn1` from the monitoring overlay and redeploy the server;
+OpenTofu does not reconcile monitoring membership automatically.
 
 For a fresh Debian/Ubuntu server, use the [automated node bootstrap](../../node/init.md):
 it installs Docker/security updates/SSHGuard, saves SSH and monitoring inventory,
