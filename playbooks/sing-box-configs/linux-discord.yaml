@@ -10,7 +10,7 @@
         file: secrets.vault.yaml
       no_log: true
 
-    - name: Generate validated profiles with the derived Naive chain
+    - name: Generate and validate shared profiles
       ansible.builtin.command:
         argv: >-
           {{ ['python3', playbook_dir ~ '/generate.py'] +

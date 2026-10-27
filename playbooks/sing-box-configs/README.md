@@ -103,19 +103,35 @@ the independent config endpoint to recover, or add a second server deliberately.
 
 An HTTP/system proxy does not capture Discord's WebRTC UDP. `sb test` uses its
 own UDP-capable SOCKS probe; a passing result alone does not fix the application.
-The separate `discord-vpn` launcher captures **only Discord and its children**:
+The separate `discord-vpn` launcher uses the installed `/usr/bin/vesktop` client
+and captures **only Vesktop and its children**:
 
 ```text
-Discord → namespace TUN → VLESS → Naïve HTTPS → dyn1 VLESS → Internet
+Vesktop → namespace gVisor TUN → VLESS/REALITY over wlan0 → dyn1 → Internet
 ```
 
 Only the TUN and its routes are created in the `discord-vpn` network namespace
 (sing-box 1.14+). The separate core and its outbound sockets stay in the host
 namespace. No host default routes, forwarding, NAT, global TUN or changes to the
-main sing-box service are needed. Application DNS is proxied; only resolving
-the Naïve server's hostname uses host DNS to bootstrap the connection. There is
-no direct fallback inside this namespace. UDP-over-TCP can stall under packet
-loss; passing STUN probes is not a voice-quality guarantee.
+main sing-box service are needed. The single VLESS outbound and its bootstrap
+DNS (UDP to `1.1.1.1`) bind to `wlan0`; no Naïve or SSH carrier is involved.
+Application DNS uses TCP to `1.1.1.1` through VLESS, independently of the UDP
+relay. Voice UDP explicitly uses XUDP: disabling it causes the Vision server
+to reject UDP with a flow mismatch. The namespace uses gVisor on sing-box 1.14;
+retest the replacement TUN stack before upgrading to 1.15. Earlier chained
+trials passed short probes but later stalled during real app startup; probe
+success alone is not application verification.
+There is no wired or direct fallback. Connect Wi-Fi before launching; if it
+loses connectivity, Vesktop loses connectivity rather than switching to wired.
+The outbound/bootstrap use routing mark `0x2024`, matching the main host
+sing-box TUN's bypass mark; keep these in sync if that mark changes. Host
+routing, the wired default, other apps and the main sing-box service stay unchanged.
+DNS returns IPv4 results only: the
+exit's IPv6 TLS connections to Discord voice endpoints fail, leaving Chromium
+stuck connecting instead of retrying IPv4. Restore dual-stack DNS only after
+IPv6 egress passes TLS and UDP checks. Host DNS and routing remain unchanged.
+UDP-over-TCP can stall under packet loss; passing STUN probes is not a
+voice-quality guarantee.
 
 Install from the Cherry worktree after restoring its private client export:
 
@@ -127,23 +143,27 @@ ansible-playbook -i localhost, --vault-password-file .ansible_pass \
 
 This validates the profiles and installs root-only credentials in
 `/etc/sing-box-discord/config.json`, an opt-in service, and the launcher/menu
-entry. It does not publish profiles, enroll the host, start Discord or enable
-boot-time startup. Rerun after credential rotation; the dedicated config is a
-snapshot, not an automatically refreshed subscription. The private Cherry export
+entry. It does not publish profiles, enroll the host, start Vesktop or enable
+boot-time startup. Vesktop must already be installed. Rerun after credential
+rotation; the dedicated config is a snapshot, not an automatically refreshed
+subscription. The private Cherry export
 is created by the `vpn_node` role and is not stored in Git.
 
-Quit existing Discord instances, then run `discord-vpn` as your desktop user
-(or choose **Discord (VPN only)** from the menu). Sudo is required to start/join
-the namespace; Electron itself runs as your normal user, not root. The ordinary
-Discord launcher remains unchanged. Do not start both launchers concurrently:
-Electron can forward a second launch to the already-running instance.
+Quit existing Vesktop instances, then run `discord-vpn` as your desktop user
+(or choose **Vesktop (Wi-Fi VPN)** from the menu). The launcher checks that
+`wlan0` has a default route and tunnel DNS works before starting the GUI.
+The command and service retain
+the `discord-vpn` name. Sudo is required to start/join the namespace; Electron
+itself runs as your normal user, not root. The ordinary Discord and Vesktop
+launchers remain unchanged. Do not run ordinary Vesktop and VPN Vesktop
+concurrently: Electron can forward a second launch to the already-running instance.
 
-After reboot into 7.2.11, the namespace TUN started successfully. DNS, HTTPS and
-20/20 native UDP/STUN requests passed as the desktop user inside the namespace,
-without an explicit application proxy. HTTPS and STUN reported dyn1's exit IP;
-host IPv4/IPv6 routes and routing rules remained unchanged. The earlier missing
-TUN module issue is resolved. The Discord GUI and a real voice call still need
-user verification: launch `discord-vpn` and join a voice channel. Diagnostics:
+The installed 7.2.11 kernel supports the namespace TUN. Direct Wi-Fi VLESS
+with TCP DNS loaded the real Vesktop interface during repeated checks. With
+XUDP enabled, native UDP/STUN replies passed. Host routes/rules and the wired
+default remained unchanged. Real voice audio and long-term stability still
+need user verification. The ordinary Vesktop launcher does not join the VPN
+namespace. Diagnostics:
 
 ```sh
 sudo journalctl -u discord-vpn.service -n 30 --no-pager

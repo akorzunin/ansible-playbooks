@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=Discord (VPN only)
-Comment=Discord-only VLESS-over-Naive namespace; other apps stay unchanged
+Name=Vesktop (Wi-Fi VPN)
+Comment=Vesktop-only tunnel over wlan0; no wired fallback; other apps stay unchanged
 Exec=/usr/local/bin/discord-vpn
-Icon=discord
+Icon=vesktop
 Terminal=true
 Categories=Network;InstantMessaging;

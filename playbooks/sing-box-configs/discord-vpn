@@ -5,13 +5,18 @@ if (( EUID == 0 )); then
     echo 'Run discord-vpn as your desktop user, not root.' >&2
     exit 1
 fi
-if pgrep -u "$(id -u)" -x Discord >/dev/null || pgrep -u "$(id -u)" -x discord >/dev/null; then
-    echo 'Quit the existing Discord instance first; it would reuse its old network namespace.' >&2
+# Packaged Vesktop runs as Electron with app.asar in its command line.
+if pgrep -u "$(id -u)" -f '(^|/)(vesktop|Vesktop)([[:space:]]|$)|/usr/lib/vesktop/app\.asar([[:space:]]|$)' >/dev/null; then
+    echo 'Quit the existing Vesktop instance first; it would reuse its old network namespace.' >&2
     exit 1
 fi
 
 if [[ ! -d /usr/lib/modules/$(uname -r) ]] && ! grep -q '^tun ' /proc/modules; then
     echo 'The running kernel has no installed modules. Reboot into the installed kernel, then retry discord-vpn.' >&2
+    exit 1
+fi
+if ! ip -4 route show default dev wlan0 | grep -q '^default '; then
+    echo 'Connect wlan0 to Wi-Fi first; Vesktop will not fall back to wired.' >&2
     exit 1
 fi
 if ! sudo systemctl start discord-vpn.service; then
@@ -31,6 +36,24 @@ for (( attempt=0; attempt<50; attempt++ )); do
 done
 sudo ip -n discord-vpn link show dev dvpn0 >/dev/null
 
+# A created TUN does not mean its carrier/DNS is ready. Fail visibly rather
+# than opening an Electron window that retries ERR_NAME_NOT_RESOLVED forever.
+dns_ready=false
+for (( attempt=0; attempt<10; attempt++ )); do
+    if sudo ip netns exec discord-vpn timeout 3 getent ahostsv4 discord.com >/dev/null 2>&1; then
+        dns_ready=true
+        break
+    fi
+    if ! systemctl is-active --quiet discord-vpn.service; then
+        break
+    fi
+    sleep 1
+done
+if [[ "$dns_ready" != true ]]; then
+    echo 'Discord DNS is unavailable through the Wi-Fi tunnel; Vesktop was not started. See: sudo journalctl -u discord-vpn.service -n 30' >&2
+    exit 1
+fi
+
 # ip netns exec mounts /etc/netns/discord-vpn/resolv.conf only for this app.
 # Drop root before starting Electron; preserve desktop sockets, not proxy vars.
 exec sudo ip netns exec discord-vpn setpriv \
@@ -39,5 +62,6 @@ exec sudo ip netns exec discord-vpn setpriv \
     HOME="$HOME" USER="$USER" LOGNAME="$USER" \
     DISPLAY="${DISPLAY:-}" WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}" \
     XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" XAUTHORITY="${XAUTHORITY:-}" \
+    XDG_SESSION_TYPE="${XDG_SESSION_TYPE:-}" ELECTRON_OZONE_PLATFORM_HINT="${ELECTRON_OZONE_PLATFORM_HINT:-auto}" \
     DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-}" \
-    /usr/bin/discord --no-proxy-server "$@"
+    /usr/bin/vesktop --no-proxy-server "$@"
