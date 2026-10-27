@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Discord (VPN only)
+Comment=Discord-only VLESS-over-Naive namespace; other apps stay unchanged
+Exec=/usr/local/bin/discord-vpn
+Icon=discord
+Terminal=true
+Categories=Network;InstantMessaging;

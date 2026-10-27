@@ -83,6 +83,16 @@ def generate(private_dir, connections, tokens, extra_outbounds=()):
     ):
         raise ValueError("Extra outbounds must be a list of sing-box outbound objects")
     extra_outbounds = list(extra_outbounds)
+    # VLESS relays UDP inside a TCP stream even when its Naïve carrier cannot
+    # relay UDP itself. Derive trial-node chains so credentials cannot drift.
+    for outbound in list(extra_outbounds):
+        tag = outbound.get("tag")
+        if outbound["type"] == "vless" and isinstance(tag, str) and tag.endswith("-vless"):
+            carrier = tag.removesuffix("-vless") + "-naive"
+            if not outbound.get("detour") and any(
+                o["type"] == "naive" and o.get("tag") == carrier for o in extra_outbounds
+            ):
+                extra_outbounds.append({**copy.deepcopy(outbound), "tag": tag + "-via-naive", "detour": carrier})
     hops = [o for o in extra_outbounds if o.get("tag") == "workstation-hop"]
     if hops:
         if any(o["type"] != "ssh" for o in hops):

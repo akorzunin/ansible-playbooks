@@ -1,0 +1,43 @@
+#!/bin/bash
+set -euo pipefail
+
+if (( EUID == 0 )); then
+    echo 'Run discord-vpn as your desktop user, not root.' >&2
+    exit 1
+fi
+if pgrep -u "$(id -u)" -x Discord >/dev/null || pgrep -u "$(id -u)" -x discord >/dev/null; then
+    echo 'Quit the existing Discord instance first; it would reuse its old network namespace.' >&2
+    exit 1
+fi
+
+if [[ ! -d /usr/lib/modules/$(uname -r) ]] && ! grep -q '^tun ' /proc/modules; then
+    echo 'The running kernel has no installed modules. Reboot into the installed kernel, then retry discord-vpn.' >&2
+    exit 1
+fi
+if ! sudo systemctl start discord-vpn.service; then
+    echo 'Discord VPN failed to start; see: sudo journalctl -u discord-vpn.service -n 30' >&2
+    exit 1
+fi
+# systemd Type=simple reports startup before the core has created its TUN.
+for (( attempt=0; attempt<50; attempt++ )); do
+    if sudo ip -n discord-vpn link show dev dvpn0 >/dev/null 2>&1; then
+        break
+    fi
+    if ! systemctl is-active --quiet discord-vpn.service; then
+        echo 'Discord VPN stopped; see: sudo journalctl -u discord-vpn.service -n 30' >&2
+        exit 1
+    fi
+    sleep 0.1
+done
+sudo ip -n discord-vpn link show dev dvpn0 >/dev/null
+
+# ip netns exec mounts /etc/netns/discord-vpn/resolv.conf only for this app.
+# Drop root before starting Electron; preserve desktop sockets, not proxy vars.
+exec sudo ip netns exec discord-vpn setpriv \
+    --reuid="$(id -u)" --regid="$(id -g)" --init-groups \
+    env -u http_proxy -u https_proxy -u all_proxy -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \
+    HOME="$HOME" USER="$USER" LOGNAME="$USER" \
+    DISPLAY="${DISPLAY:-}" WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-}" \
+    XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" XAUTHORITY="${XAUTHORITY:-}" \
+    DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-}" \
+    /usr/bin/discord --no-proxy-server "$@"

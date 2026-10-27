@@ -1,0 +1,116 @@
+---
+- name: Install an opt-in Discord-only VPN without changing host routing
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Load shared profile credentials
+      ansible.builtin.include_vars:
+        file: secrets.vault.yaml
+      no_log: true
+
+    - name: Generate validated profiles with the derived Naive chain
+      ansible.builtin.command:
+        argv: >-
+          {{ ['python3', playbook_dir ~ '/generate.py'] +
+             (['--extra-outbounds-file', sing_box_extra_outbounds_file]
+              if sing_box_extra_outbounds_file | default('') | length > 0 else []) }}
+        stdin: "{{ {'sing_box_secrets': sing_box_secrets} | to_json }}"
+      changed_when: true
+      no_log: true
+
+    - name: Build the isolated Discord configuration
+      ansible.builtin.command:
+        argv: [python3, "{{ playbook_dir }}/discord-config.py"]
+        stdin: "{{ lookup('ansible.builtin.file', playbook_dir + '/private/linux.json') }}"
+      register: discord_config
+      changed_when: false
+      no_log: true
+
+    - name: Create private service and namespace DNS directories
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "{{ item.mode }}"
+      loop:
+        - {path: /etc/sing-box-discord, mode: "0700"}
+        - {path: /etc/netns/discord-vpn, mode: "0755"}
+      become: true
+
+    - name: Validate and install the dedicated service configuration
+      ansible.builtin.copy:
+        content: "{{ discord_config.stdout }}\n"
+        dest: /etc/sing-box-discord/config.json
+        owner: root
+        group: root
+        mode: "0600"
+        validate: /usr/bin/sing-box check -c %s
+      become: true
+      no_log: true
+      diff: false
+      notify: Stop Discord VPN to apply changes on next launch
+
+    - name: Configure DNS only for processes launched in the namespace
+      ansible.builtin.copy:
+        content: "nameserver 172.31.255.2\noptions timeout:2 attempts:2\n"
+        dest: /etc/netns/discord-vpn/resolv.conf
+        owner: root
+        group: root
+        mode: "0644"
+      become: true
+
+    - name: Keep namespace hostname lookups away from the host resolved Unix socket
+      ansible.builtin.copy:
+        content: >-
+          {{ lookup('ansible.builtin.file', '/etc/nsswitch.conf') |
+             regex_replace('(?m)^hosts:.*$', 'hosts: files dns') }}
+        dest: /etc/netns/discord-vpn/nsswitch.conf
+        owner: root
+        group: root
+        mode: "0644"
+      become: true
+
+    - name: Install the opt-in service
+      ansible.builtin.copy:
+        src: discord-vpn.service
+        dest: /etc/systemd/system/discord-vpn.service
+        owner: root
+        group: root
+        mode: "0644"
+      become: true
+      notify: Stop Discord VPN to apply changes on next launch
+
+    - name: Install the unprivileged Discord launcher
+      ansible.builtin.copy:
+        src: discord-vpn
+        dest: /usr/local/bin/discord-vpn
+        owner: root
+        group: root
+        mode: "0755"
+      become: true
+
+    - name: Install the separate desktop menu entry
+      ansible.builtin.copy:
+        src: discord-vpn.desktop
+        dest: /usr/share/applications/discord-vpn.desktop
+        owner: root
+        group: root
+        mode: "0644"
+      become: true
+
+    - name: Reload systemd without enabling or starting the opt-in VPN
+      ansible.builtin.systemd_service:
+        daemon_reload: true
+        name: discord-vpn.service
+        enabled: false
+      become: true
+
+  handlers:
+    - name: Stop Discord VPN to apply changes on next launch
+      ansible.builtin.systemd_service:
+        name: discord-vpn.service
+        state: stopped
+      become: true

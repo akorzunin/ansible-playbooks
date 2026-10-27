@@ -82,6 +82,32 @@ class ProfileTests(unittest.TestCase):
             removed = json.loads((output / "linux.json").read_text())
             self.assertNotIn("cherry-ssh", removed["outbounds"][0]["outbounds"])
 
+    def test_trial_vless_naive_chain_reuses_credentials_without_changing_defaults(self):
+        extra = [
+            {"type": "vless", "tag": "cherry-vless", "uuid": "test-uuid", "flow": "xtls-rprx-vision",
+             "tls": {"enabled": True, "reality": {"public_key": "test-key"}}},
+            {"type": "naive", "tag": "cherry-naive"},
+        ]
+        original = json.loads(json.dumps(extra))
+        with tempfile.TemporaryDirectory() as work, patch.object(generate.subprocess, "run"):
+            output = Path(work)
+            generate.generate(output, self.connections, self.tokens, extra)
+            for platform, order in generate.ORDERS.items():
+                profile = json.loads((output / f"{platform}.json").read_text())
+                by_tag = {o["tag"]: o for o in profile["outbounds"]}
+                self.assertEqual(by_tag["cherry-vless-via-naive"], {
+                    **extra[0], "tag": "cherry-vless-via-naive", "detour": "cherry-naive",
+                })
+                self.assertIn("cherry-vless-via-naive", by_tag["proxy"]["outbounds"])
+                self.assertEqual(by_tag["proxy"]["default"], order[0])
+            self.assertEqual(extra, original)
+            generate.generate(output, self.connections, self.tokens, extra[:1])
+            self.assertNotIn("cherry-vless-via-naive", (output / "linux.json").read_text())
+            with self.assertRaises(ValueError):
+                generate.generate(output, self.connections, self.tokens, [
+                    *extra, {"type": "vless", "tag": "cherry-vless-via-naive"},
+                ])
+
     def test_workstation_hop_adds_chained_ssh_for_nt1_and_cherry(self):
         self.connections["ssh"].update(server="192.0.2.1", host_key=["nt1-key"])
         cherry = {"type": "ssh", "tag": "cherry-ssh", "server": "192.0.2.2",

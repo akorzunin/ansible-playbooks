@@ -43,11 +43,16 @@ supplied Windows profile, so VLESS connectivity (and consequently UDP) needs
 separate investigation; hosting/config distribution itself is working. Those
 observations refer to the earlier nt1-only trial, not the new Cherry VLESS endpoint.
 
-Current Cherry publication: `cherry-ssh`, `cherry-naive` and `cherry-vless` are
-available alongside nt1 through the same private URLs/tokens, with existing nt1
+Current Cherry publication: `cherry-ssh`, `cherry-naive`, `cherry-vless` and
+`cherry-vless-via-naive` are available through the same private URLs/tokens, with existing nt1
 defaults retained. All three public platform files matched generated contents.
-The fetched Linux profile passed six isolated direct checks (three protocols,
-two HTTPS targets) with the Amsterdam node's egress. This workstation was **not
+The initial fetched Linux profile passed six isolated direct checks (three protocols,
+two HTTPS targets) with the Amsterdam node's egress. Later direct Cherry VLESS
+checks failed at the REALITY handshake despite matching server credentials;
+the identical VLESS settings passed through both SSH and Naïve carriers. This
+suggests a direct-path problem, not a proven cause or a credential mismatch.
+The Naïve chain passed 20/20 STUN replies, 10/10 HTTPS probes and 5 MB transfers
+in both directions, exiting through Cherry. Real Discord voice testing is pending. This workstation was **not
 enrolled** by user choice: its active local `ssh-via-workstation` fallback and
 inactive updater timer remain unchanged. Refresh already-enrolled remote profiles
 to see the new options; merely having these published does not enroll a local
@@ -94,6 +99,65 @@ These three protocols all use **the same nt1 host**. Protocol selection is not
 redundancy against a complete nt1 outage. Publish a replacement server through
 the independent config endpoint to recover, or add a second server deliberately.
 
+## Discord-only Linux networking (opt-in)
+
+An HTTP/system proxy does not capture Discord's WebRTC UDP. `sb test` uses its
+own UDP-capable SOCKS probe; a passing result alone does not fix the application.
+The separate `discord-vpn` launcher captures **only Discord and its children**:
+
+```text
+Discord → namespace TUN → VLESS → Naïve HTTPS → dyn1 VLESS → Internet
+```
+
+Only the TUN and its routes are created in the `discord-vpn` network namespace
+(sing-box 1.14+). The separate core and its outbound sockets stay in the host
+namespace. No host default routes, forwarding, NAT, global TUN or changes to the
+main sing-box service are needed. Application DNS is proxied; only resolving
+the Naïve server's hostname uses host DNS to bootstrap the connection. There is
+no direct fallback inside this namespace. UDP-over-TCP can stall under packet
+loss; passing STUN probes is not a voice-quality guarantee.
+
+Install from the Cherry worktree after restoring its private client export:
+
+```sh
+ansible-playbook -i localhost, --vault-password-file .ansible_pass \
+  -e sing_box_extra_outbounds_file="$PWD/infra/cherry-vpn/private/cherry-outbounds.json" \
+  playbooks/sing-box-configs/linux-discord.yaml
+```
+
+This validates the profiles and installs root-only credentials in
+`/etc/sing-box-discord/config.json`, an opt-in service, and the launcher/menu
+entry. It does not publish profiles, enroll the host, start Discord or enable
+boot-time startup. Rerun after credential rotation; the dedicated config is a
+snapshot, not an automatically refreshed subscription. The private Cherry export
+is created by the `vpn_node` role and is not stored in Git.
+
+Quit existing Discord instances, then run `discord-vpn` as your desktop user
+(or choose **Discord (VPN only)** from the menu). Sudo is required to start/join
+the namespace; Electron itself runs as your normal user, not root. The ordinary
+Discord launcher remains unchanged. Do not start both launchers concurrently:
+Electron can forward a second launch to the already-running instance.
+
+After reboot into 7.2.11, the namespace TUN started successfully. DNS, HTTPS and
+20/20 native UDP/STUN requests passed as the desktop user inside the namespace,
+without an explicit application proxy. HTTPS and STUN reported dyn1's exit IP;
+host IPv4/IPv6 routes and routing rules remained unchanged. The earlier missing
+TUN module issue is resolved. The Discord GUI and a real voice call still need
+user verification: launch `discord-vpn` and join a voice channel. Diagnostics:
+
+```sh
+sudo journalctl -u discord-vpn.service -n 30 --no-pager
+sudo ip -n discord-vpn route show table all
+sudo ip netns exec discord-vpn curl --noproxy '*' -I https://www.gstatic.com/generate_204
+sudo systemctl stop discord-vpn.service  # stop after quitting Discord
+```
+
+Stopping the service removes the namespace name/TUN; running namespace apps
+lose connectivity rather than falling back directly. For removal, stop it,
+then delete `/etc/sing-box-discord`, `/etc/netns/discord-vpn`,
+`/etc/systemd/system/discord-vpn.service`, `/usr/local/bin/discord-vpn` and
+`/usr/share/applications/discord-vpn.desktop`, then `sudo systemctl daemon-reload`.
+
 ## Additional VPN nodes
 
 Optionally add `sing_box_secrets.extra_outbounds` to `secrets.vault.yaml`: a list
@@ -104,6 +168,12 @@ The installed sing-box core validates all platforms before any local profile
 is replaced. Keep private keys/passwords in Vault, not templates or command-line
 arguments. SSH outbounds must pin the independently verified server `host_key`;
 only distribute an unprivileged tunnel key, never an administrator key.
+
+For each extra `<node>-vless` with a matching `<node>-naive` carrier, generation
+also derives `<node>-vless-via-naive` with identical VLESS credentials and a Naïve
+`detour`. Existing direct options/defaults remain unchanged; removing either
+connection removes the derived choice. Generated tags must be unique. The
+carrier only needs TCP CONNECT, not native UDP support.
 
 The Vault also contains a pinned `workstation-hop` SSH outbound in `extra_outbounds`.
 When it is present, generation clones each non-detoured SSH exit (including nodes

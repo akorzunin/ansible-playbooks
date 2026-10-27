@@ -1,0 +1,15 @@
+[Unit]
+Description=Discord-only VLESS-over-Naive network namespace
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=/usr/bin/ip netns add discord-vpn
+ExecStartPre=/usr/bin/ip -n discord-vpn link set lo up
+ExecStart=/usr/bin/sing-box run -c /etc/sing-box-discord/config.json
+ExecStopPost=/usr/bin/ip netns delete discord-vpn
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
