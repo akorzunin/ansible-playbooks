@@ -195,6 +195,12 @@ rejects a different merely prepared/pending key. It writes mode-0600 strict
 `known_hosts` without trusting a scan, plus JSON-formatted YAML inventory. Preserve
 its `cherry_server_id`; reruns retain a saved `vpnadmin` user and controller proxy
 for the same VM. Switch the inventory from root to `vpnadmin` after bootstrap.
+Full `deploy.yaml` also refreshes the managed `dyn1` block in the shared `hosts`
+after verifying administrator SSH/sudo, preserving unrelated Vault records and
+the inventory symlink. Run it after each replacement so manual access follows the
+new IP, administrator key and strict host-key file. `ssh-sel.nu` must honor
+`ansible_ssh_private_key_file` and `ansible_ssh_common_args`; the dotfiles version
+now does (including quoted proxy options).
 Do not put an idle timeout on `nc`; SSH keepalives protect long installs.
 
 For a deliberate future replacement, prepare a fresh identity with

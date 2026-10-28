@@ -12,6 +12,27 @@
     vpn_node_name: cherry
     vpn_node_domain: akorz-dyn1.duckdns.org
   pre_tasks:
+    # The imported bootstrap has verified a fresh non-root connection and sudo.
+    # Update the manual-access alias too, not only the disposable vpn_test inventory.
+    - name: Refresh dyn1 access after verified administrator bootstrap
+      ansible.builtin.blockinfile:
+        path: "{{ playbook_dir }}/../../hosts"
+        marker: "# {mark} ANSIBLE BOOTSTRAP dyn1"
+        block: |
+          bootstrap_dyn1:
+            hosts:
+              dyn1:
+                ansible_host: {{ ansible_host | to_json }}
+                ansible_port: {{ ansible_port | default(22) | int }}
+                ansible_user: {{ ansible_user | to_json }}
+                ansible_python_interpreter: /usr/bin/python3
+                ansible_ssh_private_key_file: {{ ansible_ssh_private_key_file | to_json }}
+                ansible_ssh_common_args: {{ ansible_ssh_common_args | to_json }}
+        backup: true
+        mode: "0600"
+      delegate_to: localhost
+      become: false
+
     - name: Load shared external variables for DuckDNS
       ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../../external_vars.yml"
