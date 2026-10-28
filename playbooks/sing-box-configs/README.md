@@ -1,6 +1,6 @@
 # Remote sing-box profiles
 
-Full Android, Windows and Linux profiles are served from the workstation through
+Full Android, Windows and Linux profiles (also used on macOS) are served from the workstation through
 `https://configs.akorz.duckdns.org`, with HTTPS terminated by the existing Pi Caddy.
 Clients remember a stable private URL; republishing replaces its content, not its URL.
 No subscription converter or management database is needed.
@@ -12,6 +12,8 @@ Private enrollment artifacts are generated in `private/` (ignored by Git, mode 0
 - `urls.json`: paste the appropriate HTTPS URL into a **remote** profile in the client.
 - `import-links.json`: `sing-box://import-remote-profile` links for compatible clients.
 - `tokens.json`: generated copy of the shared Vault tokens, not their source of truth.
+- `setup-links.json`: private, rerunnable Windows/macOS setup links. macOS shares the Linux token/profile.
+- `setup-windows.ps1` and `setup-macos.sh`: rendered scripts containing private profile URLs; never share publicly.
 
 For Android, use sing-box for Android. For Windows, use a client that accepts full
 sing-box JSON remote profiles and supports Naïve, SSH, selectors and URLTest.
@@ -93,7 +95,12 @@ and a fresh controller never generates replacement tokens.
   TLS with hidden SNI (ECH) may not match: a domain rule alone cannot guarantee
   bypass for those; use DNS mapping or destination IP rules if needed.
 - Rule-set downloads use direct routing.
-- Clash API/group controls bind only to `127.0.0.1:9091`.
+- Clash API/group controls bind only to `127.0.0.1:9091`, with secret `admin`.
+  Open <https://yacd.metacubex.one> and add `http://127.0.0.1:9091` with that secret.
+  Only that HTTPS origin is allowed by CORS; private-network browser access is enabled.
+  Allow the browser's local-network permission if prompted. The simple shared secret
+  is intentional for a personal loopback-only API, not a security boundary against
+  local processes. Never expose the controller on LAN/public interfaces.
 
 These three protocols all use **the same nt1 host**. Protocol selection is not
 redundancy against a complete nt1 outage. Publish a replacement server through
@@ -326,6 +333,66 @@ ansible-vault view --vault-password-file .ansible_pass \
 python -m unittest discover -s playbooks/sing-box-configs -p 'test_*.py'
 ```
 
+## Windows and macOS manual setup/refresh
+
+Publish first, then securely give the user the corresponding link from
+`private/setup-links.json`. No Vault password or repository checkout is needed on
+client machines. The link downloads executable code containing a private enrollment
+URL: trust the hosting endpoint, treat the link as a password, and inspect the script
+before running it if desired. Source scripts with `__PROFILE_URL__` are templates;
+use the **published** links, not raw GitHub source links.
+
+On Windows 10/11 (x64/ARM64), open **PowerShell as Administrator**, replace the placeholder
+with the private Windows setup link, and run:
+
+```powershell
+& ([scriptblock]::Create((curl.exe --noproxy '*' --proto '=https' --fail --silent 'PASTE_WINDOWS_SETUP_LINK' | Out-String)))
+```
+
+On macOS (Apple Silicon/Intel), open Terminal as your ordinary desktop user
+(**not** sudo), replace the placeholder with the private macOS setup link, and run:
+
+```sh
+setup=$(mktemp)
+curl --noproxy '*' --proto '=https' -fsS 'PASTE_MACOS_SETUP_LINK' -o "$setup" && /bin/bash "$setup"
+rm -f "$setup"
+```
+
+**Rerun the same command/link whenever a new config is wanted.** There is no polling
+or scheduled config pull. Each run fetches the current profile directly, validates it
+with `sing-box check`, and restarts the managed instance, even if the file is unchanged.
+Download/validation failures retain the current config; immediate startup failures
+restore previous files and attempt to restart the previous instance. The short startup
+check only checks process liveness, not connectivity.
+
+If no core is installed, setup installs the pinned official **1.14.2** release after
+SHA-256 verification (Windows includes `libcronet.dll`). A core on `PATH` is reused;
+Windows copies it and any adjacent Cronet DLL into its protected directory. Existing
+GUI applications/services are **not** migrated or overwritten: quit/disable them
+before enrolling to avoid competing listeners/routes. Reused cores must support
+Naïve, SSH, TUN (Windows), and Clash API. Incompatible cores fail validation; upgrade
+them yourself, or remove the managed `core` directory to let the next setup reinstall.
+The scripts do not automatically upgrade the core on each refresh.
+
+- Windows stores credentials/core in administrator/SYSTEM-only
+  `%ProgramData%\\sing-box-remote`. Task Scheduler's `sing-box-remote-profile` runs the
+  core as SYSTEM now and at boot. The Windows profile retains its system-wide TUN.
+- macOS stores credentials/core/logs in the private
+  `~/Library/Application Support/sing-box-remote` directory and installs the user
+  LaunchAgent `io.github.akorzunin.sing-box-remote`, running now and at login.
+  It uses the **unchanged Linux profile**, with HTTP/SOCKS at `127.0.0.1:12334`:
+  configure your apps or macOS HTTP/HTTPS proxy settings to use it. No TUN, system
+  proxy changes or root privileges are added on macOS. An app's own bundled core
+  outside `PATH` is not detected.
+
+To stop/uninstall, disable/delete the Windows task in Task Scheduler and remove its
+managed directory. On macOS, run
+`launchctl bootout "gui/$(id -u)/io.github.akorzunin.sing-box-remote"`, then remove
+`~/Library/LaunchAgents/io.github.akorzunin.sing-box-remote.plist` and the managed
+directory. Undo any manually configured macOS proxy settings as well.
+Native Windows/macOS runtime testing is still required; Linux tests simulate the
+macOS commands and do not prove OS-specific task/LaunchAgent behavior.
+
 ## Linux automatic updates
 
 Enroll the machine running Ansible (requires an existing `/etc/sing-box/config.json`):
@@ -372,7 +439,8 @@ container publishes only `192.168.1.132:18085`, not all host interfaces. Do **no
 forward this port through the router. The workstation's edge Caddy proxies to this
 local HTTP listener. Public clients must use HTTPS.
 
-Only exact token/platform paths and GET/HEAD are served. Missing/wrong tokens,
+Only exact token/platform profile paths, Windows setup under the Windows token,
+macOS setup under the Linux token, and GET/HEAD are served. Missing/wrong tokens,
 directory requests and other files return 404. Responses use `Cache-Control: no-store`.
 Hosting request logs are disabled; edge Caddy structured logs redact request URIs and
 headers to avoid leaking enrollment URLs during reverse-proxy errors.

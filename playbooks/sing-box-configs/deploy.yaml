@@ -54,6 +54,17 @@
       no_log: true
       diff: false
 
+    - name: Publish private desktop setup scripts
+      ansible.builtin.copy:
+        src: "private/{{ item }}"
+        dest: "{{ config_dir }}/profiles/{{ item }}"
+        owner: root
+        group: root
+        mode: "0600"
+      loop: [setup-windows.ps1, setup-macos.sh]
+      no_log: true
+      diff: false
+
     - name: Render token-protected static hosting
       ansible.builtin.template:
         src: Caddyfile.j2
@@ -234,6 +245,22 @@
         public_profile.json.route.final != 'proxy' or
         public_profile.cache_control != 'no-store'
 
+    - name: Verify private desktop setup links
+      ansible.builtin.uri:
+        url: "{{ config_setup_urls[item] }}"
+        return_content: true
+        use_proxy: false
+        status_code: 200
+      vars:
+        config_setup_urls: "{{ lookup('ansible.builtin.file', playbook_dir + '/private/setup-links.json') | from_json }}"
+      loop: [windows, macos]
+      register: public_setup
+      no_log: true
+      failed_when: >-
+        public_setup.status != 200 or
+        '__PROFILE_URL__' in public_setup.content or
+        public_setup.cache_control != 'no-store'
+
     - name: Verify missing tokens are rejected
       ansible.builtin.uri:
         url: https://configs.akorz.duckdns.org/android.json
@@ -242,4 +269,7 @@
 
     - name: Report private enrollment file locations
       ansible.builtin.debug:
-        msg: "URLs: {{ playbook_dir }}/private/urls.json; client import links: {{ playbook_dir }}/private/import-links.json"
+        msg: >-
+          URLs: {{ playbook_dir }}/private/urls.json;
+          client import links: {{ playbook_dir }}/private/import-links.json;
+          desktop setup links: {{ playbook_dir }}/private/setup-links.json

@@ -44,6 +44,12 @@ class ProfileTests(unittest.TestCase):
                 self.assertGreater(rules.index(udp), 1)
                 self.assertEqual(udp["outbound"], "proxy")
                 self.assertNotIn("cache_file", result["experimental"])
+                self.assertEqual(result["experimental"]["clash_api"], {
+                    "external_controller": "127.0.0.1:9091",
+                    "secret": "admin",
+                    "access_control_allow_origin": ["https://yacd.metacubex.one"],
+                    "access_control_allow_private_network": True,
+                })
                 for inbound in result["inbounds"]:
                     if inbound["type"] == "tun":
                         self.assertNotIn("stack", inbound)
@@ -229,6 +235,22 @@ class ProfileTests(unittest.TestCase):
             self.assertEqual(output.stat().st_mode & 0o777, 0o700)
             for artifact in output.iterdir():
                 self.assertEqual(artifact.stat().st_mode & 0o777, 0o600)
+
+    def test_private_setup_links_embed_the_matching_stable_profile_url(self):
+        with tempfile.TemporaryDirectory() as work, patch.object(generate.subprocess, "run"):
+            output = Path(work)
+            generate.generate(output, self.connections, self.tokens)
+            urls = json.loads((output / "urls.json").read_text())
+            links = json.loads((output / "setup-links.json").read_text())
+            for system, platform, suffix in (("windows", "windows", "ps1"), ("macos", "linux", "sh")):
+                name = f"setup-{system}.{suffix}"
+                script = (output / name).read_text()
+                self.assertIn(urls[platform], script)
+                self.assertNotIn("__PROFILE_URL__", script)
+                self.assertEqual(links[system], f"https://{generate.DOMAIN}/{self.tokens[platform]}/{name}")
+            before = {name: (output / name).read_bytes() for name in ("setup-links.json", "setup-macos.sh", "setup-windows.ps1")}
+            generate.generate(output, self.connections, self.tokens, [{"type": "ssh", "tag": "new-node"}])
+            self.assertEqual(before, {name: (output / name).read_bytes() for name in before})
 
     def test_failed_validation_does_not_replace_published_profiles(self):
         with tempfile.TemporaryDirectory() as work:

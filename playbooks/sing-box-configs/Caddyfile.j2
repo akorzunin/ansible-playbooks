@@ -24,6 +24,17 @@
         file_server
     }
 {% endfor %}
+{% for platform, script in [('windows', 'setup-windows.ps1'), ('linux', 'setup-macos.sh')] %}
+    @setup_{{ platform }} {
+        method GET HEAD
+        path /{{ config_tokens[platform] }}/{{ script }}
+    }
+    handle @setup_{{ platform }} {
+        rewrite * /{{ script }}
+        root * /profiles
+        file_server
+    }
+{% endfor %}
     handle {
         respond "Not found" 404
     }

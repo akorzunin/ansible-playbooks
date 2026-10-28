@@ -65,7 +65,12 @@ def make_profile(base, connections, order, extra_outbounds=()):
             # deprecated implicit client; detouring to an empty direct is rejected.
             rule_set["http_client"] = {"engine": "go"}
     experimental = profile.setdefault("experimental", {})
-    experimental["clash_api"] = {"external_controller": "127.0.0.1:9091"}
+    experimental["clash_api"] = {
+        "external_controller": "127.0.0.1:9091",
+        "secret": "admin",
+        "access_control_allow_origin": ["https://yacd.metacubex.one"],
+        "access_control_allow_private_network": True,
+    }
     # Do not restore an old selector choice after publishing a new default.
     experimental.pop("cache_file", None)
     return profile
@@ -140,6 +145,13 @@ def generate(private_dir, connections, tokens, extra_outbounds=()):
     imports = {p: f"sing-box://import-remote-profile?url={quote(url, safe='')}#nt1-{p}"
                for p, url in urls.items()}
     private_write(private_dir / "import-links.json", json.dumps(imports, indent=2) + "\n")
+    setup_links = {}
+    for system, platform, suffix in (("windows", "windows", "ps1"), ("macos", "linux", "sh")):
+        name = f"setup-{system}.{suffix}"
+        script = (ROOT / name).read_text().replace("__PROFILE_URL__", urls[platform])
+        private_write(private_dir / name, script)
+        setup_links[system] = f"https://{DOMAIN}/{tokens[platform]}/{name}"
+    private_write(private_dir / "setup-links.json", json.dumps(setup_links, indent=2) + "\n")
 
 
 if __name__ == "__main__":
