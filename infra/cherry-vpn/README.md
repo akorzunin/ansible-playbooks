@@ -1,7 +1,7 @@
 # Budget VPN experiment
 
 Supervised trial: one disposable hourly VM, native SSH forwarding, and optional
-Dockerized Naïve and VLESS/REALITY, with Linux as the first client. Existing nt1,
+Dockerized Naïve, VLESS/REALITY and Hysteria 2/Brutal, with Linux as the first client. Existing nt1,
 application servers and active client configuration are kept separate. Full
 deployment now also registers Cherry in the existing monitoring stack and installs
 isolated workstation probes with Grafana/Telegram alerts. No automatic allocation,
@@ -57,13 +57,108 @@ the new choices on refresh; selection is manual, not automatic failover.
 `ssh-via-workstation` selection/local fallback remains active, no enrollment file
 was created and its update timer remains inactive. Published-profile testing used
 a temporary isolated core, not the active service. Private configs/results are
-in `private/`. UDP, sustained stability, other client platforms and autonomous
-replacement remain unverified.
+in `private/`. At that stage, UDP, sustained stability, other client platforms and
+autonomous replacement remained unverified; see the later Hysteria 2 trial below.
 
 The catalogue quote remains EUR 0.015/hour; the server API has reported a EUR 0.02
 hourly unit price. The user accepted API pricing; these fields are not a verified
 all-inclusive bill. The DuckDNS token's missing YAML `!vault |` marker was corrected
 without changing its encrypted ciphertext or `external_vars.yml` symlink.
+
+## Hysteria 2 / Brutal in the dynamic-node flow
+
+Initially deployed on dyn1 on 2026-10-28 through [`hysteria2.yaml`](hysteria2.yaml).
+Hysteria 2 is now also part of the normal [`deploy.yaml`](deploy.yaml) flow, after
+Naïve obtains its certificate and before combined client export and monitoring.
+It reuses the existing `vpn-hysteria2` Compose project in `/srv/deploy/vpn-hysteria2`
+and the same digest-pinned sing-box 1.14.4 image as VLESS: no trial-to-full migration
+or second listener is needed. It publishes **UDP/443**; Naïve keeps TCP/443 and
+VLESS keeps TCP/8443.
+
+The user found it less stable than SSH. Keep it as an additional manual option,
+not a replacement or new default. The normal flow exports all four protocols and
+configures eight monitoring checks (two destinations per protocol); publication
+remains explicit. No active-client change is made.
+
+The Hysteria-only entry point below is retained for scoped redeployment without
+reconfiguring the other services, DNS or monitoring:
+
+Requirements: the existing pinned private inventory, non-root `vpnadmin` sudo,
+Docker/Compose, `vpnproxy` account and Naïve's valid domain certificate. The
+container mounts only that domain's certificate directory read-only, not Caddy's
+ACME account keys. Caddy still owns renewal; sing-box reloads changed certificate
+and key files. A provider firewall, if added, must allow UDP/443.
+
+```sh
+ansible-playbook -i infra/cherry-vpn/private/inventory.yaml \
+  --vault-password-file .ansible_pass infra/cherry-vpn/hysteria2.yaml
+```
+
+Both entry points load the same `infra/cherry-vpn/hysteria2.vault.yaml`. **Restore
+this encrypted file** with `secrets.vault.yaml` on new controllers; replacements
+reuse it and never generate a new password. For a new project only, prepare it
+before deployment with `python infra/cherry-vpn/prepare-secrets.py --hysteria2`.
+This writes directly into Vault using `.ansible_pass` and refuses existing files
+or symlinks. The original trial password is preserved. Plaintext exports under
+`private/` must not be committed. Run deployment without `--check`.
+
+Initial client targets are **20 Mbps download / 5 Mbps upload**, not measured
+capacity. Both positive client bandwidth fields select Brutal rather than BBR;
+server caps are set in the opposite directions. Tune the two
+`vpn_node_hysteria2_download_mbps` / `vpn_node_hysteria2_upload_mbps` variables with
+`-e` when rerunning, based on sustained path measurements rather than ISP line rate.
+Do not increase them merely to make a speed test look faster.
+
+Normal deployment appends `cherry-hysteria2` to `private/cherry-outbounds.json`
+and adds port `12343` to the combined `private/cherry-test.json`. Existing protocol
+order and the test profile's SSH default are preserved. The existing publisher
+accepts this fourth outbound without changing platform defaults or enrollment URLs.
+
+Additional Hysteria-only artifacts remain available (do not run both test clients
+simultaneously, since they share port `12343`):
+
+- `private/cherry-hysteria2-test.json`: isolated Linux mixed HTTP/SOCKS listener,
+  `127.0.0.1:12343`, no TUN or API. Uses the existing Linux bypass mark `0x2024`
+  so the outer QUIC connection avoids the active VPN. Requires sudo for `SO_MARK`;
+  verify `ip route get 84.32.231.93 mark 0x2024` uses the physical uplink on this
+  workstation. Recheck the bypass mark if the active VPN routing changes.
+- `private/cherry-hysteria2-outbounds.json`: portable outbound, verified TLS/SNI,
+  no Linux-specific mark; not merged into any published profile.
+
+Start the isolated client in a terminal, then test from another:
+
+```sh
+sudo sing-box run -c infra/cherry-vpn/private/cherry-hysteria2-test.json
+# In another terminal:
+curl --disable --fail --noproxy '' --proxy http://127.0.0.1:12343 \
+  --connect-timeout 10 --max-time 20 https://api.ipify.org/
+```
+
+For a Twitch trial, configure **both HTTP and HTTPS proxy** to `127.0.0.1:12343`
+in a separate browser profile. Keep the same stream/quality and compare stall
+frequency/duration against the existing VPN over longer sessions. Stop the test
+client with Ctrl-C afterward. This does not switch the machine's active VPN.
+
+**Initial observations:** direct marked workstation-to-dyn1 QUIC succeeded with
+certificate verification enabled, returned egress `84.32.231.93`, and passed a
+second independent HTTPS check. Two 30,000,000-byte Cloudflare downloads completed
+in 12.36 / 12.34 seconds (about 19.4 Mbps payload throughput). An intentionally
+invalid password was explicitly rejected. A second deployment reported zero
+changes; existing Naïve/VLESS container IDs and uptimes were preserved. These
+short checks do **not** establish long-term consistency or Twitch playback quality.
+The temporary smoke clients were stopped; only the server remains running.
+
+To temporarily stop/remove only the Hysteria 2 container and its dedicated network
+(the next normal deployment will restore it):
+
+```sh
+ansible -i infra/cherry-vpn/private/inventory.yaml cherry_vpn_test \
+  -e ansible_host_key_checking=true -e ansible_become_flags=-n -b \
+  -m ansible.builtin.command \
+  -a 'docker compose -p vpn-hysteria2 -f /srv/deploy/vpn-hysteria2/compose.yaml down'
+```
+
+Credentials, certificate state and other VPN services are left intact.
 
 ## Monitoring and suspected blocking
 
@@ -98,10 +193,12 @@ What is checked:
 - **Real protocol requests:** a separate Compose project deployed through the
   existing `deploy_compose` role runs unprivileged `client` and `probe` containers.
   They share a network namespace: only the probe reaches the client's loopback
-  listeners on ports 22340–22342; no ports are published to the workstation.
-  Every minute the probe uses Cherry's pinned SSH key,
-  Naïve credentials/TLS and VLESS/REALITY credentials. Curl requests gstatic and
-  Cloudflare HTTPS through each protocol (six checks, including remote DNS).
+  listeners on ports 22340–22343; no ports are published to the workstation.
+  Every minute the probe uses Cherry's pinned SSH key, Naïve credentials/TLS,
+  VLESS/REALITY credentials and Hysteria 2 password/TLS. Curl requests gstatic and
+  Cloudflare HTTPS through each protocol (eight checks, including remote DNS).
+  Regenerate the four-protocol export before redeploying monitoring; an old
+  three-protocol export is rejected.
   There is no direct outbound fallback, TUN or modification of the active client.
 - **Direct controls:** HTTPS to `example.com` and `www.wikipedia.org`, without
   curlrc or inherited proxy variables. Both must pass. Verify these sites are
@@ -126,7 +223,7 @@ The playbook saves a managed block in the private monitoring overlay (with backu
 so ordinary `ws-logs/deploy.yml` runs retain Cherry and probe alerts without loading
 its private inventory. Rerun full Cherry deployment after replacement to refresh
 its metrics address, host pin and isolated probe credentials. It verifies Cherry's
-host/container metrics and all six probe series in Prometheus; this checks collection,
+host/container metrics and all eight probe series in Prometheus; this checks collection,
 not that VPN requests passed. Inspect `vpn_probe_success` and test the existing
 **Monitoring Telegram** contact point in Grafana after deployment.
 
@@ -151,8 +248,9 @@ normal monitoring inventory process if destroying the VM.
 
 ## Secure automatic bootstrap
 
-For a new deployment only, create `secrets.vault.yaml` with `prepare-secrets.py`.
-For an existing deployment **reuse that encrypted file** and add/retain its
+For a new deployment only, create `secrets.vault.yaml` with `prepare-secrets.py`
+and `hysteria2.vault.yaml` with `prepare-secrets.py --hysteria2`.
+For an existing deployment **reuse both encrypted files** and add/retain the main Vault's
 bootstrap identity and random state-encryption passphrase:
 
 ```sh

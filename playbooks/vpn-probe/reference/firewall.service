@@ -1,0 +1,22 @@
+[Unit]
+Description=Source guard for native VPN reference listeners only
+Before=vpn-reference.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 -E -s /opt/vpn-reference/firewall.py apply --config /etc/vpn-reference/config.json
+ExecStop=/usr/bin/python3 -E -s /opt/vpn-reference/firewall.py remove
+TimeoutStartSec=10
+TimeoutStopSec=10
+User=root
+UMask=0077
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_NET_ADMIN
+RestrictAddressFamilies=AF_NETLINK AF_UNIX
+StandardOutput=null
+StandardError=null

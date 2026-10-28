@@ -16,5 +16,9 @@
 - name: Package and configure the pinned proxy servers
   ansible.builtin.import_tasks: proxies.yaml
 
+# Naive must obtain its certificate before Hysteria 2 can mount it read-only.
+- name: Configure Hysteria 2 alongside the TCP protocols
+  ansible.builtin.import_tasks: hysteria2.yaml
+
 - name: Export verified client connections for the profile publisher
   ansible.builtin.import_tasks: clients.yaml

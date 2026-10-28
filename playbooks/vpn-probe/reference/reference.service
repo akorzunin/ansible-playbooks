@@ -1,0 +1,42 @@
+[Unit]
+Description=Finite VPN reference endpoint (one lease, no restart)
+Requires=vpn-reference-firewall.service
+After=vpn-reference-firewall.service
+BindsTo=vpn-reference-firewall.service
+
+[Service]
+Type=simple
+DynamicUser=yes
+User=vpn-reference
+SupplementaryGroups=
+LoadCredential=config.json:/etc/vpn-reference/config.json
+LoadCredential=cert.pem:/etc/vpn-reference/cert.pem
+LoadCredential=key.pem:/etc/vpn-reference/key.pem
+ExecStart=/usr/bin/python3 -I /opt/vpn-reference/endpoint.py --config %d/config.json
+StateDirectory=vpn-reference
+StateDirectoryMode=0700
+UMask=0077
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectProc=invisible
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_INET AF_UNIX
+LockPersonality=yes
+MemoryMax=192M
+MemorySwapMax=0
+CPUQuota=75%
+TasksMax=24
+LimitNOFILE=64
+LimitFSIZE=2097152
+RuntimeMaxSec=900
+TimeoutStopSec=5
+KillMode=control-group
+Restart=no
+StandardOutput=null
+StandardError=null

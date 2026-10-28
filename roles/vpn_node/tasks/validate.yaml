@@ -21,8 +21,11 @@
       - vpn_node_credentials.reality_private_key is match('^[a-zA-Z0-9_-]{43}$')
       - vpn_node_credentials.reality_public_key is match('^[a-zA-Z0-9_-]{43}$')
       - vpn_node_credentials.reality_short_id is match('^[0-9a-f]{16}$')
+      - vpn_node_hysteria2_password | length >= 32
+      - vpn_node_hysteria2_download_mbps | int > 0
+      - vpn_node_hysteria2_upload_mbps | int > 0
       - lookup('ansible.builtin.file', vpn_node_ssh_public_key_path) is match('^ssh-ed25519 ')
-    fail_msg: Prepare shared credentials with infra/cherry-vpn/prepare-secrets.py and restore the dedicated SSH keys.
+    fail_msg: Restore both shared VPN Vaults and the dedicated SSH keys before deploying.
   no_log: true
 
 - name: Derive the tunnel public key from the controller private key

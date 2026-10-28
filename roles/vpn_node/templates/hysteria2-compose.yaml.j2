@@ -1,0 +1,27 @@
+services:
+  hysteria2:
+    image: "{{ vpn_node_hysteria2_image }}"
+    command: [run, -c, /etc/vpn/server.json]
+    restart: unless-stopped
+    user: "{{ ansible_facts.getent_passwd.vpnproxy[1] }}:{{ ansible_facts.getent_passwd.vpnproxy[2] }}"
+    # UDP/443 is independent of Naive's TCP/443; use an unprivileged internal port.
+    ports:
+      - "0.0.0.0:443:8443/udp"
+    volumes:
+      - /srv/deploy/vpn-hysteria2/server.json:/etc/vpn/server.json:ro
+      # Mount the domain directory, not individual inodes, so ACME renewal is visible.
+      # Do not expose Caddy's account keys or other domains to this container.
+      - "{{ vpn_node_hysteria2_certificate_dir }}:/etc/vpn/certificate:ro"
+    environment:
+      GOMEMLIMIT: 96MiB
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 192m
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

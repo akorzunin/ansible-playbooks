@@ -1,0 +1,22 @@
+{
+  "log": {"level": "info", "timestamp": true},
+  "inbounds": [
+    {
+      "type": "hysteria2",
+      "tag": "hysteria2-in",
+      "listen": "0.0.0.0",
+      "listen_port": 8443,
+      "up_mbps": {{ vpn_node_hysteria2_download_mbps | int }},
+      "down_mbps": {{ vpn_node_hysteria2_upload_mbps | int }},
+      "ignore_client_bandwidth": false,
+      "users": [{"name": "trial", "password": {{ vpn_node_hysteria2_password | to_json }}}],
+      "tls": {
+        "enabled": true,
+        "server_name": "{{ vpn_node_domain }}",
+        "certificate_path": "/etc/vpn/certificate/{{ vpn_node_domain }}.crt",
+        "key_path": "/etc/vpn/certificate/{{ vpn_node_domain }}.key"
+      }
+    }
+  ],
+  "outbounds": [{"type": "direct", "tag": "direct"}]
+}

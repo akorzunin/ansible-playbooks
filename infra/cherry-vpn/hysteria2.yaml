@@ -1,0 +1,32 @@
+---
+# Opt-in trial only: no bootstrap, DNS updates, profile publication or client restart.
+- name: Deploy isolated Hysteria 2 with Brutal on dyn1
+  hosts: cherry_vpn_test
+  gather_facts: false
+  become: true
+  become_flags: -n
+  vars:
+    ansible_host_key_checking: true
+    vpn_node_name: cherry
+    vpn_node_domain: akorz-dyn1.duckdns.org
+  pre_tasks:
+    - name: Require a single pinned non-root administrator connection
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - ansible_user == 'vpnadmin'
+          - ansible_host_key_checking | bool
+          - "'StrictHostKeyChecking=yes' in ansible_ssh_common_args"
+          - "'UserKnownHostsFile=' in ansible_ssh_common_args"
+          - not ansible_check_mode
+        fail_msg: Use the isolated Cherry inventory and a real deployment run.
+
+    - name: Load the dedicated shared Hysteria 2 credential
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/hysteria2.vault.yaml"
+      no_log: true
+  tasks:
+    - name: Deploy only the isolated Hysteria 2 trial
+      ansible.builtin.import_role:
+        name: vpn_node
+        tasks_from: hysteria2

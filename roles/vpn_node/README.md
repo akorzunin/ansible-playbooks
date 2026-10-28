@@ -2,7 +2,7 @@
 
 Reusable configuration for a **dedicated Debian x86_64 node**, not nt1. The role
 never creates cloud resources, rotates nodes, republishes profiles or changes the
-active client. Native SSH stays on the host; Naïve and VLESS run in Docker.
+active client. Native SSH stays on the host; Naïve, VLESS and Hysteria 2 run in Docker.
 
 | Public port | Service |
 | --- | --- |
@@ -10,11 +10,13 @@ active client. Native SSH stays on the host; Naïve and VLESS run in Docker.
 | TCP 80 | ACME certificate issuance / HTTPS redirect |
 | TCP 443 | Authenticated Naïve HTTP/2 proxy |
 | TCP 8443 | VLESS/REALITY + Vision, sing-box server |
+| UDP 443 | Hysteria 2 + Brutal, sing-box server |
 
 VLESS can relay UDP over its TCP connection; it does not require a public UDP
-listener. SSH and this Naïve setup are TCP-only. UDP and ISP/mobile behavior still
-need separate client tests. Naïve owns port 443; an SNI router would be needed to
-also offer REALITY on 443. There is no Docker socket, management API or panel
+listener. SSH and this Naïve setup are TCP-only. Hysteria 2 uses native QUIC/UDP;
+ISP/mobile behavior and application UDP still need separate client tests. Naïve
+owns TCP/443, independently of Hysteria 2's UDP/443; an SNI router would be needed
+to also offer REALITY on TCP/443. There is no Docker socket, management API or panel
 exposed to clients, and no host firewall is installed by this role.
 
 ## Inputs and deployment
@@ -28,15 +30,17 @@ values must use YAML's `!vault |` tag, not a plain string containing Vault armor
 Other DNS providers must be configured separately. DNS is polled after updating;
 A records must point **only** to this IPv4, with no AAAA records (IPv6 deployment
 is not implemented). Existing records are never automatically cleared. Allow
-inbound TCP 80/443/8443 and SSH in any provider firewall. `vpn_node_reality_server_name`
+inbound TCP 80/443/8443, UDP 443 and SSH in any provider firewall. `vpn_node_reality_server_name`
 defaults to `www.google.com`; its TLS 1.3 handshake endpoint must be reachable from
 the node. Do not repoint nt1's hostname or reuse production credentials.
 
 Restore the existing administrator/probe SSH keys first (see the Cherry guide).
-Generate the shared proxy credentials **once**, encrypted directly into Vault:
+For a new project, generate the shared proxy credentials **once**, encrypted
+directly into two Vaults. For an existing project, restore both files instead:
 
 ```sh
 python infra/cherry-vpn/prepare-secrets.py
+python infra/cherry-vpn/prepare-secrets.py --hysteria2
 ```
 
 Requires Python, OpenSSL and Ansible Vault on the controller. The script writes
@@ -46,7 +50,10 @@ Requires Python, OpenSSL and Ansible Vault on the controller. The script writes
 is produced. Existing files/symlinks are refused, not regenerated. Keep this
 **encrypted** file with shared deployment inputs across controllers and transfer
 the Vault password separately. Replacing a VM must not silently rotate these
-credentials. Do not commit generated plaintext client files.
+credentials. The `--hysteria2` command separately creates `hysteria2.vault.yaml`
+with `vpn_node_hysteria2_password`, also refusing replacement. Both the full Cherry
+deployment and the Hysteria-only entry point load this same Vault; neither
+regenerates a password during node deployment. Do not commit plaintext client files.
 
 The Cherry entry points use `akorz-dyn1.duckdns.org` and load `DUCKDNS_TOKEN` from
 `external_vars.yml`. To update DNS immediately after creating a VM, without
@@ -103,18 +110,25 @@ directory. The role verifies sudo and matching probe keys before changing SSH.
 - Restricted `vpnprobe` native SSH forwarding: no shell/subsystem sessions, agent,
   TTY, remote TCP forwarding or Unix-socket forwarding. Root SSH is disabled only
   after verified non-root sudo access. Host-key checking remains enabled.
-- Docker Engine/Compose and two unprivileged, read-only, capability-dropped
+- Docker Engine/Compose and three unprivileged, read-only, capability-dropped
   containers with memory/PID/log limits. No Docker group access is granted.
 - Naïve `v2.11.7-naive2`: checksum-verified upstream amd64 binary packaged into a
   scratch image, without compilation. VLESS: upstream sing-box `1.14.4`, pinned by
   immutable image digest. The latest Xray `26.10.21` failed REALITY verification
   with the installed sing-box `1.14.2` client in an isolated local test; this role
   does **not** work around that by deploying an older Xray release.
-- Private server configs under `/srv/deploy/vpn-node`, and persistent certificates
-  and ACME account under `/var/lib/vpn-node`. Recreating containers preserves both.
-  Back these up securely; they are not stored in the images.
+- Private Naïve/VLESS configs under `/srv/deploy/vpn-node`, with persistent
+  certificates and ACME account under `/var/lib/vpn-node`. Hysteria 2 reuses the
+  same pinned sing-box image in the separate `/srv/deploy/vpn-hysteria2` Compose
+  project, deployed after Naïve obtains its certificate. Only the domain's
+  certificate directory is mounted read-only; sing-box reloads renewed files.
+  Recreating containers preserves certificate state. Back it up securely.
+- Hysteria 2's initial Brutal targets are 20 Mbps download / 5 Mbps upload, configured
+  by `vpn_node_hysteria2_download_mbps` / `vpn_node_hysteria2_upload_mbps`. These are
+  trial targets, not measured capacity; keep Hysteria 2 as an additional manual
+  choice. The user found SSH more stable. Existing defaults are unchanged.
 
-Both configurations are checked in their pinned containers before activation.
+All server configurations are checked in their pinned containers before activation.
 Reruns preserve credentials/certificates and recreate containers only when their
 image/configuration changes. Syntax checks are not an end-to-end health gate;
 post-activation failure currently needs manual investigation/rollback. DNS moves
@@ -126,19 +140,21 @@ introduced; the operator supervises running nodes and spend.
 ## Linux test, then publish
 
 After successful **node-side** HTTPS/certificate verification, the role exports
-two mode-0600 files. This self-check proves service readiness only; direct
+the following combined mode-0600 files (plus separate Hysteria-only trial files).
+This self-check proves service readiness only; direct
 regional connectivity is tested separately and must gate publication:
 
 - `infra/cherry-vpn/private/cherry-test.json`: isolated mixed listeners, all bound
-  to loopback: SSH `12340`, Naïve `12341`, VLESS `12342`. No TUN, system routing,
+  to loopback: SSH `12340`, Naïve `12341`, VLESS `12342`, Hysteria 2 `12343`. No TUN, system routing,
   Clash API or active-client configuration changes.
-- `infra/cherry-vpn/private/cherry-outbounds.json`: three complete client outbounds
+- `infra/cherry-vpn/private/cherry-outbounds.json`: four complete client outbounds
   for the profile publisher. Contains the **probe**, never administrator, private
   key. The server host key is read through the authenticated administrator
   connection and pinned in the SSH outbound; TLS verification stays enabled.
 
 Start the isolated test client in another terminal (existing listeners cause a
-bind failure, not replacement):
+bind failure, not replacement). Do not run it alongside the Hysteria-only test
+client: both use port `12343`.
 
 ```sh
 sing-box run -c infra/cherry-vpn/private/cherry-test.json
@@ -147,7 +163,7 @@ sing-box run -c infra/cherry-vpn/private/cherry-test.json
 Test each local proxy; its returned egress IPv4 should match the Cherry node:
 
 ```sh
-for port in 12340 12341 12342; do
+for port in 12340 12341 12342 12343; do
   curl --disable --fail --silent --show-error --noproxy '' \
     --proxy "http://127.0.0.1:$port" --connect-timeout 10 --max-time 20 \
     https://api.ipify.org/
@@ -171,7 +187,8 @@ ansible-playbook -i hosts --vault-password-file .ansible_pass \
 sudo systemctl start sing-box-profile-update.service
 ```
 
-Then explicitly select `cherry-ssh`, `cherry-naive` or `cherry-vless` in the
+Then explicitly select `cherry-ssh`, `cherry-naive`, `cherry-vless` or
+`cherry-hysteria2` in the
 client's selector (the Linux Clash API is at `127.0.0.1:9091`). Updating a remote
 profile does not automatically select the new node. Only use already-private
 HTTPS enrollment URLs; they now grant the extra tunnel credentials as well.

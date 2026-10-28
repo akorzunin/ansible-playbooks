@@ -36,10 +36,12 @@ def credentials():
     }
 
 
-def prepare(output, password_file):
+def prepare(output, password_file, *, hysteria2=False):
     if output.exists() or output.is_symlink():
         raise FileExistsError("Refusing to replace shared credentials")
-    payload = json.dumps({"vpn_node_credentials": credentials()}).encode()
+    data = ({"vpn_node_hysteria2_password": secrets.token_urlsafe(32)} if hysteria2
+            else {"vpn_node_credentials": credentials()})
+    payload = json.dumps(data).encode()
     result = subprocess.run(
         ["ansible-vault", "encrypt", "--vault-password-file", str(password_file), "--output", "-"],
         input=payload, check=True, capture_output=True,
@@ -54,11 +56,13 @@ def prepare(output, password_file):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=ROOT / "secrets.vault.yaml")
+    parser.add_argument("--hysteria2", action="store_true", help="Prepare only the dedicated Hysteria 2 Vault")
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--vault-password-file", type=Path, default=ROOT.parent.parent / ".ansible_pass")
     args = parser.parse_args()
     try:
-        prepare(args.output, args.vault_password_file)
+        output = args.output or ROOT / ("hysteria2.vault.yaml" if args.hysteria2 else "secrets.vault.yaml")
+        prepare(output, args.vault_password_file, hysteria2=args.hysteria2)
     except (OSError, ValueError, subprocess.CalledProcessError):
         parser.exit(1, "Credential preparation failed. Existing files are never replaced; check paths and Vault access.\n")
-    print(f"Encrypted shared credentials created: {args.output}")
+    print(f"Encrypted shared credentials created: {output}")

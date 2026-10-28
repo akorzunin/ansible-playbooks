@@ -19,10 +19,10 @@
           - (groups['monitoring_servers'] | first) in groups['monitored_nodes']
         fail_msg: Load hosts, monitoring.inventory.yml and private/inventory.yaml; run without --limit or --check.
 
-    - name: Require the exported three-protocol client profile
+    - name: Require the exported four-protocol client profile
       ansible.builtin.assert:
         that:
-          - cherry_monitor_outbounds | map(attribute='tag') | list == ['cherry-ssh', 'cherry-naive', 'cherry-vless']
+          - cherry_monitor_outbounds | map(attribute='tag') | list == ['cherry-ssh', 'cherry-naive', 'cherry-vless', 'cherry-hysteria2']
           - cherry_monitor_outbounds[0].server == hostvars[groups['vpn_test'] | first].ansible_host
         fail_msg: Run the Cherry deployment first to export private/cherry-outbounds.json.
       vars:
@@ -97,11 +97,11 @@
   hosts: monitoring_servers
   gather_facts: false
   tasks:
-    - name: Wait for host metrics and all six protocol checks in Prometheus
+    - name: Wait for host metrics and all eight protocol checks in Prometheus
       vars:
         cherry_monitor_query: >-
           (up{job="telegraf",node="cherry"} == 1)
-          and on () (count(vpn_probe_success) == 6)
+          and on () (count(vpn_probe_success) == 8)
           and on () (time() - max(vpn_probe_timestamp_seconds) < 180)
           and on (node) mem_total{job="telegraf"}
           and on (node) docker_container_mem_usage{job="telegraf"}

@@ -35,6 +35,8 @@ services:
       - naive=socks5h://127.0.0.1:22341
       - --proxy
       - vless=socks5h://127.0.0.1:22342
+      - --proxy
+      - hysteria2=socks5h://127.0.0.1:22343
       - --control-url
       - https://example.com/
       - --control-url

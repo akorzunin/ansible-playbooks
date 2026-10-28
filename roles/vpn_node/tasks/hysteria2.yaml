@@ -1,0 +1,159 @@
+---
+- name: Require a dedicated password and positive Brutal bandwidth targets
+  ansible.builtin.assert:
+    that:
+      - vpn_node_hysteria2_password | length >= 32
+      - vpn_node_hysteria2_download_mbps | int > 0
+      - vpn_node_hysteria2_upload_mbps | int > 0
+  no_log: true
+
+- name: Read the existing unprivileged proxy account
+  ansible.builtin.getent:
+    database: passwd
+    key: vpnproxy
+
+# Let's Encrypt storage layout only; discover issuer directories if Caddy gains other issuers.
+- name: Locate the existing domain certificate directory
+  ansible.builtin.set_fact:
+    vpn_node_hysteria2_certificate_dir: >-
+      /var/lib/vpn-node/caddy/certificates/acme-v02.api.letsencrypt.org-directory/{{ vpn_node_domain }}
+
+- name: Verify the existing certificate is valid for this hostname and another day
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - x509
+      - -in
+      - "{{ vpn_node_hysteria2_certificate_dir }}/{{ vpn_node_domain }}.crt"
+      - -noout
+      - -checkhost
+      - "{{ vpn_node_domain }}"
+      - -checkend
+      - "86400"
+  changed_when: false
+
+- name: Create the isolated private deployment directory
+  ansible.builtin.file:
+    path: /srv/deploy/vpn-hysteria2
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Pull the existing digest-pinned QUIC-capable sing-box image
+  community.docker.docker_image:
+    name: "{{ vpn_node_hysteria2_image }}"
+    source: pull
+
+- name: Stage the private Hysteria 2 server candidate
+  ansible.builtin.template:
+    src: hysteria2.json.j2
+    dest: /srv/deploy/vpn-hysteria2/server.json.candidate
+    owner: root
+    group: vpnproxy
+    mode: "0640"
+  no_log: true
+  diff: false
+
+- name: Validate the server candidate and certificate access before activation
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --network=none
+      - --read-only
+      - --cap-drop=ALL
+      - --security-opt=no-new-privileges:true
+      - --user={{ ansible_facts.getent_passwd.vpnproxy[1] }}:{{ ansible_facts.getent_passwd.vpnproxy[2] }}
+      - --volume=/srv/deploy/vpn-hysteria2/server.json.candidate:/etc/vpn/server.json:ro
+      - --volume={{ vpn_node_hysteria2_certificate_dir }}:/etc/vpn/certificate:ro
+      - "{{ vpn_node_hysteria2_image }}"
+      - check
+      - -c=/etc/vpn/server.json
+  changed_when: false
+  no_log: true
+
+- name: Install validated isolated Compose configuration
+  ansible.builtin.template:
+    src: hysteria2-compose.yaml.j2
+    dest: /srv/deploy/vpn-hysteria2/compose.yaml
+    owner: root
+    group: root
+    mode: "0600"
+    validate: docker compose -f %s config --quiet
+
+# Syntax-only guard; add health-gated rollback before unattended configuration changes.
+- name: Activate the validated Hysteria 2 server configuration
+  ansible.builtin.copy:
+    src: /srv/deploy/vpn-hysteria2/server.json.candidate
+    dest: /srv/deploy/vpn-hysteria2/server.json
+    remote_src: true
+    owner: root
+    group: vpnproxy
+    mode: "0640"
+  register: vpn_node_hysteria2_config
+  no_log: true
+  diff: false
+
+- name: Start only the isolated Hysteria 2 Compose project
+  community.docker.docker_compose_v2:
+    project_src: /srv/deploy/vpn-hysteria2
+    project_name: vpn-hysteria2
+    state: present
+    pull: never
+    recreate: "{{ 'always' if vpn_node_hysteria2_config.changed else 'auto' }}"
+    wait: true
+    wait_timeout: 30
+
+- name: Prepare the portable Hysteria 2 trial connection
+  ansible.builtin.set_fact:
+    vpn_node_hysteria2_outbound:
+      type: hysteria2
+      tag: "{{ vpn_node_name }}-hysteria2"
+      server: "{{ vpn_node_public_address }}"
+      server_port: 443
+      password: "{{ vpn_node_hysteria2_password }}"
+      up_mbps: "{{ vpn_node_hysteria2_upload_mbps | int }}"
+      down_mbps: "{{ vpn_node_hysteria2_download_mbps | int }}"
+      tls:
+        enabled: true
+        server_name: "{{ vpn_node_domain }}"
+  no_log: true
+
+- name: Create the private controller client directory
+  ansible.builtin.file:
+    path: "{{ vpn_node_client_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+
+- name: Validate and export the isolated loopback test client
+  ansible.builtin.template:
+    src: hysteria2-client.json.j2
+    dest: "{{ vpn_node_client_dir }}/{{ vpn_node_name }}-hysteria2-test.json"
+    mode: "0600"
+    validate: sing-box check -c %s
+  delegate_to: localhost
+  become: false
+  no_log: true
+  diff: false
+
+- name: Export the portable connection separately without publishing profiles
+  ansible.builtin.copy:
+    content: "{{ [vpn_node_hysteria2_outbound] | to_nice_json }}\n"
+    dest: "{{ vpn_node_client_dir }}/{{ vpn_node_name }}-hysteria2-outbounds.json"
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+  no_log: true
+  diff: false
+
+- name: Report the isolated trial endpoint and artifacts
+  ansible.builtin.debug:
+    msg:
+      - "Hysteria 2: {{ vpn_node_domain }} UDP/443; Brutal targets {{ vpn_node_hysteria2_download_mbps }}/{{ vpn_node_hysteria2_upload_mbps }} Mbps down/up."
+      - "Test client: {{ vpn_node_client_dir }}/{{ vpn_node_name }}-hysteria2-test.json (127.0.0.1:12343)."
+      - "Portable connection: {{ vpn_node_client_dir }}/{{ vpn_node_name }}-hysteria2-outbounds.json."
+      - "Container readiness is not an end-to-end UDP check. This project does not change other VPN services or active clients."

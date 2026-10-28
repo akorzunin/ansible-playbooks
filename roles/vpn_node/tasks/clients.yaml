@@ -39,6 +39,7 @@
             enabled: true
             public_key: "{{ vpn_node_credentials.reality_public_key }}"
             short_id: "{{ vpn_node_credentials.reality_short_id }}"
+      - "{{ vpn_node_hysteria2_outbound }}"
   no_log: true
 
 - name: Create the private controller client directory

@@ -234,6 +234,10 @@ Omitting additional-node outbounds restores nt1-only exits (plus the workstation
 hop when configured). OpenTofu does not change this Vault
 file or publish on its own. See the [Cherry trial guide](../../infra/cherry-vpn/README.md).
 
+The dynamic-node flow also exports `cherry-hysteria2` (UDP/443, Brutal) alongside
+SSH, Naïve and VLESS. It remains an additional manual choice, with existing defaults
+unchanged; no automatic failover or publication is introduced.
+
 The [`vpn_node` role](../../roles/vpn_node/README.md) can export a private JSON
 list with SSH, Naïve and VLESS connections. Publish that list without modifying
 the shared profile Vault:

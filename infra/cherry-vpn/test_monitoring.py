@@ -46,13 +46,14 @@ class CherryMonitoringTests(unittest.TestCase):
 
     def test_isolated_core_cannot_change_routes_or_reuse_active_client_ports(self):
         template = self.env.from_string((ROOT / "playbooks/vpn-monitor/client.json.j2").read_text())
-        outbounds = [{"tag": "cherry-" + name, "type": name} for name in ("ssh", "naive", "vless")]
+        outbounds = [{"tag": "cherry-" + name, "type": name} for name in ("ssh", "naive", "vless", "hysteria2")]
         config = json.loads(template.render(cherry_monitor_outbounds=outbounds))
         self.assertEqual(config["outbounds"], outbounds)
-        self.assertEqual([inbound["listen_port"] for inbound in config["inbounds"]], [22340, 22341, 22342])
+        self.assertEqual([inbound["listen_port"] for inbound in config["inbounds"]], [22340, 22341, 22342, 22343])
         self.assertTrue(all(inbound["listen"] == "127.0.0.1" and inbound["type"] == "mixed"
                             for inbound in config["inbounds"]))
-        self.assertEqual(len(config["route"]["rules"]), 3)
+        self.assertEqual(len(config["route"]["rules"]), 4)
+        self.assertEqual(config["route"]["rules"][-1]["outbound"], "cherry-hysteria2")
         self.assertNotIn("auto_route", json.dumps(config))
 
     def test_persisted_overlay_survives_normal_monitoring_deployment(self):
@@ -85,6 +86,7 @@ class CherryMonitoringTests(unittest.TestCase):
         client, probe = compose["services"]["client"], compose["services"]["probe"]
         self.assertEqual(probe["network_mode"], "service:client")
         self.assertIn("--continuous", probe["command"])
+        self.assertIn("hysteria2=socks5h://127.0.0.1:22343", probe["command"])
         self.assertIn("/metrics/metrics.prom", probe["command"])
         self.assertIn("/var/lib/vpn-monitor:/metrics:rw", probe["volumes"])
         self.assertFalse(any("client.json" in volume for volume in probe["volumes"]))
@@ -109,6 +111,24 @@ class CherryMonitoringTests(unittest.TestCase):
         self.assertIn("docker run --rm --network=none", template["validate"])
         self.assertIn("sha256:", template["validate"])
         self.assertIn("sha256:", (ROOT / "playbooks/vpn-monitor/Dockerfile").read_text())
+
+    def test_monitoring_requires_four_protocol_exports_and_eight_checks(self):
+        plays = yaml.safe_load((PROJECT / "monitoring.yaml").read_text())
+        guard = plays[0]["tasks"][1]["ansible.builtin.assert"]["that"]
+        values = {
+            "cherry_monitor_outbounds": [
+                {"tag": "cherry-" + name, "server": "192.0.2.10"}
+                for name in ("ssh", "naive", "vless", "hysteria2")
+            ],
+            "groups": {"vpn_test": ["fixture"]},
+            "hostvars": {"fixture": {"ansible_host": "192.0.2.10"}},
+        }
+        checks = [self.env.compile_expression(expression) for expression in guard]
+        self.assertTrue(all(check(**values) for check in checks))
+        values["cherry_monitor_outbounds"].pop()
+        self.assertFalse(all(check(**values) for check in checks))
+        query = plays[-1]["tasks"][0]["vars"]["cherry_monitor_query"]
+        self.assertIn("count(vpn_probe_success) == 8", query)
 
     def test_full_deployment_includes_monitoring(self):
         plays = yaml.safe_load((PROJECT / "deploy.yaml").read_text())

@@ -3,7 +3,7 @@
 - name: Bootstrap the isolated node and verify administrator access
   ansible.builtin.import_playbook: ../../playbooks/vpn-probe/deploy.yaml
 
-- name: Deploy all three VPN protocols on the verified Cherry administrator connection
+- name: Deploy all four VPN protocols on the verified Cherry administrator connection
   hosts: vpn_test_admin
   become: true
   become_flags: -n
@@ -41,6 +41,10 @@
     - name: Load shared VPN credentials without exposing them in logs
       ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/secrets.vault.yaml"
+      no_log: true
+    - name: Load the shared Hysteria 2 credential without rotating it per node
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/hysteria2.vault.yaml"
       no_log: true
   roles:
     - vpn_node

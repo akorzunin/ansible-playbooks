@@ -29,6 +29,11 @@ class RoleTests(unittest.TestCase):
             "vpn_node_name": "cherry", "vpn_node_domain": "vpn.example.org",
             "vpn_node_public_address": "192.0.2.10", "vpn_node_reality_server_name": "www.google.com",
             "vpn_node_credentials": self.credentials,
+            "vpn_node_hysteria2_outbound": {
+                "type": "hysteria2", "tag": "cherry-hysteria2", "server": "192.0.2.10", "server_port": 443,
+                "password": "fixture-hysteria2-password-123456789", "up_mbps": 5, "down_mbps": 20,
+                "tls": {"enabled": True, "server_name": "vpn.example.org"},
+            },
             "ansible_facts": {"getent_passwd": {"vpnproxy": ["x", "1234", "1234"]}},
         }
 
@@ -70,7 +75,8 @@ class RoleTests(unittest.TestCase):
         tasks = yaml.safe_load((ROLE / "tasks/clients.yaml").read_text())
         connections = next(t["ansible.builtin.set_fact"]["vpn_node_client_outbounds"] for t in tasks
                            if "ansible.builtin.set_fact" in t)
-        self.assertEqual([o["type"] for o in connections], ["ssh", "naive", "vless"])
+        self.assertEqual([o["type"] for o in connections[:3]], ["ssh", "naive", "vless"])
+        self.assertEqual(connections[3], "{{ vpn_node_hysteria2_outbound }}")
         self.assertIn("vpn_node_ssh_private_key_path", connections[0]["private_key"])
         self.assertIn("vpn_node_host_key", connections[0]["host_key"][0])
         self.assertEqual(connections[0]["user"], "vpnprobe")
@@ -80,14 +86,15 @@ class RoleTests(unittest.TestCase):
             {"type": "ssh", "tag": "cherry-ssh"},
             {"type": "naive", "tag": "cherry-naive"},
             {"type": "vless", "tag": "cherry-vless"},
+            self.variables["vpn_node_hysteria2_outbound"],
         ]
         client = json.loads(self.render("client-test.json.j2"))
-        self.assertEqual([i["listen_port"] for i in client["inbounds"]], [12340, 12341, 12342])
+        self.assertEqual([i["listen_port"] for i in client["inbounds"]], [12340, 12341, 12342, 12343])
         self.assertTrue(all(i["listen"] == "127.0.0.1" for i in client["inbounds"]))
         self.assertNotIn("experimental", client)
         self.assertNotIn("tun", json.dumps(client))
         self.assertEqual([r["outbound"] for r in client["route"]["rules"]],
-                         ["cherry-ssh", "cherry-naive", "cherry-vless"])
+                         ["cherry-ssh", "cherry-naive", "cherry-vless", "cherry-hysteria2"])
         for task in tasks:
             if any(module in task for module in ("ansible.builtin.set_fact", "ansible.builtin.copy", "ansible.builtin.template")):
                 self.assertTrue(task["no_log"])
@@ -200,6 +207,10 @@ class RoleTests(unittest.TestCase):
             self.assertEqual(outbounds[0]["host_key"][0], key.with_suffix(".pub").read_text().strip())
             self.assertEqual(outbounds[1]["password"], self.credentials["naive_password"])
             self.assertEqual(outbounds[2]["tls"]["reality"]["public_key"], self.credentials["reality_public_key"])
+            self.assertEqual(outbounds[3], self.variables["vpn_node_hysteria2_outbound"])
+            client = json.loads((clients / "cherry-test.json").read_text())
+            self.assertEqual(client["outbounds"][3], outbounds[3])
+            self.assertEqual(client["route"]["rules"][3]["outbound"], "cherry-hysteria2")
             self.assertEqual(clients.stat().st_mode & 0o777, 0o700)
             self.assertTrue(all(p.stat().st_mode & 0o777 == 0o600 for p in clients.iterdir()))
 

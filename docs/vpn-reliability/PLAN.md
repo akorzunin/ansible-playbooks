@@ -17,8 +17,9 @@
 ## What repository inspection established
 
 Initial observations below are corrected by the Package 1 runtime snapshot in
-`INVENTORY.md`; use that inventory and `CONTRACT-v1.md` for implementation.
-Runtime must be rechecked before experiments. No sustained measurements exist yet.
+`INVENTORY.md`; use it, reviewed `PACKAGE-1b.md`/`PACKAGE-2.md`/`PACKAGE-2b.md`,
+the controller findings in `PACKAGE-3.md`, and `CONTRACT-v1.md` for implementation. Runtime must be rechecked before experiments. No sustained
+measurements exist yet.
 
 - `playbooks/naiveproxy/check.py` already compares isolated SSH/VLESS/Naive
   processes, but uses small HTTPS requests, machine-local input paths and a shared
@@ -52,9 +53,15 @@ Runtime must be rechecked before experiments. No sustained measurements exist ye
 
 1. Inventory the actual path and agree on the measurement contract. Package 1
    is reviewed as a snapshot, with launch/DNS amendments in `CONTRACT-v1.md`.
-   Complete Package 1b: baseline DNS diagnosis and safe launch design, without
-   modifying production DNS/routing or reusing the production service UID.
-2. Build isolated sustained TCP measurements and a controlled reference endpoint.
+   Package 1b is now reviewed: baseline DNS diagnosis and transient-worker launch
+   completed with user approval, without production changes. See `PACKAGE-1b.md`.
+2. Package 2b commissioning/cleanup is reviewed. Same-host endpoint readiness
+   passed after three runtime fixes; failures remain in its ledger. No endpoint
+   remains. Package 3r corrections are reviewed. Package 3b's approved attempt
+   aborted before gate release; cleanup passed and no workload requests ran.
+   Package 3b-r controller helper is implemented, but review found a startup
+   envelope mismatch. Next is 3b-r2: narrow actual writer/reader integration
+   correction, before any fresh smoke approval. No sustained campaign.
 3. Add real destination/media tests and an explicit UDP path, on this machine.
 4. Run baseline and repeated campaigns; reproduce degradation before changing protocols.
 5. Audit configurations and run controlled protocol/DPI-related experiments.
@@ -75,6 +82,14 @@ under tested conditions, never proof of invisibility to DPI.
 | VPN host -> reference endpoint or real destination | Exit uplink, destination reachability, host resource limits |
 | This machine -> same VPN route -> real media destination | End-to-end service usability |
 | This machine -> normal application through a verified UDP path | Actual voice behavior, not proxy-only reachability |
+
+The implemented reference was commissioned on TCP 9443/UDP 9444 and removed:
+a private-CA/IP-SAN TLS control without DNS bootstrap. Its own-host loopback
+readiness passed; external reachability/source rejection and capacity did not run. Its port, SNI and trust differ from public
+HTTPS/VPN handshakes: do not call it a same-port DPI comparison. Its 900 s lease,
+600 s UDP-session and 4 GiB object ceilings support commissioning/short screens,
+not the 30-minute voice acceptance below. Longer qualification needs a later
+reviewed design, not silent limit increases. Receipts expire with the process.
 
 An endpoint on the VPN host measures access/tunnel behavior but does not exercise
 that host's Internet egress. Complement it with a distinct controlled host if
@@ -117,12 +132,19 @@ A server-side success does not prove the client's path is healthy.
 
 ### DNS is a separate qualification axis
 
-The user reports `dig @1.1.1.1 youtube.com` returned NXDOMAIN while
-`dig +tcp @1.1.1.1 youtube.com A` returned NOERROR. These were user observations,
-not rerun here. Compare identical name/type/options from a verified execution
-context: UDP and TCP may follow different interception/routing paths on this host.
-A forged response can claim the requested resolver's source IP. The difference
-is evidence of transport-dependent behavior, not proof of ISP attribution.
+Package 1b reproduced the user's observation for YouTube A and AAAA: UDP returned
+NXDOMAIN, whereas TCP and CA/hostname-verified DoH/DoT returned usable answers.
+Positive/negative controls behaved as expected. The explicitly approved transient
+worker was locally exempt from interception; no authenticated remote observer
+was available. This is transport-dependent behavior in one short window, not
+ISP attribution or sustained encrypted-DNS qualification. libc worked in that
+worker/window, not proof that ordinary-user/application DNS is repaired.
+
+Treat UDP/53 on the observed path as unsuitable for the tested YouTube lookups.
+Direct DoH/DoT are bootstrap candidates, not a selected production resolver.
+Independent tunnel bootstrap and per-route application DNS remain unqualified.
+Keep the failed UDP evidence; no need for second-resolver/EDNS follow-up merely
+to advance to endpoint implementation. Future probes need their own approval.
 
 Test separately, preserving failed responses and timing:
 
@@ -254,11 +276,42 @@ commands/tests, sanitized results, unresolved limits and rollback instructions.
 Do not auto-commit or publish. Run `uvx prek run --all-files` after changes plus
 focused unit tests. Bring the report back to the controller before the next gate.
 
-Status: Package 1 inventory reviewed; contract amended for DNS and launch safety.
-Package 1b is next, before endpoint deployment or hostname-dependent screens.
-Read-only remote inspection was performed by the Package 1 session, not this
-controller. No sustained campaign, protocol change or deployment is established.
-Implementation approval does not authorize privileged launches or deployment.
+Status: Packages 1/1b/2/2b reviewed within their documented scope. Package 2b
+same-host readiness and complete teardown are accepted; all failed attempts and
+identity-sampling limitations remain explicit. Runtime fixes cover nft host
+literals, strict systemd credential loading and real HTTPSConnection cleanup;
+descriptor expiry is implemented. Independently reran 60 tests and hooks: passed.
+
+Package 3r is now accepted after review of deadline/error attribution, nine new
+boundary regressions and the corrected container-source proposal. Independently
+reran 103 tests and repository hooks: passed. The original reproduced bug and all
+failed iterations remain documented. The code-review hold is cleared; execution
+approval is not granted by this review.
+
+Package 3b: one exact container /32 and lease were approved; endpoint installation
+and inspection passed, but private-controller polling attempted JSON decode of
+an empty initial poll. The worker was stopped before release, with zero workload
+requests. Teardown/production preservation are documented. Raw worker artifacts
+were not collected before runtime deletion: this is explicit evidence loss, not
+an invented raw route-unverified result. See PACKAGE-3b.md.
+
+Package 3b-r added a tracked readiness/collection helper and 26 offline tests;
+controller independently reran all 129 tests and hooks: passed. However, actual
+screen.Artifacts startup rows reproduced a new interoperability blocker: the
+reader rejects the initial unselected run-start before the valid ready event.
+Its fixture-only tests did not cover the actual runner's startup envelope.
+
+Next: Package 3b-r2 narrow startup-contract fix and writer/reader integration
+regression, then review before a fresh lease/retry. Keep strict ready identity,
+pre-input failure artifacts and the new bounded polling/teardown behavior.
+No network/protocol repair is indicated by these orchestration defects.
+Source derivation is time-bounded and not yet confirmed by a receipt. No endpoint
+or reusable credentials remain. No workstation reachability,
+external source rejection, VPN path/DNS/UDP relay, capacity calibration, sustained
+campaign or production DNS migration is qualified yet. The user's full test-node
+access authorization during readiness is recorded in Package 2b; it is not an
+assumed approval for new workstation paths, sources, load or production changes.
+Recheck runtime context and validation before future experiments.
 
 ## Research sources
 

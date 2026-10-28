@@ -9,11 +9,10 @@ network: measurements and changes would interfere.
 
 ```text
 Work in /home/akorz/Documents/ansible-playbooks. Read AGENTS.md, then
- docs/vpn-reliability/{PLAN,INVENTORY,CONTRACT-v1}.md first. The inventory is a
- time-bounded snapshot; recheck relevant runtime facts. Follow the controller's
- amended launch/DNS contract, not older assumptions. You are an implementation
- session; there are
-no sub-agents. Implement only the package below. Preserve existing user changes,
+ docs/vpn-reliability/{PLAN,INVENTORY,CONTRACT-v1,PACKAGE-1b,PACKAGE-2,PACKAGE-2b,PACKAGE-3,PACKAGE-3b,PACKAGE-3b-r}.md first.
+The inventory and DNS evidence are time-bounded; recheck relevant runtime facts.
+Follow the amended contract, not older assumptions. You are an implementation
+session; there are no sub-agents. Implement only the package below. Preserve existing user changes,
 including .gitignore and .ansible-lint. Prefer small Python stdlib/curl/sing-box
 utilities and existing Ansible patterns, without speculative abstractions or new
 services. Never read private credentials/state into chat, print bearer/signed
@@ -30,7 +29,14 @@ rotate credentials or publish profiles without explicit approval for that step.
 After changes run focused tests and uvx prek run --all-files. Report changed
 paths, commands/results, security/routing limitations, sanitized evidence, and
 rollback/cleanup. Distinguish not run, unsupported, inconclusive and failed from
-passed. Stop at the package's review gate.
+passed. Stop at the package's review gate. Package 3r controller review verified
+103 tests and hooks passed and accepted the deadline/source corrections. Package
+3b then aborted before release on a private controller polling bug. Package 3b-r
+has 129 passing tests/hooks but a startup writer/reader mismatch found in review.
+Next is Package 3b-r2 local integration correction, not a live retry or campaign.
+Earlier unrelated YAML violations were fixed
+externally. Recheck current validation rather than repeating a stale baseline.
+Do not introduce suppressions or unrelated fixes.
 ```
 
 ## 1. Runtime inventory and executable test contract
@@ -64,7 +70,7 @@ Gate: return the inventory, unresolved access/approval needs and the precise
 implementation proposal. No campaign or configuration changes yet.
 ```
 
-## 1b. DNS baseline and safe launch (next after Package 1 review)
+## 1b. DNS baseline and safe launch (complete; retained as original instructions)
 
 ```text
 Package 1 is accepted as a time-bounded inventory. Implement the controller's
@@ -111,46 +117,127 @@ launch/cleanup evidence, attribution limits and a proposed bootstrap/destination
 DNS policy. Resolver migration and endpoint deployment remain unapproved.
 ```
 
-## 2. Controlled reference endpoint on the Cherry test infrastructure
+## 2. Controlled reference endpoint (offline implementation reviewed)
 
 ```text
-Use the amended contract and reviewed Package 1/1b reports. Implement the smallest
-idempotent deployment for a controlled noncompressible HTTPS transfer endpoint
-and a restricted bidirectional UDP measurement endpoint. Reuse existing server
-components where practical, and justify any added dependency. Show the exact
-host, listeners, firewall changes and resource limits before requesting approval
-to deploy. Existing Cherry test VPN is permitted, but do not disrupt its VPN or
-administrator SSH access. No open proxy, unauthenticated reflector, large
-unbounded files, secret-bearing logs or wildcard firewall opening.
+Packages 1/1b are reviewed. Implement endpoint/deployment code and offline tests
+only; stop before deployment. Follow CONTRACT-v1.md's Package 2 gate. Implement
+the smallest idempotent deployment for controlled noncompressible HTTPS transfers
+and a restricted UDP measurement endpoint. Reuse existing components where
+practical; justify dependencies. Return exact host, listeners, TLS trust/renewal,
+authentication, firewall effects, resource limits, readiness commands and teardown.
+Do not rerun DNS probes or privileged launches under Package 1b's past approval.
+The existing Cherry test VPN is permitted, but do not disrupt its VPN or
+administrator SSH access. Preserve occupied TCP 22/80/443/8443 and production
+certificates/configs. Propose a reviewed TLS/listener strategy; no insecure TLS,
+private-key copying or existing-proxy reload as an implicit shortcut. If using
+a distinct HTTPS port, label that limitation in later protocol comparisons.
+No open proxy, unauthenticated reflector, large unbounded files, secret-bearing
+logs or wildcard firewall opening.
 
 Include health/readiness, finite transfer sizes/durations, source restrictions
 or suitable authentication, bounded replies, request/session/rate limits,
 read-only resource use where possible, expiry/teardown and verification. UDP
 restrictions must account for direct client and VPN-exit source addresses.
-Expose only the minimal sanitized server-side receipt evidence needed to prove
-which path arrived. Keep key material in private/Vault inputs, not argv/history.
+Expose minimal authenticated run/request receipt evidence: server-observed
+source, bytes and timing, not an untrusted forwarded source header. Bound retention
+and avoid claiming source identity proves protocol. Include negative tests for
+unauthorized/expired/replayed requests and session limits. UDP echo alone cannot
+measure independent one-way loss/jitter; state supported metrics and sequence/
+count evidence per direction. Keep key material in private inputs, not argv/history.
 
 Document that a same-VPN-host endpoint tests access/tunnel capacity, not that
 host's Internet egress. Plan a real-destination/available-distinct-host control.
 Provide separate small preflight/fresh objects, digest-verifiable segment objects
 and a finite continuous object larger than the chosen byte cap. Demonstrate bounded
-RAM/disk generation on the 1 GiB host. Define endpoint receipt semantics and how
-authenticated run IDs link source/route evidence without logging bearer tokens.
+RAM/disk generation on the 1 GiB host. Demonstrate that endpoint resource/rate
+ceilings do not cap below the client's intended load, or document that measurement
+ceiling. Return private endpoint descriptor shape and any necessary contract
+amendments; do not silently break the proposed runner interface.
 Unit-test relevant validation and negative cases. Do not run throughput loads
 against public third-party speed-test services without permission.
 
-Gate: deploy only after reviewing the exact change with the user, then return
-endpoint aliases, readiness evidence, limits, access instructions and teardown.
+Gate: return code/tests and PACKAGE-2.md with the exact deployment, bounded smoke
+and teardown proposal. STOP before remote installation or listener/firewall changes.
+No sustained runner/campaign yet. Deployment and live readiness checks require
+separate explicit user approval after review.
 ```
 
-## 3. Sustained TCP diagnostic runner
+## 2b. Bounded commissioning (reviewed complete; original instructions retained)
 
 ```text
-Use the amended contract, reviewed 1b launch/DNS evidence and reference endpoint.
-Implement screen.py/test_screen.py in playbooks/vpn-probe/, using the useful
-isolation patterns from playbooks/naiveproxy/check.py. Preserve that old tool
-unless replacing it clearly reduces duplication without breaking its documented
-workflow. Do not build a generic plugin framework.
+Package 2's offline implementation is reviewed. Follow CONTRACT-v1.md and
+PACKAGE-2.md. Do not implement the sustained runner or change production VPN,
+DNS, routing, certificates or client profiles.
+
+First add expires_at to the three generated endpoint descriptors, exactly equal
+to config.expires, and test it. Preserve all resource/lifetime caps; update the
+report/schema proposal. This is metadata for later expiry-aware measurements,
+not permission to regenerate or install a live lease yet.
+
+Request user approval for bounded read-only pinned SSH preflight on the existing
+Cherry host. Verify current native listeners, Docker bindings and complete relevant
+NAT/host policy, assigned bind IPv4, systemd/tool support, existing reference
+resources, and safe SSH/VPN health baseline. Do not infer free ports from ss alone.
+Propose exact private bind and /32 source values, including actual same-host source
+routing; do not paste secrets or private mappings into shared reports. Do not
+probe to discover public source addresses without including that in the approved
+preflight. Unknown/conflicting policy or needed provider changes mean stop.
+
+Then obtain explicit approval for one exact fresh-lease preparation/install,
+inspection, the documented same-host readiness, and teardown. Prepare just in
+time: the 900-second lease starts at preparation, not service start. Install only
+through the reviewed standalone playbook; no source broadening or production
+reload/restart. Verify actual unit identity/sandbox, loaded own nft guard and
+listener binding before smoke. Same-host readiness is one attempt: six HTTPS
+operations and one 96-byte authenticated UDP request/reply, under its 60-second
+cgroup limit. No workstation probes, external load or new targets are included.
+Do not retry or relax receipt/hash/auth assertions after failure; preserve evidence
+and review whether startup, receipt timing, source policy or expiry caused it.
+
+Collect sanitized outcomes plus private receipts/context as needed before the
+lease expires. Same-host success is not external filtering, VPN routing, endpoint
+capacity or ISP qualification. An external negative-source test needs its own
+approved vantage/plan; otherwise mark it not run. Offline tests are not enforcement
+proof. Keep the performance/port/SNI/private-CA confounders explicit.
+
+Always execute the approved own-resource teardown, including after partial start
+or failed smoke. Verify endpoint/smoke cgroups, credentials, listeners, own nft
+rules, installed units/files and replay state are gone, and preserved production
+SSH/VPN health and other policy are unchanged. No dangling endpoint while
+Package 3 is written; a new screen later needs a fresh separately approved lease.
+
+Gate: return PACKAGE-2b.md with exact approved actions, sanitized runtime evidence,
+failures/limits, cleanup verification, tests/checks and remaining calibration or
+source-enforcement work. Stop before sustained runner/campaign or profile changes.
+```
+
+## 3. Sustained TCP diagnostic runner (implemented; 3r reviewed)
+
+```text
+Package 2b commissioning/cleanup is reviewed. Implement screen.py/test_screen.py
+in playbooks/vpn-probe/ using the amended CONTRACT-v1.md. No live endpoint remains.
+Work locally: no new lease/deployment, SSH, privileged worker, source-allowlist
+change or external request in this package. Do not interpret historic readiness
+authorization as approval for workstation traffic. Preserve existing tools and
+production configs; no framework, dashboard or generic plugin abstraction.
+
+Implement strict ca_file/run_id/receipt-template/expires_at handling, exact
+same-origin receipt URLs, safe config/header serialization and unique operation
+IDs. Check remaining lifetime before startup/workload; budget receipt collection
+and cleanup. Do not lengthen caps or treat expired/depleted leases as tunnel
+failures. Continuous/segment runs need a separately validated small fresh-object
+--preflight-endpoint-file from the same lease; never use a 4 GiB object as a tiny
+successful preflight or invent descriptor/hash data.
+
+Use an explicit controller/worker handoff: controller privately selects one
+outbound and endpoint, worker receives only necessary material under the reviewed
+isolated UID/sandbox. No automatic sudo/production UID or grants of Vault/admin
+keys. Supply concrete proposed launch/route-evidence/cleanup commands for review.
+Record unproven identity/interception context as route-unverified, never infer
+exemption just from curl proxy flags. Incorporate 2b's credential lesson: local
+private inputs and systemd read-only credential mounts need distinct strict
+handling; do not loosen a global permissions check.
 
 Support explicit direct and individual approved VPN routes with isolated
 loopback listeners/state and no automatic fallback or production config edits.
@@ -159,8 +246,11 @@ Support repeated fresh requests, a continuous large noncompressible HTTPS
 transfer, and repeated large-object/segment-like downloads. Record per-second
 progress and stage/HTTP/byte-integrity errors, bounded timeouts, stalls and
 partial results. Record actual route evidence and avoid claiming a new outer
-connection merely because curl was restarted. Run capacity comparisons
-sequentially, with configurable bounded fan-out within the chosen route.
+connection merely because curl was restarted. Each invocation selects one route;
+future comparisons run sequentially, with bounded fan-out within that route.
+Capture progress even at zero goodput; use the planned timeline after failures.
+Keep control/preflight bytes separate from workload windows and preserve all
+failed attempts. Fresh or short smoke success is not 600-second qualification.
 
 Write private incrementally flushed JSONL, manifest and a sanitized summary
 with early/middle/late windows, failures, time/bytes-to-degradation, sustained
@@ -170,11 +260,191 @@ cannot appear as successful throughput. Handle startup failure, malformed curl
 output, subprocess timeout, mid-transfer stall, SIGINT and orphan cleanup.
 Protect temporary configs, secrets and signed URLs in logs/exception paths.
 
-Add deterministic local/fake-process tests; no live Internet required for unit
-tests. Run a short approved reference smoke check, not a full campaign. Explain
-outer path verification limits if the active machine routing prevents isolation.
+Collect receipt finalization separately from body success. Follow the contract's
+two-read bounded active-receipt policy, unique IDs, total-operation ceiling and
+expiry/deadline handling. Do not redownload objects or hide retries. Missing or
+still-active receipts mean incomplete evidence, not invented source identity.
 
-Gate: return commands, tests, sample sanitized output and smoke evidence.
+Add deterministic tests for input/redaction, actual curl output/headers, startup
+and malformed metrics, partial failures/stalls/zero windows, timeouts versus normal
+deadlines, byte/disk/process limits, receipt races/mismatch/expiry and SIGINT/orphan
+cleanup. Include real curl subprocess integration against a temporary loopback-only
+TLS fixture using scoped test trust and strict cleanup; no Internet or production
+services. Test selected real-library behavior, not only MagicMock: Package 2b's
+connection-context bug was hidden by its original mock. Keep body/metric/stderr
+pipes drained concurrently with bounded buffers and final summaries on failure.
+
+Gate: return PACKAGE-3.md with changed paths, CLI/worker-launch proposals, tests,
+sanitized local artifacts, remaining limits and an exact finite live-smoke plan
+for a fresh lease and explicitly approved sources. STOP before executing that plan.
+External reachability/source enforcement and endpoint-capacity calibration remain
+live gates; no performance/DPI conclusions or production changes from local tests.
+```
+
+## 3r. Correct runner deadline accounting (reviewed complete; original instructions)
+
+```text
+Read the controller review at the top of PACKAGE-3.md and the amended contract.
+Implement only the two review corrections below; preserve all other user/package
+changes. No new lease, SSH, privileged launch, source-allowlist change or external
+request. Keep this local; do not jump to the proposed live smoke or campaigns.
+
+R1: Reproduce Runner.pump assigning completed-window to a curl that has already
+naturally exited 18, then Transfer.finish returning completed-window/error=null
+for only 3 of 100 expected bytes. Fix the smallest cause/accounting path. Preserve
+an already-observable natural exit, EOF or protocol failure before considering
+runner-owned cancellation. Record causal provenance and raw curl exit; ambiguous
+races must not erase a failure. Do not simply classify every SIGTERM/nonzero exit
+as failure: genuine parent-owned planned cancellation must remain distinguishable.
+Do not loosen integrity/HTTP/deadline checks or discard partial failed samples.
+
+Add deterministic boundary regressions for already-exited curl 18/56, natural
+unexpected timeout, actual parent-owned cancellation of a still-running transfer,
+error/malformed response at the deadline, and complete versus partial segments.
+Use real loopback TLS/curl integration where it can test the actual boundary
+without relying on flaky sleeps. Verify both request rows and summary failure/
+partial-byte/window accounting; rerun all existing tests and required hooks.
+
+R2: Correct the live-smoke proposal's endpoint-source assumption. A containerized
+VLESS exit connecting to a native service on its own host may present a container/
+bridge source instead of the public bind/exit IPv4. Specify read-only namespace,
+route/NAT/network-mode preflight and exact source-plan review before installation.
+An actual /32 source addition requires explicit approval; no automatic broadening
+or direct fallback. Unknown source/policy means stop/inconclusive, not VPN failure.
+No live preflight or source-discovery probe is part of this corrective package.
+
+Gate: update PACKAGE-3.md (or add PACKAGE-3r.md) with changed paths, regression
+reproduction/fix evidence, full test/check results and the amended unexecuted
+smoke proposal. STOP for controller review before any live action. Do not refactor
+unrelated runner code, add abstractions or implement UDP/media features here.
+```
+
+## 3b. Bounded runner live smoke (attempted; aborted before release)
+
+```text
+Package 3r is reviewed and accepted. Follow PACKAGE-3.md's revised concrete
+live-smoke proposal and CONTRACT-v1.md. No sustained campaign, protocol tuning,
+source broadening, direct fallback, DNS repair or production/client changes.
+
+Request approval for bounded pinned read-only Cherry/workstation preflight first.
+Verify actual VLESS core PID/container/network namespace, host-local destination
+route and relevant NAT/filter path; derive the endpoint-facing source separately
+from bind/public-exit IP. Check local UID interception, updater/policy context,
+server resources and listener ownership. Do not send source-discovery traffic.
+Unknown source/policy means stop with a bounded observation proposal, not guessing.
+
+Privately present the exact minimal /32 and obtain explicit approval for that
+source, one fresh <=900 s lease/install, isolated DynamicUser workers, the three
+specified tiny workloads, evidence collection and teardown. Do not prepare a
+lease until approval. The proposed endpoint permits only the reviewed source;
+a container /32 is not automatically authorized by past host-local readiness.
+
+Use the reviewed launch/gate/watch/collection procedure in PACKAGE-3.md. Inspect
+the ready event's actual Python PID/UID, sandbox, policy exemption and sockets
+before release; gate creation alone is not proof. Check the selected VLESS log
+and receipts against the exact approved source. Keep raw route-unverified records
+and write a separate controller assessment; exit 0 alone is not a smoke pass.
+
+Run sequential cherry-vless workloads only: fresh 5 s at 256 KiB/s / 1 MiB body
+cap; continuous 5 s at 256 KiB/s / 2 MiB; segments 12 s at 1 MiB/s / 16 MiB.
+Total <=19 MiB client-read bodies, not a wire/billing guarantee. Keep endpoint
+caps unchanged. After each, inspect artifacts: no unexpected request failure,
+complete hash-verified fresh objects, positive continuous bytes with truthful
+cancellation/partial accounting, and >=1 complete hash-verified segment. Record
+censored final partial work, receipts, skipped/missed observations and all errors.
+Stop on unexpected failure, source mismatch or missing route evidence; no blind
+same-lease retry or automatic direct request. Short smoke is not a speed/DPI test.
+
+Collect artifacts while the dynamic runtime exists; preserve partial output if
+collection/startup fails. Always execute approved own-worker/staging/reference
+teardown, including after partial install, within the reviewed outer deadlines.
+Verify no own processes/listeners/units/credentials/state/nft table remain and
+production SSH/VPN/DNS/routing/updater are unchanged. Do not pause the updater.
+
+Gate: return PACKAGE-3b.md with approvals/actions, per-workload evidence,
+separate route assessment, failures/limits, validation and verified cleanup.
+Stop before calibration, sustained screening, other protocols, UDP/media or
+publishing. Further fixes/retries need explicit scoped authorization and must
+preserve failed attempts, not manufacture a pass.
+```
+
+## 3b-r. Readiness polling and abort evidence (implemented; review found mismatch)
+
+```text
+Read PACKAGE-3b.md's controller review and CONTRACT-v1.md's readiness/abort gate.
+Correct only the session-private controller defect and evidence-loss path.
+No lease preparation, SSH, privileged/systemd launch, gate release, source change,
+external request or live retry. Do not alter screen.py's network/qualification
+semantics, endpoint caps, VPN/DNS/routing or production/updater state.
+
+Put the minimal polling/allowlisted-artifact handling into a small tracked helper
+under playbooks/vpn-probe/ with focused tests. Existing reviewed launch commands
+can remain explicit; no generic service manager, new dependency or framework.
+The correction must be used by the proposed procedure, not an unused parser next
+to another untested private orchestration script.
+
+Read JSONL incrementally with bounded byte/time/poll limits. Missing file, empty
+bytes, blank lines and a partial final line mean pending until a complete record
+or deadline. Test delayed creation and a ready record split across writes.
+Complete malformed JSON, wrong schema/non-ready records, permission/read errors,
+truncation, early process exit and timeout must remain distinguishable. Never
+call json.loads on a blank poll or treat every exception as not-ready. A valid
+ready record supplies the candidate Python PID for existing context inspection;
+the helper must not auto-release a gate or claim route proof.
+
+Implement/test the startup-error and cancellation collection path: while owned
+runtime still exists and it is safe, attempt bounded private collection of only
+manifest.json/events.jsonl/summary.json/SUMMARY.md before unit removal. Refuse
+symlinks/nonregular files, bound file/total/time use, keep 0700/0600 destinations,
+and record missing/partial/no-terminal artifacts accurately. No full-directory
+archive, core config, handoff, key or credential copy. Do not invent raw outcomes.
+
+If graceful cancellation is used, signal only an actually verified owned worker,
+retain the approved hold/deadline and collect before runtime deletion. If no PID
+is verified, or immediate stop is necessary, do not guess; preserve available
+files and explicitly mark any evidence loss. Copy/read/timeout errors must never
+skip the always-run own-resource teardown. Test call ordering and cleanup for
+these failures with fake units/processes and temporary files; no root/systemd
+or network sockets are needed for these regressions.
+
+Rerun focused/all existing tests, required hooks and whitespace checks. Return
+PACKAGE-3b-r.md or an explicit correction section with changed paths, regression
+evidence and exact revised polling/collection/cleanup procedure for review.
+STOP. No retry is authorized; the consumed lease/old approval cannot be reused.
+```
+
+## 3b-r2. Align actual startup writer/reader (next; local only)
+
+```text
+Read the controller review in PACKAGE-3b-r.md. Fix only the reproduced startup
+contract mismatch. No SSH, lease, privileged/systemd launch, release-gate creation,
+external request, production change or live retry. Preserve all prior evidence.
+
+Reproduce using the actual screen writer/startup ordering, not rows manufactured
+from the controller READY fixture: execute emits run-start while run/endpoint are
+unselected, then read_inputs/envelope.update supplies the approved identity, then
+route-evidence/ready is emitted. Current poll_ready rejects that first real row
+as wrong-schema even when the next ready event is valid.
+
+Align this narrow bootstrap transition explicitly. Prefer the smallest change;
+if the runner's initial emission must change, limit it to startup metadata and
+preserve diagnostic artifacts on pre-input failure. Do not relax ready-event
+run/route/endpoint validation, ignore arbitrary identity mismatches, swallow
+malformed complete records or infer a candidate from bootstrap/default fields.
+No change to network/deadline/qualification or collection authority is needed.
+
+Add an offline writer/reader integration regression using screen.Artifacts/
+execute's actual startup sequence or a locally gate-held process that never
+releases the gate. Test that legitimate startup reaches the expected candidate,
+while wrong run/endpoint/route in ready records, malformed startup and terminal
+pre-input failure stay distinguishable and cannot grant readiness. Do not merely
+patch the fixture to skip the unselected first record; assert actual wire rows.
+Keep the existing empty/partial/error/bounded-copy/always-teardown regressions.
+
+Rerun all focused tests, hooks and whitespace checks. Update PACKAGE-3b-r.md or
+add PACKAGE-3b-r2.md with the failing reproduction, minimal fix, new integration
+evidence and revised startup contract/procedure. STOP for review before any
+fresh execution request. Do not refactor unrelated code or add a framework.
 ```
 
 ## 4. Actual service tests and the UDP/voice path

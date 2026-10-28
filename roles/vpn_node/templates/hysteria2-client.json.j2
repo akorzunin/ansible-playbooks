@@ -1,0 +1,13 @@
+{
+  "log": {"level": "info", "timestamp": true},
+  "inbounds": [
+    {"type": "mixed", "tag": "trial", "listen": "127.0.0.1", "listen_port": 12343}
+  ],
+  "outbounds": [
+    {{ vpn_node_hysteria2_outbound | to_nice_json }}
+  ],
+  "route": {
+    "default_mark": 8228,
+    "final": "{{ vpn_node_name }}-hysteria2"
+  }
+}

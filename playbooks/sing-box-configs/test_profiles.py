@@ -88,6 +88,21 @@ class ProfileTests(unittest.TestCase):
             removed = json.loads((output / "linux.json").read_text())
             self.assertNotIn("cherry-ssh", removed["outbounds"][0]["outbounds"])
 
+    def test_hysteria2_is_an_additional_choice_without_changing_defaults(self):
+        outbound = {
+            "type": "hysteria2", "tag": "cherry-hysteria2", "server": "192.0.2.10", "server_port": 443,
+            "password": "fixture-password", "up_mbps": 5, "down_mbps": 20,
+            "tls": {"enabled": True, "server_name": "vpn.example.org"},
+        }
+        with tempfile.TemporaryDirectory() as work, patch.object(generate.subprocess, "run"):
+            output = Path(work)
+            generate.generate(output, self.connections, self.tokens, [outbound])
+            for platform, order in generate.ORDERS.items():
+                profile = json.loads((output / f"{platform}.json").read_text())
+                self.assertEqual(profile["outbounds"][0]["outbounds"], order + ["cherry-hysteria2"])
+                self.assertEqual(profile["outbounds"][0]["default"], order[0])
+                self.assertEqual(profile["outbounds"][-2], outbound)
+
     def test_trial_vless_naive_chain_reuses_credentials_without_changing_defaults(self):
         extra = [
             {"type": "vless", "tag": "cherry-vless", "uuid": "test-uuid", "flow": "xtls-rprx-vision",

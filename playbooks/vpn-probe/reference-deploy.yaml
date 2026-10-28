@@ -1,0 +1,208 @@
+---
+# Opt-in only. Does not import Cherry bootstrap, VPN roles or monitoring.
+- name: Manage the finite native Cherry reference endpoint
+  hosts: cherry_vpn_test
+  gather_facts: false
+  become: true
+  become_flags: -n
+  vars:
+    ansible_host_key_checking: true
+    ansible_user: vpnadmin
+    ansible_python_interpreter: /usr/bin/python3
+    ansible_ssh_private_key_file: "{{ playbook_dir }}/../../infra/cherry-vpn/private/ssh/admin"
+    ansible_ssh_common_args: >-
+      -o StrictHostKeyChecking=yes -o BatchMode=yes -o IdentitiesOnly=yes
+      -o ConnectTimeout=8
+      -o UserKnownHostsFile={{ playbook_dir }}/../../infra/cherry-vpn/private/known_hosts
+    reference_state: present
+    reference_approved: false
+    reference_files:
+      - {src: "{{ playbook_dir }}/reference/endpoint.py", dest: /opt/vpn-reference/endpoint.py, mode: "0644"}
+      - {src: "{{ playbook_dir }}/reference/firewall.py", dest: /opt/vpn-reference/firewall.py, mode: "0644"}
+      - {src: "{{ playbook_dir }}/reference/smoke.py", dest: /opt/vpn-reference/smoke.py, mode: "0644"}
+      - {src: "{{ playbook_dir }}/reference/reference.service", dest: /etc/systemd/system/vpn-reference.service, mode: "0644"}
+      - {src: "{{ playbook_dir }}/reference/firewall.service", dest: /etc/systemd/system/vpn-reference-firewall.service, mode: "0644"}
+      - {src: "{{ reference_private_dir | default('/nonexistent') }}/config.json", dest: /etc/vpn-reference/config.json, mode: "0600"}
+      - {src: "{{ reference_private_dir | default('/nonexistent') }}/cert.pem", dest: /etc/vpn-reference/cert.pem, mode: "0600"}
+      - {src: "{{ reference_private_dir | default('/nonexistent') }}/key.pem", dest: /etc/vpn-reference/key.pem, mode: "0600"}
+      - {src: "{{ reference_private_dir | default('/nonexistent') }}/ca.pem", dest: /etc/vpn-reference/ca.pem, mode: "0600"}
+  tasks:
+    - name: Require explicit approval and one exact existing host
+      ansible.builtin.assert:
+        that:
+          - reference_approved | bool
+          - not ansible_check_mode
+          - reference_state in ['present', 'absent']
+          - ansible_play_hosts_all == ['cherry_vpn_test']
+          - ansible_user == 'vpnadmin'
+        fail_msg: Review PACKAGE-2.md and obtain deployment or teardown approval first.
+
+    - name: Deploy only the isolated endpoint
+      when: reference_state == 'present'
+      block:
+        - name: Validate the private lease locally without network traffic
+          ansible.builtin.command:
+            argv:
+              - python3
+              - "{{ playbook_dir }}/reference/endpoint.py"
+              - --config
+              - "{{ reference_private_dir }}/config.json"
+              - --check
+          delegate_to: localhost
+          become: false
+          changed_when: false
+          no_log: true
+
+        - name: Verify existing tools without installing packages
+          ansible.builtin.command:
+            argv: "{{ item }}"
+          loop:
+            - [/usr/bin/python3, --version]
+            - [/usr/sbin/nft, --version]
+            - [/usr/bin/openssl, version]
+          changed_when: false
+
+        - name: Inspect service metadata without starting or changing services
+          ansible.builtin.service_facts:
+
+        - name: Record whether this lease is already running
+          ansible.builtin.set_fact:
+            reference_running: "{{ ansible_facts.services.get('vpn-reference.service', {}).get('state', '') == 'running' }}"
+
+        - name: Inspect persistent replay marker before a new launch
+          ansible.builtin.stat:
+            path: /var/lib/private/vpn-reference/spent
+          register: reference_spent
+
+        - name: Require teardown rather than resetting a spent lease
+          ansible.builtin.assert:
+            that: reference_running or not reference_spent.stat.exists
+            fail_msg: A spent or crashed lease cannot restart. Teardown and prepare fresh credentials.
+
+        - name: Refuse occupied reference ports before a new launch
+          ansible.builtin.shell: |
+            set -eu
+            test -z "$(ss -H -lnt 'sport = :9443')"
+            test -z "$(ss -H -lnu 'sport = :9444')"
+          args:
+            executable: /bin/sh
+          changed_when: false
+          when: not reference_running
+
+        - name: Create only endpoint-owned installation directories
+          ansible.builtin.file:
+            path: "{{ item.path }}"
+            state: directory
+            owner: root
+            group: root
+            mode: "{{ item.mode }}"
+          loop:
+            - {path: /opt/vpn-reference, mode: "0755"}
+            - {path: /etc/vpn-reference, mode: "0700"}
+
+        - name: Preview managed files without changing a running lease
+          ansible.builtin.copy:
+            src: "{{ item.src }}"
+            dest: "{{ item.dest }}"
+            owner: root
+            group: root
+            mode: "{{ item.mode }}"
+          loop: "{{ reference_files }}"
+          check_mode: true
+          diff: false
+          register: reference_preview
+          no_log: true
+          when: reference_running
+
+        - name: Require teardown before changing an active lease
+          ansible.builtin.assert:
+            that: not reference_running or not reference_preview.changed
+            fail_msg: Never restart or replace an active lease. Teardown and prepare fresh credentials.
+
+        - name: Install only the reviewed endpoint files
+          ansible.builtin.copy:
+            src: "{{ item.src }}"
+            dest: "{{ item.dest }}"
+            owner: root
+            group: root
+            mode: "{{ item.mode }}"
+          loop: "{{ reference_files }}"
+          diff: false
+          no_log: true
+
+        - name: Verify the separate certificate chain and exact IP SAN on the host
+          ansible.builtin.shell: |
+            set -eu
+            ip=$(/usr/bin/python3 -c 'import json; print(json.load(open("/etc/vpn-reference/config.json"))["bind_ipv4"])')
+            /usr/bin/openssl verify -CAfile /etc/vpn-reference/ca.pem -verify_ip "$ip" /etc/vpn-reference/cert.pem
+          args:
+            executable: /bin/sh
+          changed_when: false
+          no_log: true
+
+        - name: Reload unit definitions and start only the guarded endpoint without enabling boot startup
+          ansible.builtin.systemd_service:
+            name: vpn-reference.service
+            daemon_reload: true
+            state: started
+            enabled: false
+
+    - name: Tear down only reference resources
+      when: reference_state == 'absent'
+      block:
+        - name: Inspect installed reference unit files
+          ansible.builtin.stat:
+            path: "/etc/systemd/system/{{ item }}"
+          loop: [vpn-reference.service, vpn-reference-firewall.service]
+          register: reference_units
+
+        - name: Stop the endpoint before removing its firewall guard
+          ansible.builtin.systemd_service:
+            name: "{{ item.item }}"
+            state: stopped
+            enabled: false
+          loop: "{{ reference_units.results }}"
+          when: item.stat.exists
+
+        - name: Remove a reference guard left by a failed partial start
+          ansible.builtin.shell: |
+            set -euo pipefail
+            tables=$(/usr/sbin/nft list tables)
+            if printf '%s\n' "$tables" | grep -Fxq 'table inet vpn_reference'; then
+              /usr/sbin/nft delete table inet vpn_reference
+              printf 'removed\n'
+            fi
+          args:
+            executable: /bin/bash
+          register: reference_guard_removal
+          changed_when: reference_guard_removal.stdout == 'removed'
+
+        - name: Remove only reference installation and replay state
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /etc/systemd/system/vpn-reference.service
+            - /etc/systemd/system/vpn-reference-firewall.service
+            - /opt/vpn-reference
+            - /etc/vpn-reference
+            - /var/lib/vpn-reference
+            - /var/lib/private/vpn-reference
+
+        - name: Reload definitions after reference removal
+          ansible.builtin.systemd_service:
+            daemon_reload: true
+
+        - name: Clear retained failure state only for removed reference units
+          ansible.builtin.shell: |
+            set -eu
+            for unit in vpn-reference.service vpn-reference-firewall.service; do
+              if [ "$(systemctl show "$unit" --property=ActiveState --value)" = failed ]; then
+                systemctl reset-failed "$unit"
+                printf '%s\n' "$unit"
+              fi
+            done
+          args:
+            executable: /bin/sh
+          register: reference_failure_reset
+          changed_when: reference_failure_reset.stdout | length > 0

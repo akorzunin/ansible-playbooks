@@ -55,6 +55,31 @@ class CredentialTests(unittest.TestCase):
                 generate.assert_not_called()
             self.assertEqual(output.read_bytes(), before)
 
+    @unittest.skipUnless(shutil.which("ansible-vault"), "Ansible Vault unavailable")
+    def test_hysteria2_vault_is_encrypted_separate_and_never_replaced(self):
+        with tempfile.TemporaryDirectory() as work:
+            directory = Path(work)
+            password = directory / "password"
+            password.write_text("offline-test-password\n")
+            output = directory / "hysteria2.vault.yaml"
+            with patch.object(prepare, "credentials") as generate:
+                prepare.prepare(output, password, hysteria2=True)
+                generate.assert_not_called()
+            before = output.read_bytes()
+            self.assertTrue(before.startswith(b"$ANSIBLE_VAULT;"))
+            self.assertEqual(output.stat().st_mode & 0o777, 0o600)
+            result = subprocess.run(
+                ["ansible-vault", "view", "--vault-password-file", str(password), str(output)],
+                capture_output=True, check=True,
+            )
+            data = json.loads(result.stdout)
+            self.assertEqual(set(data), {"vpn_node_hysteria2_password"})
+            self.assertRegex(data["vpn_node_hysteria2_password"], r"^[A-Za-z0-9_-]{43}$")
+            with self.assertRaises(FileExistsError):
+                prepare.prepare(output, password, hysteria2=True)
+            self.assertEqual(output.read_bytes(), before)
+            self.assertEqual({p.name for p in directory.iterdir()}, {"password", "hysteria2.vault.yaml"})
+
     def test_refuses_symlinks_including_dangling_links(self):
         with tempfile.TemporaryDirectory() as work:
             directory = Path(work)
