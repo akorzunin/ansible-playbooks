@@ -32,14 +32,20 @@ def private_write(path, content):
             temporary.unlink(missing_ok=True)
 
 
-def make_profile(base, connections, order, extra_outbounds=()):
+def make_profile(base, connections, order, extra_outbounds=(), default_outbound=None):
     profile = copy.deepcopy(base)
+    order = [kind for kind in order if kind in connections]
     tags = [connections[kind]["tag"] for kind in order]
     tags.extend(outbound["tag"] for outbound in extra_outbounds
                 if outbound["tag"] != "workstation-hop")
+    if not tags:
+        raise ValueError("Profiles must contain at least one selectable connection")
+    if default_outbound is not None and default_outbound not in tags:
+        raise ValueError("Default outbound must be a selectable connection")
     profile["outbounds"] = [
         {"type": "selector", "tag": "proxy", "outbounds": tags,
-         "default": tags[0], "interrupt_exist_connections": True},
+         "default": default_outbound if default_outbound is not None else tags[0],
+         "interrupt_exist_connections": True},
         *[copy.deepcopy(connections[kind]) for kind in order],
         *copy.deepcopy(extra_outbounds),
         {"type": "direct", "tag": "direct"},
@@ -76,9 +82,9 @@ def make_profile(base, connections, order, extra_outbounds=()):
     return profile
 
 
-def generate(private_dir, connections, tokens, extra_outbounds=()):
-    if set(connections) != {"vless", "naive", "ssh"}:
-        raise ValueError("Vault must contain vless, naive and ssh connections")
+def generate(private_dir, connections, tokens, extra_outbounds=(), default_outbound=None):
+    if not isinstance(connections, dict) or set(connections) - {"vless", "naive", "ssh"}:
+        raise ValueError("Connections must be a mapping of vless, naive or ssh outbounds")
     for kind, outbound in connections.items():
         if outbound.get("type") != kind:
             raise ValueError(f"Connection {kind} must have type {kind}")
@@ -129,7 +135,8 @@ def generate(private_dir, connections, tokens, extra_outbounds=()):
         rendered = {}
         for platform, order in ORDERS.items():
             base = json.loads((ROOT / "templates" / f"{platform}.json").read_text())
-            rendered[platform] = json.dumps(make_profile(base, connections, order, extra_outbounds), indent=2) + "\n"
+            rendered[platform] = json.dumps(
+                make_profile(base, connections, order, extra_outbounds, default_outbound), indent=2) + "\n"
             candidate = Path(work) / f"{platform}.json"
             private_write(candidate, rendered[platform])
             # Check with the installed core; platform-specific runtime behavior still
@@ -142,7 +149,7 @@ def generate(private_dir, connections, tokens, extra_outbounds=()):
         private_write(private_dir / f"{platform}.json", content)
     urls = {p: f"https://{DOMAIN}/{tokens[p]}/{p}.json" for p in ORDERS}
     private_write(private_dir / "urls.json", json.dumps(urls, indent=2) + "\n")
-    imports = {p: f"sing-box://import-remote-profile?url={quote(url, safe='')}#nt1-{p}"
+    imports = {p: f"sing-box://import-remote-profile?url={quote(url, safe='')}#vpn-{p}"
                for p, url in urls.items()}
     private_write(private_dir / "import-links.json", json.dumps(imports, indent=2) + "\n")
     setup_links = {}
@@ -165,7 +172,7 @@ if __name__ == "__main__":
         extra = data.get("extra_outbounds", [])
         if args.extra_outbounds_file:
             extra = extra + json.loads(args.extra_outbounds_file.read_text())
-        generate(args.private_dir, data["connections"], data["tokens"], extra)
+        generate(args.private_dir, data["connections"], data["tokens"], extra, data.get("default_outbound"))
     except (OSError, ValueError, KeyError, TypeError, AttributeError, subprocess.CalledProcessError):
         # Input/core errors can contain credentials. Never echo them to deployment logs.
         parser.exit(1, "Profile generation failed; check Vault inputs and sing-box locally.\n")

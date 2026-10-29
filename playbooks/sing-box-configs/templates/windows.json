@@ -28,7 +28,7 @@
       {
         "network": "udp",
         "action": "route",
-        "outbound": "vless-nt1"
+        "outbound": "proxy"
       },
       {
         "action": "sniff"
@@ -57,6 +57,6 @@
         "update_interval": "1d"
       }
     ],
-    "final": "vless-nt1"
+    "final": "proxy"
   }
 }

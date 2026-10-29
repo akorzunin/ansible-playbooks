@@ -62,6 +62,58 @@ class ProfileTests(unittest.TestCase):
                 if platform == "linux":
                     self.assertNotIn("auto_detect_interface", result["route"])
 
+    def test_retiring_nt1_removes_direct_and_chained_routes_with_stable_enrollment(self):
+        for outbound in self.connections.values():
+            outbound["server"] = "nt1-blocked.example"
+        extra = [
+            {"type": "ssh", "tag": "workstation-hop"},
+            {"type": "ssh", "tag": "cherry-ssh"},
+            {"type": "naive", "tag": "cherry-naive"},
+            {"type": "vless", "tag": "cherry-vless"},
+            {"type": "hysteria2", "tag": "cherry-hysteria2"},
+        ]
+        with tempfile.TemporaryDirectory() as work, patch.object(generate.subprocess, "run"):
+            output = Path(work)
+            generate.generate(output, self.connections, self.tokens, extra)
+            enrollment = {name: (output / name).read_bytes() for name in (
+                "tokens.json", "urls.json", "setup-links.json", "setup-windows.ps1", "setup-macos.sh",
+            )}
+            generate.generate(output, {}, self.tokens, extra, "cherry-vless-via-naive")
+            for platform in generate.ORDERS:
+                profile = json.loads((output / f"{platform}.json").read_text())
+                by_tag = {o["tag"]: o for o in profile["outbounds"]}
+                self.assertEqual(set(by_tag), {
+                    "proxy", "direct", "workstation-hop", "cherry-ssh", "cherry-naive",
+                    "cherry-vless", "cherry-hysteria2", "cherry-vless-via-naive",
+                    "cherry-ssh-via-workstation",
+                })
+                self.assertEqual(by_tag["proxy"]["default"], "cherry-vless-via-naive")
+                self.assertNotIn("workstation-hop", by_tag["proxy"]["outbounds"])
+                self.assertEqual(by_tag["cherry-vless-via-naive"]["detour"], "cherry-naive")
+                self.assertEqual(by_tag["cherry-ssh-via-workstation"]["detour"], "workstation-hop")
+            for artifact in output.iterdir():
+                self.assertNotIn("nt1", artifact.read_text())
+            self.assertEqual(enrollment, {name: (output / name).read_bytes() for name in enrollment})
+
+    def test_invalid_defaults_and_no_exits_preserve_published_artifacts(self):
+        with tempfile.TemporaryDirectory() as work, patch.object(generate.subprocess, "run") as check:
+            output = Path(work)
+            generate.generate(output, self.connections, self.tokens)
+            before = {p.name: p.read_bytes() for p in output.iterdir()}
+            for extra, default in (
+                ([], None),
+                ([{"type": "ssh", "tag": "workstation-hop"}], None),
+                ([{"type": "ssh", "tag": "cherry-ssh"}], "ssh"),
+                ([{"type": "ssh", "tag": "workstation-hop"},
+                  {"type": "ssh", "tag": "cherry-ssh"}], "workstation-hop"),
+            ):
+                with self.subTest(extra=extra, default=default):
+                    check.reset_mock()
+                    with self.assertRaises(ValueError):
+                        generate.generate(output, {}, self.tokens, extra, default)
+                    check.assert_not_called()
+                    self.assertEqual(before, {p.name: p.read_bytes() for p in output.iterdir()})
+
     def test_second_server_is_selectable_without_changing_defaults_or_enrollment(self):
         with tempfile.TemporaryDirectory() as work, patch.object(generate.subprocess, "run"):
             output = Path(work)
@@ -217,7 +269,7 @@ class ProfileTests(unittest.TestCase):
             exported = directory / "cherry-outbounds.json"
             exported.write_text(json.dumps([{"type": "ssh", "tag": "cherry-ssh"}]))
             payload = json.dumps({"sing_box_secrets": {
-                "connections": self.connections, "tokens": self.tokens,
+                "connections": {}, "tokens": self.tokens, "default_outbound": "cherry-ssh",
                 "extra_outbounds": [{"type": "naive", "tag": "another-node"}],
             }})
             command = [sys.executable, str(generate.ROOT / "generate.py"),
@@ -226,7 +278,8 @@ class ProfileTests(unittest.TestCase):
             result = subprocess.run(command, input=payload, capture_output=True, text=True, env=environment)
             self.assertEqual(result.returncode, 0, result.stderr)
             profile = json.loads((output / "linux.json").read_text())
-            self.assertEqual(profile["outbounds"][0]["outbounds"][-2:], ["another-node", "cherry-ssh"])
+            self.assertEqual(profile["outbounds"][0]["outbounds"], ["another-node", "cherry-ssh"])
+            self.assertEqual(profile["outbounds"][0]["default"], "cherry-ssh")
             before = {p.name: p.read_bytes() for p in output.iterdir()}
             exported.write_text('{"password": "DO_NOT_LOG_FIXTURE"}')
             result = subprocess.run(command, input=payload, capture_output=True, text=True, env=environment)
@@ -295,7 +348,8 @@ class ProfileTests(unittest.TestCase):
     def test_invalid_connections_are_rejected(self):
         with tempfile.TemporaryDirectory() as work:
             for connections in (
-                {},
+                {}, None, [],
+                {"unknown": {"type": "ssh", "tag": "ssh"}},
                 {**self.connections, "ssh": {"type": "direct", "tag": "ssh"}},
                 {**self.connections, "ssh": {"type": "ssh", "tag": "naive"}},
                 {**self.connections, "ssh": {"type": "ssh", "tag": "proxy"}},

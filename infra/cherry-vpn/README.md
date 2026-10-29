@@ -48,10 +48,12 @@ Lithuania previously failed all direct checks but passed the SSH-forwarded
 reference; its results were retained separately. These observations do not prove
 which ISP/transit/filtering component caused the difference.
 
-`cherry-ssh`, `cherry-naive` and `cherry-vless` are now published alongside nt1 in
-all three existing private platform profiles. HTTPS contents match local generated
-files, URLs/tokens and nt1 defaults are unchanged. Already-enrolled devices receive
-the new choices on refresh; selection is manual, not automatic failover.
+Cherry SSH, Naïve, VLESS, VLESS-over-Naïve and Hysteria 2 are published in all
+three existing private platform profiles. Blocked nt1's direct and chained routes
+have been removed. URLs/tokens are unchanged; all platforms now default to
+`cherry-vless-via-naive`. Current Cherry credentials live in the profile Vault,
+so publish without `sing_box_extra_outbounds_file` to avoid duplicate tags.
+Already-enrolled devices receive these changes on refresh; there is no automatic failover.
 
 **This workstation was not enrolled**, by explicit user choice. Its original
 `ssh-via-workstation` selection/local fallback remains active, no enrollment file

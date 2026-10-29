@@ -29,8 +29,9 @@ The [`vpn_node` role](roles/vpn_node/README.md) configures
 non-root administration, unattended security updates, native SSH forwarding and
 Dockerized Naïve/VLESS, with private Linux test and profile-publisher outputs.
 The Amsterdam node passes direct Linux checks for all three protocols. Its
-connections are published alongside nt1 at the existing private profile URLs;
-nt1 defaults and this workstation's non-enrolled active configuration are unchanged.
+connections are published at the existing private profile URLs. Blocked nt1
+routes have been removed; all platforms default to Cherry VLESS over Naïve.
+This workstation's non-enrolled active configuration is unchanged.
 See the [current status](infra/cherry-vpn/README.md#current-status)
 and [controller handoff instructions](infra/cherry-vpn/README.md#dropbox-inputs-and-switching-controllers).
 Further provisioning requires a fresh reviewed plan and explicit approval.

@@ -46,8 +46,11 @@ separate investigation; hosting/config distribution itself is working. Those
 observations refer to the earlier nt1-only trial, not the new Cherry VLESS endpoint.
 
 Current Cherry publication: `cherry-ssh`, `cherry-naive`, `cherry-vless` and
-`cherry-vless-via-naive` are available through the same private URLs/tokens, with existing nt1
-defaults retained. All three public platform files matched generated contents.
+`cherry-vless-via-naive` and `cherry-hysteria2` are available through the same private
+URLs/tokens. `aurora-vless` is an additional manual option from the Aurora VLESS
+connection, verified with an isolated HTTPS request on this workstation; UDP and
+Android/Windows runtime behavior have not been tested. nt1 is blocked and has been removed from publisher credentials and
+all generated direct/chained routes. All platforms default to `cherry-vless-via-naive`.
 The initial fetched Linux profile passed six isolated direct checks (three protocols,
 two HTTPS targets) with the Amsterdam node's egress. Later direct Cherry VLESS
 checks failed at the REALITY handshake despite matching server credentials;
@@ -66,23 +69,25 @@ additional people. Treat enrollment/import links as passwords, not public links.
 
 ## Connections and routing
 
-All profiles use `sing_box_secrets.connections` in `secrets.vault.yaml`, an
-Ansible Vault-encrypted file tracked in Git. It also stores the existing platform
-tokens in `sing_box_secrets.tokens`. No controller-local outbound files are needed,
-and a fresh controller never generates replacement tokens.
+All profiles use `secrets.vault.yaml`, an Ansible Vault-encrypted file tracked in
+Git. `sing_box_secrets.connections` is now empty; Cherry credentials and the
+workstation hop are stored in `sing_box_secrets.extra_outbounds`. The Vault also
+stores the existing platform tokens in `sing_box_secrets.tokens` and the shared
+selector default in `sing_box_secrets.default_outbound`. No controller-local
+outbound files are needed, and a fresh controller never generates replacement tokens.
 
 - Manual selection only through `proxy`; Auto/URLTest is removed because successful
   probes did not reliably predict usable connections on mobile networks.
-- Android defaults to SSH; select VLESS manually when UDP is needed.
-- Windows/Linux default to VLESS; select Naïve or SSH manually if it fails.
-- `ssh-via-workstation` and `cherry-ssh-via-workstation` reach the corresponding
-  SSH server through the workstation. Both are TCP-only; `workstation-hop` is an
-  internal transport, not a selectable exit. Defaults remain unchanged.
+- All platforms default to `cherry-vless-via-naive`, which carries both TCP and UDP
+  through Cherry VLESS over Naïve. Other Cherry protocols remain manual choices.
+- `cherry-ssh-via-workstation` reaches Cherry SSH through the workstation. It is
+  TCP-only; `workstation-hop` is an internal transport, not a selectable exit.
+  nt1's `ssh-via-workstation` route is no longer generated.
 - Manual changes interrupt existing connections. Selector choices are not persisted
   by the core cache; restarting may restore the platform default.
 - Proxied TCP and UDP follow the selected protocol. UDP/443 is no longer rejected.
-  This nt1 Naïve deployment and SSH do not provide UDP relay: select working VLESS
-  for UDP applications. TCP fallback depends on the application.
+  Direct Naïve and SSH do not provide UDP relay: select working VLESS, its Naïve
+  chain, or Hysteria 2 for UDP applications. TCP fallback depends on the application.
 - Existing Russian-domain/GeoIP direct routing and platform inbounds are preserved.
 - Linux retains the existing local mixed/system-proxy listener on `127.0.0.1:12334`;
   it does not gain a TUN interface. Linux omits `auto_detect_interface`: it is
@@ -102,9 +107,9 @@ and a fresh controller never generates replacement tokens.
   is intentional for a personal loopback-only API, not a security boundary against
   local processes. Never expose the controller on LAN/public interfaces.
 
-These three protocols all use **the same nt1 host**. Protocol selection is not
-redundancy against a complete nt1 outage. Publish a replacement server through
-the independent config endpoint to recover, or add a second server deliberately.
+The Cherry protocols all use **the same Cherry host**; switching between them is
+not redundancy against a complete Cherry outage. `aurora-vless` uses a separate
+endpoint and can be selected manually; there is no automatic failover.
 
 ## Discord-only Linux networking (opt-in)
 
@@ -188,9 +193,12 @@ then delete `/etc/sing-box-discord`, `/etc/netns/discord-vpn`,
 ## Additional VPN nodes
 
 Optionally add `sing_box_secrets.extra_outbounds` to `secrets.vault.yaml`: a list
-of complete sing-box outbound objects for additional nodes. The existing
-`connections` mapping remains unchanged. Every outbound needs a unique,
-nonempty `tag` that does not collide with nt1 or `auto`/`proxy`/`direct`.
+of complete sing-box outbound objects for VPN nodes. The `connections` mapping
+may contain any subset of `vless`, `naive` and `ssh`, including an empty mapping
+when retiring the original server. Every outbound needs a unique, nonempty `tag`
+that does not collide with another connection or `auto`/`proxy`/`direct`.
+`default_outbound`, when set, must name a selectable outbound (including derived
+chains); otherwise the first selectable entry is used. Empty selectors are rejected.
 The installed sing-box core validates all platforms before any local profile
 is replaced. Keep private keys/passwords in Vault, not templates or command-line
 arguments. SSH outbounds must pin the independently verified server `host_key`;
@@ -198,8 +206,8 @@ only distribute an unprivileged tunnel key, never an administrator key.
 
 For each extra `<node>-vless` with a matching `<node>-naive` carrier, generation
 also derives `<node>-vless-via-naive` with identical VLESS credentials and a Naïve
-`detour`. Existing direct options/defaults remain unchanged; removing either
-connection removes the derived choice. Generated tags must be unique. The
+`detour`. Removing either connection removes the derived choice; update
+`default_outbound` too if it names that chain. Generated tags must be unique. The
 carrier only needs TCP CONNECT, not native UDP support.
 
 The Vault also contains a pinned `workstation-hop` SSH outbound in `extra_outbounds`.
@@ -212,8 +220,8 @@ tags. Removing `workstation-hop` removes the generated chained options.
 The workstation's `sing-box-hop` account must allow each destination in **both**
 its `authorized_keys` `permitopen` options and its sshd `Match User` `PermitOpen`.
 `workstation-hop.yaml`, included by the publish playbook, configures both allowlists
-from the validated generated Linux profile's direct SSH exits (nt1 and Cherry when
-published). It uses the existing `workstation-hop` outbound and
+from the validated generated Linux profile's direct SSH exits (currently Cherry
+only). It uses the existing `workstation-hop` outbound and
 `workstation_ssh_public_key` in Vault, with a dedicated forwarding-only account:
 no shell, commands, PTY, agent/X11/Unix-socket or reverse forwarding. The complete
 sshd configuration is validated before reload. Generate profiles before running
@@ -221,18 +229,19 @@ this playbook separately. Do not replace these restrictions with unrestricted
 forwarding; rendering cannot prove reachability.
 
 Publish with the command below. Extra outbounds are appended to every manual
-selector without changing nt1 defaults, routing or enrollment URLs. Refresh the
-client's existing remote profile and explicitly select the trial node. On Linux,
+selector without changing routing or enrollment URLs. Refresh the
+client's existing remote profile; the configured default applies on restart.
+Explicitly select a different connection if needed. On Linux,
 start `sing-box-profile-update.service` to refresh immediately; Android/Windows
 use the app's remote-profile refresh. An imported local JSON file does not update.
 There is no automatic failover or evidence of connectivity from generation alone.
 
 After a supervised replacement, edit the extra outbound's endpoint, credentials
 and pinned host key in Vault, then republish. Before destroying a trial node,
-remove its outbound and republish; clients still need to refresh/select nt1.
-Omitting additional-node outbounds restores nt1-only exits (plus the workstation
-hop when configured). OpenTofu does not change this Vault
-file or publish on its own. See the [Cherry trial guide](../../infra/cherry-vpn/README.md).
+publish a working replacement and update `default_outbound` before removing the
+old outbounds. Clients still need to refresh. There is no nt1 fallback, and
+publishing without selectable exits fails without replacing existing profiles.
+OpenTofu does not change this Vault file or publish on its own. See the [Cherry trial guide](../../infra/cherry-vpn/README.md).
 
 The dynamic-node flow also exports `cherry-hysteria2` (UDP/443, Brutal) alongside
 SSH, Naïve and VLESS. It remains an additional manual choice, with existing defaults
@@ -249,7 +258,8 @@ ansible-playbook -i hosts --vault-password-file .ansible_pass \
 ```
 
 The file entries are appended to any Vault `extra_outbounds`; duplicate tags are
-rejected. Keep supplying the file on subsequent publishes, or copy its list into
+rejected. Current Cherry entries already live in Vault: publish **without** this
+flag unless importing a different node. Keep supplying the file on subsequent publishes, or copy its list into
 the encrypted Vault and omit the flag. Publishing without either source removes
 the trial entries. File-based inputs remain controller-local and must be
 regenerated with the role after a controller/VM change. This is supervised
