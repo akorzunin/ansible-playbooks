@@ -487,8 +487,37 @@ class MonitoringTests(unittest.TestCase):
             self.assertEqual(set(pattern.split("|")), expected)
             self.assertIn('node="nk1"', rendered)
 
+    def test_native_client_has_host_metrics_without_docker(self):
+        variables = {
+            "inventory_hostname": "GE1",
+            "monitoring_client_native": True,
+            "monitoring_client_telegraf_bind_address": "0.0.0.0",
+            "monitoring_client_telegraf_port": 9273,
+            "monitoring_telegraf_allowed_sources": ["198.51.100.5/32"],
+        }
+        template = self.environment.from_string(
+            (ROOT / "roles/monitoring_client/templates/telegraf.conf.j2").read_text()
+        )
+        config = tomllib.loads(template.render(**variables))
+        self.assertEqual(config["agent"]["hostname"], "GE1")
+        self.assertNotIn("docker", config["inputs"])
+        self.assertIn("disk", config["inputs"])
+        output, = config["outputs"]["prometheus_client"]
+        self.assertEqual(output["listen"], "0.0.0.0:9273")
+        self.assertEqual(output["ip_range"], ["198.51.100.5/32"])
+
+    def test_native_install_validates_config_and_does_not_start_defaults(self):
+        tasks = yaml.safe_load((ROOT / "roles/monitoring_client/tasks/native.yaml").read_text())
+        install = next(task["ansible.builtin.apt"] for task in tasks if "ansible.builtin.apt" in task)
+        self.assertEqual(install["policy_rc_d"], 101)
+        template = next(task["ansible.builtin.template"] for task in tasks if "ansible.builtin.template" in task)
+        self.assertIn("--test", template["validate"])
+        download = next(task["ansible.builtin.get_url"] for task in tasks if "ansible.builtin.get_url" in task)
+        self.assertTrue(download["checksum"].startswith("sha256:"))
+        self.assertFalse(any("community.docker.docker_compose_v2" in task for task in tasks))
+
     def test_client_configuration_changes_notify_restart_handler(self):
-        role = yaml.safe_load((ROOT / "roles/monitoring_client/tasks/main.yaml").read_text())
+        role = yaml.safe_load((ROOT / "roles/monitoring_client/tasks/compose.yaml").read_text())
         template = next(task for task in role if "ansible.builtin.template" in task)
         handlers = yaml.safe_load((ROOT / "roles/monitoring_client/handlers/main.yaml").read_text())
         handler = next(handler for handler in handlers if handler["name"] == template["notify"])
@@ -500,7 +529,7 @@ class MonitoringTests(unittest.TestCase):
     def test_client_deploy_excludes_server_and_retired_nodes(self):
         client = yaml.safe_load((STACK / "deploy-clients.yml").read_text())[0]
         self.assertEqual(client["hosts"], "monitored_nodes:!monitoring_servers:!retired_nodes")
-        role = yaml.safe_load((ROOT / "roles/monitoring_client/tasks/main.yaml").read_text())
+        role = yaml.safe_load((ROOT / "roles/monitoring_client/tasks/compose.yaml").read_text())
         self.assertEqual(client["serial"], 1)
         deploy = next(task["community.docker.docker_compose_v2"] for task in role if "community.docker.docker_compose_v2" in task)
         self.assertEqual(deploy["project_src"], "/srv/monitoring/telegraf")

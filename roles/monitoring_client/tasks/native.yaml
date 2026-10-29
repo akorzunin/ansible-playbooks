@@ -1,0 +1,39 @@
+---
+# Native packages currently support Debian/Ubuntu amd64 only; add verified packages for other architectures when needed.
+- name: Validate native Telegraf platform
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family == 'Debian'
+      - ansible_facts.architecture == 'x86_64'
+    fail_msg: Native Telegraf currently supports Debian/Ubuntu amd64 only.
+
+- name: Download checksum-pinned native Telegraf package
+  ansible.builtin.get_url:
+    url: https://repos.influxdata.com/debian/packages/telegraf_1.40.2-1_amd64.deb
+    dest: /var/cache/telegraf_1.40.2-1_amd64.deb
+    checksum: sha256:08968d96e764819cb7c16649e8e9e13d4f24b641edb9883b06b8daf321c9e877
+    mode: "0644"
+
+- name: Install native Telegraf without starting its default configuration
+  ansible.builtin.apt:
+    deb: /var/cache/telegraf_1.40.2-1_amd64.deb
+    install_recommends: false
+    policy_rc_d: 101
+  notify: Restart native Telegraf
+
+- name: Configure native Telegraf with host metrics and source restrictions
+  ansible.builtin.template:
+    src: telegraf.conf.j2
+    dest: /etc/telegraf/telegraf.conf
+    owner: root
+    group: telegraf
+    mode: "0640"
+    backup: true
+    validate: /usr/bin/telegraf --config %s --test
+  notify: Restart native Telegraf
+
+- name: Enable and start native Telegraf
+  ansible.builtin.systemd_service:
+    name: telegraf
+    enabled: true
+    state: started

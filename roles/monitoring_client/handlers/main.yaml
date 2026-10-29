@@ -5,3 +5,8 @@
     state: restarted
     services: [telegraf]
     dependencies: false
+
+- name: Restart native Telegraf
+  ansible.builtin.systemd_service:
+    name: telegraf
+    state: restarted

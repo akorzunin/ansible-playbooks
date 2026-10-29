@@ -255,7 +255,15 @@ ansible-playbook -i ./hosts -i ./monitoring.inventory.yml \
   --vault-password-file=.ansible_pass playbooks/ws-logs/deploy.yml
 ```
 
-The client playbook requires Docker Compose and sudo. Both the client role and
+The client playbook requires sudo and, by default, Docker Compose. For an existing
+Debian/Ubuntu amd64 host without Docker, set `monitoring_client_native: true` on
+that inventory entry. The same client playbook installs checksum-pinned Telegraf
+1.40.2 as a system service, with the same host metrics and source allowlist but
+without Docker metrics. It does not install Docker or change VPN/firewall settings.
+Availability and disk alerts apply normally. Do not run `retire-exporters.yml` on
+native hosts: its verification requires Docker metric families.
+
+Both the client role and
 `node/nt1/services.deploy.yaml` now deploy Telegraf, not the old exporters; always
 load the monitoring overlay for endpoint restrictions. For an existing exporter
 host, keep the old containers until server-side checks pass, then retire them:

@@ -4,7 +4,11 @@
   hostname = {{ monitoring_node | default(inventory_hostname) | to_json }}
 
 [[outputs.prometheus_client]]
+{% if monitoring_client_native | default(false) | bool %}
+  listen = {{ (monitoring_client_telegraf_bind_address ~ ':' ~ monitoring_client_telegraf_port) | to_json }}
+{% else %}
   listen = ":9273"
+{% endif %}
   metric_version = 1
   expiration_interval = "60s"
 {% if monitoring_telegraf_allowed_sources is defined %}
@@ -37,6 +41,7 @@
 [[inputs.diskio]]
   skip_serial_number = true
 
+{% if not (monitoring_client_native | default(false) | bool) %}
 [[inputs.docker]]
   endpoint = "unix:///var/run/docker.sock"
   timeout = "5s"
@@ -44,3 +49,4 @@
   perdevice_include = []
   total_include = ["cpu", "blkio", "network"]
   docker_label_include = ["com.docker.compose.project", "com.docker.compose.service"]
+{% endif %}
