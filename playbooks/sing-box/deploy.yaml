@@ -1,0 +1,217 @@
+---
+- name: Migrate the workstation proxy to sing-box
+  hosts: remote_workstation
+  become: false
+  any_errors_fatal: true
+  vars:
+    project_dir: /srv/deploy/sing-box
+    sing_box_image: "{{ (lookup('file', 'compose.yaml') | from_yaml).services['sing-box'].image }}"
+    sing_box_health_url: https://www.gstatic.com/generate_204
+    aurora_outbounds: >-
+      {{ sing_box_secrets.extra_outbounds | selectattr('tag', 'equalto', 'aurora-vless') | list }}
+
+  pre_tasks:
+    - name: Refuse check mode because migration needs live proxy verification
+      ansible.builtin.assert:
+        that: not ansible_check_mode
+        fail_msg: Run without --check; configuration is validated before cutover.
+
+    - name: Load shared profile credentials
+      ansible.builtin.include_vars:
+        file: ../sing-box-configs/secrets.vault.yaml
+      no_log: true
+
+    - name: Validate the shared Aurora outbound
+      ansible.builtin.assert:
+        that:
+          - aurora_outbounds | length == 1
+          - aurora_outbounds[0].type == 'vless'
+          - aurora_outbounds[0].detour is not defined
+        quiet: true
+      no_log: true
+
+  tasks:
+    - name: Create the private deployment directory
+      ansible.builtin.file:
+        path: "{{ project_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0700"
+      become: true
+
+    - name: Identify the deploying user
+      ansible.builtin.command: "id {{ item }}"
+      loop: [-u, -g]
+      register: deploy_ids
+      changed_when: false
+
+    - name: Write Compose runtime IDs
+      ansible.builtin.copy:
+        content: |
+          SING_BOX_UID={{ deploy_ids.results[0].stdout }}
+          SING_BOX_GID={{ deploy_ids.results[1].stdout }}
+        dest: "{{ project_dir }}/.env"
+        mode: "0600"
+
+    - name: Inspect the shared Docker network
+      ansible.builtin.command: docker network inspect v2raya-proxy
+      register: network_inspect
+      changed_when: false
+      failed_when: false
+
+    - name: Create the shared Docker network when missing
+      ansible.builtin.command: docker network create v2raya-proxy
+      when: network_inspect.rc != 0
+      changed_when: true
+
+    - name: Pull the pinned image before touching the running proxy
+      ansible.builtin.command:
+        argv: [docker, pull, "{{ sing_box_image }}"]
+      register: image_pull
+      changed_when: "'Downloaded newer image' in (image_pull.stdout + image_pull.stderr)"
+
+    - name: Stage and validate the private candidate configuration
+      ansible.builtin.template:
+        src: config.json.j2
+        dest: "{{ project_dir }}/config.json.next"
+        mode: "0600"
+        validate: >-
+          docker run --rm --network=none
+          -v %s:/etc/sing-box/config.json:ro
+          {{ sing_box_image }} check -c /etc/sing-box/config.json
+      no_log: true
+      diff: false
+
+    - name: Stage Compose configuration
+      ansible.builtin.copy:
+        src: compose.yaml
+        dest: "{{ project_dir }}/compose.yaml.next"
+        mode: "0644"
+
+    - name: Validate candidate Compose configuration
+      ansible.builtin.command:
+        cmd: docker compose -p workstation-sing-box -f compose.yaml.next config -q
+        chdir: "{{ project_dir }}"
+      changed_when: false
+
+    - name: Record the previous container states for rollback
+      ansible.builtin.command:
+        argv: [docker, inspect, --format, "{{ '{{.State.Running}}' }}", "{{ item }}"]
+      # The live workstation still has the old NT1 SSH sidecar as well as V2RayA.
+      loop: [v2raya, v2raya-ssh-socks, sing-box]
+      register: previous_containers
+      changed_when: false
+      failed_when: false
+
+    - name: Activate sing-box with rollback on failure
+      block:
+        - name: Install validated configuration with a private rollback copy
+          ansible.builtin.copy:
+            src: "{{ project_dir }}/config.json.next"
+            dest: "{{ project_dir }}/config.json"
+            remote_src: true
+            mode: "0600"
+            backup: true
+          register: active_config
+          no_log: true
+          diff: false
+
+        - name: Install validated Compose configuration with a rollback copy
+          ansible.builtin.copy:
+            src: "{{ project_dir }}/compose.yaml.next"
+            dest: "{{ project_dir }}/compose.yaml"
+            remote_src: true
+            mode: "0644"
+            backup: true
+          register: active_compose
+
+        # Both proxies claim the same host ports; never run them together.
+        - name: Stop legacy V2RayA and its NT1 tunnel but retain containers and data
+          ansible.builtin.command:
+            argv: [docker, stop, "{{ item.item }}"]
+          loop: "{{ previous_containers.results[:2] }}"
+          loop_control:
+            label: "{{ item.item }}"
+          when: item.stdout == 'true'
+          changed_when: true
+
+        - name: Start sing-box and remount changed configuration
+          ansible.builtin.command:
+            cmd: >-
+              docker compose -p workstation-sing-box up -d --remove-orphans
+              {{ '--force-recreate' if active_config.changed or active_compose.changed else '' }}
+            chdir: "{{ project_dir }}"
+          register: compose_up
+          changed_when: >-
+            'Created' in (compose_up.stdout + compose_up.stderr)
+            or 'Recreated' in (compose_up.stdout + compose_up.stderr)
+            or 'Started' in (compose_up.stdout + compose_up.stderr)
+
+        # One HTTPS probe gates cutover; add application probes for broader coverage.
+        - name: Verify HTTPS through the proxy rather than only checking its listener
+          ansible.builtin.uri:
+            url: "{{ sing_box_health_url }}"
+            method: GET
+            status_code: [200, 204]
+            timeout: 20
+            use_proxy: true
+            validate_certs: true
+          environment:
+            http_proxy: http://127.0.0.1:20171
+            https_proxy: http://127.0.0.1:20171
+            HTTP_PROXY: http://127.0.0.1:20171
+            HTTPS_PROXY: http://127.0.0.1:20171
+            no_proxy: ""
+            NO_PROXY: ""
+          register: proxy_health
+          until: proxy_health is succeeded
+          retries: 5
+          delay: 3
+
+      rescue:
+        - name: Remove the failed replacement to release its listeners and DNS alias
+          ansible.builtin.command:
+            cmd: docker compose -p workstation-sing-box -f compose.yaml.next down
+            chdir: "{{ project_dir }}"
+          changed_when: true
+
+        - name: Restore previous active files when backups exist
+          ansible.builtin.copy:
+            src: "{{ item.backup_file }}"
+            dest: "{{ project_dir }}/{{ item.filename }}"
+            remote_src: true
+            mode: "{{ item.mode }}"
+          loop:
+            - backup_file: "{{ active_config.backup_file | default('') }}"
+              filename: config.json
+              mode: "0600"
+            - backup_file: "{{ active_compose.backup_file | default('') }}"
+              filename: compose.yaml
+              mode: "0644"
+          when: item.backup_file | length > 0
+          no_log: true
+          diff: false
+
+        - name: Restart the previously running sing-box deployment
+          ansible.builtin.command:
+            cmd: docker compose -p workstation-sing-box up -d
+            chdir: "{{ project_dir }}"
+          when: previous_containers.results[2].stdout == 'true'
+          changed_when: true
+
+        - name: Restart previously running legacy containers with the tunnel first
+          ansible.builtin.command:
+            argv: [docker, start, "{{ item.item }}"]
+          loop: "{{ previous_containers.results[:2] | reverse | list }}"
+          loop_control:
+            label: "{{ item.item }}"
+          when: item.stdout == 'true'
+          changed_when: true
+
+        - name: Report unsuccessful activation
+          ansible.builtin.fail:
+            msg: >-
+              sing-box activation failed. Previous files and previously running
+              proxies were restored. Check connectivity and outbound credentials
+              before retrying; retained config backups contain secrets.

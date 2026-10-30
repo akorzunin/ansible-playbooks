@@ -1,0 +1,36 @@
+services:
+  sing-box:
+    # Upstream sing-box 1.14.4, matching the Aurora proxy migration.
+    image: ghcr.io/sagernet/sing-box@sha256:0788ffbddab2c68a99a2dd4780bbc50902f159af6f589df3ee74a8389d278279
+    container_name: sing-box
+    command: [run, -c, /etc/sing-box/config.json]
+    restart: unless-stopped
+    # Config is owner-readable only; run as the deploying user's numeric IDs.
+    user: "${SING_BOX_UID:?}:${SING_BOX_GID:?}"
+    # Preserve host.docker.internal and VM/LAN clients, not just localhost.
+    # These unauthenticated listeners must remain behind the host/router firewall.
+    ports:
+      - "20171:20171"
+      - "20170:20170"
+    volumes:
+      - ./config.json:/etc/sing-box/config.json:ro
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 256m
+    cpus: "1.0"
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      v2raya-proxy:
+        aliases: [v2raya]
+
+networks:
+  v2raya-proxy:
+    external: true
+    name: v2raya-proxy

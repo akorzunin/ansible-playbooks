@@ -19,6 +19,11 @@ and configure your scraper source CIDRs. Load it alongside the private `hosts`
 inventory to generate scrape targets, provision shared dashboards/alerts, and
 configure Telegram routing.
 
+## Workstation proxy
+
+[sing-box with `aurora-vless`](playbooks/sing-box/README.md) replaces the blocked
+NT1/V2RayA proxy, preserving port `20171` for existing app containers and clients.
+
 ## Budget VPN experiment
 
 See [the Cherry Servers/OpenTofu trial guide](infra/cherry-vpn/README.md) for
@@ -31,7 +36,8 @@ Dockerized Naïve/VLESS, with private Linux test and profile-publisher outputs.
 The Amsterdam node passes direct Linux checks for all three protocols. Its
 connections are published at the existing private profile URLs. Blocked nt1
 routes have been removed; all platforms default to Cherry VLESS over Naïve.
-This workstation's non-enrolled active configuration is unchanged.
+The controller's non-enrolled native sing-box configuration is unchanged;
+the workstation's Docker proxy is managed separately as described above.
 See the [current status](infra/cherry-vpn/README.md#current-status)
 and [controller handoff instructions](infra/cherry-vpn/README.md#dropbox-inputs-and-switching-controllers).
 Further provisioning requires a fresh reviewed plan and explicit approval.

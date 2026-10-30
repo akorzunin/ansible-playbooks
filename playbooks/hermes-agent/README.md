@@ -27,7 +27,7 @@ ansible-vault encrypt_string --vault-password-file .ansible_pass 'value' --name 
 
 ## Use through OmniRoute
 
-OmniRoute is configured to send outbound traffic through the host v2rayA HTTP
+OmniRoute is configured to send outbound traffic through the host sing-box HTTP
 proxy at `host.docker.internal:20171`.
 
 Deploy/redeploy OmniRoute so the proxy settings are applied:

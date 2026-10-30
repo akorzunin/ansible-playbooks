@@ -1,4 +1,6 @@
 ---
+# Legacy rollback only. Use ../sing-box/deploy.yaml for the workstation;
+# never run both proxies together because their host ports conflict.
 - name: Deploy v2rayA
   hosts: all
   become: false

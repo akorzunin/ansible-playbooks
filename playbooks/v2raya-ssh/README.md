@@ -1,4 +1,8 @@
-# v2rayA as a VLESS proxy
+# v2rayA as a VLESS proxy (legacy)
+
+The workstation now uses [sing-box with `aurora-vless`](../sing-box/README.md).
+This playbook is retained for rollback only. Its NT1 endpoint is blocked;
+do not run it alongside sing-box because their proxy ports conflict.
 
 This deploys v2rayA with a VLESS node from `V2RAYA_NODE_URL`, enables proxy
 sharing on the `v2raya-proxy` Docker network, and starts that node. The API is
@@ -19,7 +23,7 @@ Deploy to the machine running v2rayA:
 
 ```sh
 ansible-playbook --vault-password-file=.ansible_pass \
-  playbooks/v2raya/deploy.yaml -i hosts -l host_name
+  playbooks/v2raya-ssh/deploy.yaml -i hosts -l host_name
 ```
 
 The playbook creates the `v2raya-proxy` Docker network, bootstraps the admin
