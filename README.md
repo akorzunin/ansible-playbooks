@@ -4,7 +4,10 @@
 
 See [the automated node bootstrap](node/init.md). Run once, enter the node name,
 address and root password; it sets up key-only sudo access, Docker, SSHGuard,
-security updates and the existing monitoring stack, then saves inventory for later use.
+security updates and the existing monitoring stack. Each node gets a dedicated
+Vault-encrypted SSH key in private `hosts`, usable from another trusted controller
+with the inventory and Vault password (Ansible Core 2.19+ and OpenSSH required).
+The updated dotfiles `ssh-sel.nu` also supports these portable identities.
 
 ```sh
 ansible-playbook --vault-password-file=.ansible_pass \

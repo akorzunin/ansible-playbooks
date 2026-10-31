@@ -52,9 +52,37 @@
         that: hostvars['localhost'].node_bootstrap_root_ready | default(false) | bool
         fail_msg: Root bootstrap failed; fix SSH connectivity before retrying. No node setup will run.
 
+    - name: Install dedicated key using existing key-file administrator access
+      ansible.posix.authorized_key:
+        user: "{{ ansible_user }}"
+        key: "{{ node_authorized_key }}"
+        state: present
+      when: node_legacy_private_key_file | length > 0
+
+    - name: Switch administrator authentication to the Vault-backed identity
+      ansible.builtin.set_fact:
+        ansible_private_key: "{{ hostvars['localhost'].node_identity.private_key }}"
+        ansible_ssh_private_key_file: ""
+      no_log: true
+
+    - name: Close the old key-file session before verifying the dedicated key
+      ansible.builtin.meta: reset_connection
+      when: node_legacy_private_key_file | length > 0
+
     - name: Verify fresh key-only SSH and passwordless sudo before hardening
       ansible.builtin.command: /usr/bin/true
       changed_when: false
+      vars:
+        ansible_ssh_args: -o ControlMaster=no -o ControlPath=none -o IdentitiesOnly=yes -o PreferredAuthentications=publickey -o PasswordAuthentication=no
+
+    - name: Mark key-file migration complete only after verifying the dedicated key
+      ansible.builtin.set_fact:
+        node_legacy_private_key_file: ""
+
+    - name: Save the verified portable administrator connection
+      ansible.builtin.import_role:
+        name: node
+        tasks_from: save_connection
 
     - name: Gather facts after verifying access
       ansible.builtin.setup:
@@ -74,6 +102,8 @@
     - name: Verify key-only sudo still works after SSH policy reload
       ansible.builtin.command: /usr/bin/true
       changed_when: false
+      vars:
+        ansible_ssh_args: -o ControlMaster=no -o ControlPath=none -o IdentitiesOnly=yes -o PreferredAuthentications=publickey -o PasswordAuthentication=no
 
     - name: Persist node for future deployments
       ansible.builtin.import_role:
@@ -128,5 +158,6 @@
       ansible.builtin.debug:
         msg: >-
           {{ inventory_hostname }} is ready: key-only SSH as {{ ansible_user }}, Docker,
-          SSHGuard, unattended security updates, and verified monitoring.
-          Reboot required: {{ node_reboot_required.stat.exists }}.
+          SSHGuard, AppArmor, unattended security updates, and verified monitoring.
+          Reboot-required marker present: {{ node_reboot_required.stat.exists }}.
+          Its absence does not guarantee no reboot is needed.

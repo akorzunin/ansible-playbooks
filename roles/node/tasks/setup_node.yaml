@@ -27,9 +27,11 @@
 - name: Install prerequisite and security packages
   ansible.builtin.apt:
     name:
+      - apparmor
       - ca-certificates
       - curl
       - python3-apt
+      - python3-debian
       - python3-pip
       - python3-requests
       - sshguard
@@ -40,8 +42,31 @@
   ansible.builtin.copy:
     dest: /etc/apt/apt.conf.d/20auto-upgrades
     content: |
+      APT::Periodic::Enable "1";
       APT::Periodic::Update-Package-Lists "1";
       APT::Periodic::Unattended-Upgrade "1";
+    owner: root
+    group: root
+    mode: "0644"
+
+# Override package/provider origins instead of assuming unattended-upgrades defaults.
+- name: Restrict unattended upgrades to distribution security repositories
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/99node-security
+    content: |
+      #clear Unattended-Upgrade::Allowed-Origins;
+      #clear Unattended-Upgrade::Origins-Pattern;
+      {% if ansible_facts.distribution == 'Debian' %}
+      Unattended-Upgrade::Origins-Pattern {
+          "origin=Debian,codename=${distro_codename}-security,label=Debian-Security";
+      };
+      {% else %}
+      Unattended-Upgrade::Allowed-Origins {
+          "${distro_id}:${distro_codename}-security";
+          "${distro_id}ESMApps:${distro_codename}-apps-security";
+          "${distro_id}ESM:${distro_codename}-infra-security";
+      };
+      {% endif %}
     owner: root
     group: root
     mode: "0644"
@@ -60,9 +85,24 @@
     state: started
     enabled: true
   loop:
+    - apparmor
     - sshguard
     - apt-daily.timer
     - apt-daily-upgrade.timer
+
+- name: Check AppArmor support in the running kernel
+  ansible.builtin.command: aa-enabled
+  register: node_apparmor_enabled
+  changed_when: false
+  failed_when: false
+
+- name: Require active AppArmor before installing Docker
+  ansible.builtin.assert:
+    that: node_apparmor_enabled.rc == 0
+    fail_msg: >-
+      AppArmor is not active in the running kernel. Use an AppArmor-capable
+      kernel, enable AppArmor in the image's kernel boot settings, reboot,
+      and rerun bootstrap. No automatic reboot or bootloader change was made.
 
 - name: Ensure apt keyrings directory exists
   ansible.builtin.file:
@@ -85,13 +125,20 @@
     group: root
     mode: "0644"
 
+- name: Remove legacy Docker apt repository
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/docker.list
+    state: absent
+
 - name: Add Docker apt repository
-  ansible.builtin.apt_repository:
-    repo: >-
-      deb [arch={{ node_dpkg_architecture.stdout }} signed-by=/etc/apt/keyrings/docker.asc]
-      https://download.docker.com/linux/{{ ansible_facts.distribution | lower }}
-      {{ ansible_facts.distribution_release }} stable
-    filename: docker
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: [deb]
+    uris: "https://download.docker.com/linux/{{ ansible_facts.distribution | lower }}"
+    suites: ["{{ ansible_facts.distribution_release }}"]
+    components: [stable]
+    architectures: ["{{ node_dpkg_architecture.stdout }}"]
+    signed_by: /etc/apt/keyrings/docker.asc
     state: present
 
 - name: Install Docker packages
@@ -103,6 +150,7 @@
       - docker-buildx-plugin
       - docker-compose-plugin
     state: present
+    update_cache: true
 
 - name: Ensure Docker service is running and enabled
   ansible.builtin.systemd_service:

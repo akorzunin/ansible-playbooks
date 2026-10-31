@@ -1,33 +1,28 @@
 ---
-# One top-level YAML group per node avoids rewriting unrelated Vault-tagged records.
-- name: Save key-only SSH connection in the private YAML hosts file
-  ansible.builtin.blockinfile:
-    path: "{{ node_inventory_file }}"
-    marker: "# {mark} ANSIBLE BOOTSTRAP {{ inventory_hostname }}"
-    block: |
-      bootstrap_{{ inventory_hostname }}:
-        hosts:
-          {{ inventory_hostname }}:
-            ansible_host: {{ ansible_host | to_json }}
-            ansible_port: {{ ansible_port | int }}
-            ansible_user: {{ ansible_user | to_json }}
-            ansible_python_interpreter: /usr/bin/python3
-            ansible_ssh_private_key_file: {{ ansible_ssh_private_key_file | to_json }}
-    backup: true
-    mode: "0600"
-  delegate_to: localhost
-  become: false
-
-# Layout-bound insertion at the end of monitored_nodes.hosts; use a structured
-# inventory writer if the overlay layout changes (preflight checks this anchor).
-- name: Save monitoring membership allowlist and alert opt-in
+- name: Remove the old layout-dependent monitoring entry when present
   ansible.builtin.blockinfile:
     path: "{{ node_monitoring_inventory_file }}"
     marker: "        # {mark} ANSIBLE BOOTSTRAP {{ inventory_hostname }}"
-    insertbefore: '^    # Retain SSH records'
-    block: |2
+    state: absent
+    backup: true
+  delegate_to: localhost
+  become: false
+
+# Ansible merges same-named groups across the inventory. A unique parent lets us
+# extend monitored_nodes without rewriting existing YAML, comments, or Vault text.
+- name: Save monitoring membership allowlist and alert opt-in
+  ansible.builtin.blockinfile:
+    path: "{{ node_monitoring_inventory_file }}"
+    marker: "# {mark} ANSIBLE BOOTSTRAP {{ inventory_hostname }}"
+    block: |
+      monitoring_bootstrap_{{ inventory_hostname }}:
+        children:
+          monitored_nodes:
+            hosts:
               {{ inventory_hostname }}:
+                monitoring_enabled: true
                 monitoring_availability_alert: true
+                monitoring_client_telegraf_port: 9273
                 monitoring_telegraf_allowed_sources: {{ monitoring_telegraf_allowed_sources | to_json }}
     backup: true
     mode: "0644"

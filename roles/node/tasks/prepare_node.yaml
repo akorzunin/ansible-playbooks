@@ -33,31 +33,22 @@
     fail_msg: Configure monitoring Telegram credentials in external_vars.yml first.
   no_log: true
 
-- name: Require the expected YAML inventory layout before inserting managed entries
+# Top-level appends preserve existing text; use a round-trip YAML writer if
+# flow-style inventories need support.
+- name: Require block-style YAML inventories before appending managed groups
   ansible.builtin.assert:
     that:
       - "lookup('file', node_inventory_file) is search('(?m)^\\S[^\\n]*:\\s*$')"
-      - "lookup('file', node_monitoring_inventory_file) is search('(?m)^    # Retain SSH records')"
-    fail_msg: Bootstrap expects the private YAML hosts inventory and the repository monitoring overlay layout.
+      - "lookup('file', node_monitoring_inventory_file) is search('(?m)^\\S[^\\n]*:\\s*$')"
+    fail_msg: Bootstrap appends managed groups to existing block-style YAML inventories; INI and single-line flow-style inventories are not supported.
 
-- name: Read administrator public key
-  ansible.builtin.set_fact:
-    node_authorized_key: "{{ lookup('file', node_public_key_file) | trim }}"
-
-- name: Validate administrator public key
-  ansible.builtin.assert:
-    that:
-      - node_authorized_key is match('^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp[0-9]+) [A-Za-z0-9+/=]+( .*)?$')
-    fail_msg: Set node_public_key_file to a single OpenSSH public key.
-
-- name: Check private key and monitoring environment exist locally
+- name: Check inventories and monitoring environment exist locally
   ansible.builtin.stat:
     path: "{{ item }}"
     get_checksum: false
     get_mime: false
     get_attributes: false
   loop:
-    - "{{ node_private_key_file }}"
     - "{{ monitoring_env_file | default(playbook_dir ~ '/../playbooks/ws-logs/.env') }}"
     - "{{ node_inventory_file }}"
     - "{{ node_monitoring_inventory_file }}"
@@ -105,6 +96,27 @@
       - "{{ node_allowed_sources | to_json }}"
   changed_when: false
 
+- name: Prepare dedicated Vault-encrypted node identity using active Vault credentials
+  node_identity:
+    inventory_file: "{{ node_inventory_file }}"
+    node: "{{ nn }}"
+    use_legacy_access: "{{ node_root_pass | length == 0 }}"
+    legacy_key_file: "{{ node_private_key_file }}"
+  register: node_identity
+  no_log: true
+
+- name: Check the old local private key only when migrating key-file access
+  ansible.builtin.stat:
+    path: "{{ node_identity.legacy_key_file }}"
+  register: node_legacy_key
+  when: node_identity.legacy_key_file | length > 0
+
+- name: Require the old key for a key-file migration without root access
+  ansible.builtin.assert:
+    that: node_legacy_key.stat.exists
+    fail_msg: Supply the existing administrator key via node_private_key_file, or rerun using root access to install the dedicated key.
+  when: node_identity.legacy_key_file | length > 0
+
 - name: Wait for the server to present an SSH banner before bootstrap
   ansible.builtin.wait_for:
     host: "{{ node_address }}"
@@ -126,10 +138,10 @@
     ansible_port: "{{ node_port | int }}"
     ansible_user: root
     ansible_password: "{{ node_root_pass }}"
-    ansible_ssh_args: -o PreferredAuthentications=password,keyboard-interactive -o PubkeyAuthentication=no
+    ansible_ssh_args: -o ControlMaster=auto -o ControlPersist=60s -o PreferredAuthentications=password,keyboard-interactive -o PubkeyAuthentication=no
     ansible_python_interpreter: /usr/bin/python3
     node_user: "{{ node_user }}"
-    node_authorized_key: "{{ node_authorized_key }}"
+    node_authorized_key: "{{ node_identity.public_key }}"
   no_log: true
   when: node_root_pass | length > 0
 
@@ -143,12 +155,22 @@
     ansible_user: "{{ node_user }}"
     ansible_password: ""
     ansible_become_password: ""
-    ansible_ssh_private_key_file: "{{ node_private_key_file }}"
-    # A separate alias and disabled multiplexing ensure this cannot reuse root's session.
-    ansible_ssh_args: -o ControlMaster=no -o ControlPath=none -o IdentitiesOnly=yes -o PreferredAuthentications=publickey -o PasswordAuthentication=no
+    ansible_private_key: "{{ node_identity.private_key if node_identity.legacy_key_file | length == 0 else '' }}"
+    ansible_ssh_private_key_file: "{{ node_identity.legacy_key_file }}"
+    node_authorized_key: "{{ node_identity.public_key }}"
+    node_private_key_vault: "{{ node_identity.vaulted_key }}"
+    node_legacy_private_key_file: "{{ node_identity.legacy_key_file }}"
+    # Access checks disable multiplexing explicitly; normal tasks reuse the
+    # administrator connection (Ansible's default control path includes the user).
+    ansible_ssh_args: -o ControlMaster=auto -o ControlPersist=60s -o IdentitiesOnly=yes -o PreferredAuthentications=publickey -o PasswordAuthentication=no
+    ansible_ssh_retries: 3
     ansible_python_interpreter: /usr/bin/python3
     monitoring_node: "{{ nn }}"
     monitoring_enabled: true
     monitoring_availability_alert: true
     monitoring_client_telegraf_port: 9273
     monitoring_telegraf_allowed_sources: "{{ node_allowed_sources }}"
+  no_log: true
+
+- name: Persist the encrypted recovery identity before changing remote access
+  ansible.builtin.import_tasks: save_connection.yaml

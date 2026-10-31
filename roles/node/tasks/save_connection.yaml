@@ -1,0 +1,30 @@
+---
+# One top-level group preserves unrelated Vault records, comments, and symlinks.
+# Save before changing remote access: a failed run must not lose its recovery key.
+# Single-writer inventory: serialize bootstraps; add a controller-side lock if
+# concurrent provisioning is needed.
+- name: Save Vault-backed SSH connection in the private YAML hosts file
+  vars:
+    node_saved_host: "{{ hostvars[groups['node_bootstrap_target'] | first] }}"
+  ansible.builtin.blockinfile:
+    path: "{{ node_inventory_file }}"
+    marker: "# {mark} ANSIBLE BOOTSTRAP {{ node_saved_host.inventory_hostname }}"
+    block: |
+      bootstrap_{{ node_saved_host.inventory_hostname }}:
+        hosts:
+          {{ node_saved_host.inventory_hostname }}:
+            ansible_host: {{ node_saved_host.ansible_host | to_json }}
+            ansible_port: {{ node_saved_host.ansible_port | int }}
+            ansible_user: {{ node_saved_host.ansible_user | to_json }}
+            ansible_python_interpreter: /usr/bin/python3
+            ansible_ssh_common_args: -o IdentitiesOnly=yes -o PreferredAuthentications=publickey -o PasswordAuthentication=no
+            ansible_private_key: !vault |
+      {{ node_saved_host.node_private_key_vault | indent(14, true) }}
+      {% if node_saved_host.node_legacy_private_key_file | length > 0 %}
+            node_bootstrap_legacy_key_file: {{ node_saved_host.node_legacy_private_key_file | to_json }}
+      {% endif %}
+    backup: true
+    mode: "0600"
+  delegate_to: localhost
+  become: false
+  no_log: true
