@@ -1,0 +1,7 @@
+# Both deployments plus older on-host copies; stopped main must remain stopped.
+backup_service: dwman
+backup_paths:
+  - /srv/deploy/dwman-main
+  - /srv/deploy/dwman-test
+  - /srv/deploy/dwman-test.bak
+  - /srv/deploy.bak

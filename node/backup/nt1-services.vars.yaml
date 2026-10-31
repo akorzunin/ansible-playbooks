@@ -1,0 +1,10 @@
+# Non-dwman services, including persistent/config paths outside /srv/deploy.
+backup_service: services
+backup_paths:
+  - /srv/deploy/3x-ui
+  - /srv/deploy/caddy
+  - /srv/deploy/naiveproxy
+  - /srv/deploy/rustdesk
+  - /srv/monitoring
+  - /etc/naiveproxy
+  - /var/lib/naiveproxy

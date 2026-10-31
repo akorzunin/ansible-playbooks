@@ -1,82 +1,205 @@
-- name: Install rclone
-  ansible.builtin.import_role:
-    name: rclone
+- name: Require a real run and explicit backup paths
+  ansible.builtin.assert:
+    that:
+      - not ansible_check_mode
+      - backup_paths | length > 0
+    quiet: true
+    fail_msg: Backups require source paths and a non-check-mode run.
 
-- name: Create rclone config
-  ansible.builtin.include_role:
-    name: rclone
-    tasks_from: setup_config
-  vars:
-    rclone_user: "{{ BACKUP_USER }}"
-    rclone_pass: "{{ BACKUP_PASS }}"
+- name: Check installed tools before stopping anything
+  ansible.builtin.command:
+    argv: ["{{ item }}", --version]
+  loop: [rclone, tar]
+  changed_when: false
 
-- name: Backup all services
-  when: backup_service == "all"
+- name: Create private backup staging outside source directories
+  ansible.builtin.tempfile:
+    state: directory
+    path: /var/tmp
+    prefix: service-backup-
+  become: true
+  register: backup_work_dir
+
+- name: Prepare and upload backup
+  become: true
   block:
-    - name: Stop docker daemon
-      ansible.builtin.systemd:
-        name: docker
-        state: stopped
-      become: true
-      timeout: 30
-
-    - name: Backup all services w/ rclone
-      ansible.builtin.command:
-        argv:
-          - rclone
-          - archive
-          - create
-          - "{{ backup_create_base_dir }}"
-          - "{{ backup_dest_path }}"
-          - "--config"
-          - "{{ rclone_config_path }}"
-      become: true
-      register: backup_save_out
-      changed_when: backup_save_out.rc != 0
-
-    - name: Fix rclone config permissions
+    - name: Create private staging subdirectories
       ansible.builtin.file:
-        path: "{{ rclone_config_path }}"
-        mode: "0600"
-        owner: "{{ ansible_user }}"
-        group: "{{ ansible_user }}"
-      become: true
+        path: "{{ backup_work_dir.path }}/{{ item }}"
+        state: directory
+        mode: "0700"
+      loop: [metadata, upload]
 
-    - name: Start docker daemon
-      ansible.builtin.systemd:
-        name: docker
-        state: started
-      become: true
+    - name: Inspect containers and refuse omitted writable storage
+      ansible.builtin.script:
+        cmd: >-
+          inventory.py {{ backup_paths | to_json | quote }}
+          {{ (backup_work_dir.path ~ '/metadata/containers.json') | quote }}
+        executable: python3
+      register: backup_inventory_out
+      changed_when: false
 
-- name: Backup single service
-  when: backup_service != "all"
-  block:
-    - name: Stop docker service {{ backup_service }}
-      ansible.builtin.command:
-        cmd: docker compose stop
-        chdir: "{{ backup_service_dir }}"
-      register: backup_stop_out
-      changed_when: backup_stop_out.rc != 0
+    - name: Remember exactly which containers were running
+      ansible.builtin.set_fact:
+        backup_inventory: "{{ backup_inventory_out.stdout | from_json }}"
 
-    - name: Backup service w/ rclone
+    - name: Check cloud access before downtime
       ansible.builtin.command:
         argv:
           - rclone
-          - archive
-          - create
-          - "{{ backup_service_dir }}"
-          - "{{ backup_dest_path }}"
-      register: backup_save_out
-      changed_when: backup_save_out.rc != 0
+          - lsf
+          - "{{ backup_remote_name }}:"
+          - --dirs-only
+          - --config
+          - "{{ backup_rclone_config_path }}"
+          - --contimeout
+          - 15s
+          - --timeout
+          - 60s
+          - --retries
+          - '1'
+      changed_when: false
+      no_log: true
 
-    - name: Start docker service {{ backup_service }}
+    - name: Take consistent filesystem snapshot
+      block:
+        - name: Stop only previously running containers using selected storage
+          ansible.builtin.command:
+            argv: "{{ ['docker', 'stop', '--time', '60'] + backup_inventory.running_ids }}"
+          when: backup_inventory.running_ids | length > 0
+          changed_when: true
+
+        - name: Archive data and deployment metadata with numeric ownership
+          ansible.builtin.command:
+            argv: >-
+              {{ ['tar', '--create', '--gzip', '--acls', '--xattrs', '--numeric-owner',
+                  '--file', backup_work_dir.path ~ '/upload/' ~ backup_file_name,
+                  '--directory', backup_work_dir.path, 'metadata', '--directory', '/', '--']
+                 + (backup_inventory.paths | map('regex_replace', '^/', '') | list) }}
+          changed_when: true
+      always:
+        # Restore initial running state even if stop partially fails or tar fails.
+        # Ansible always cannot survive controller loss; staging retains IDs for manual recovery.
+        - name: Restart only containers which were running before backup
+          ansible.builtin.command:
+            argv: [docker, start, "{{ item }}"]
+          loop: "{{ backup_inventory.running_ids }}"
+          changed_when: true
+
+    - name: Verify running containers recovered
       ansible.builtin.command:
-        cmd: docker compose start
-        chdir: "{{ backup_service_dir }}"
-      register: backup_start_out
-      changed_when: backup_start_out.rc != 0
+        argv: [docker, inspect, "{{ item }}"]
+      loop: "{{ backup_inventory.running_ids }}"
+      register: backup_recovery
+      changed_when: false
+      failed_when: >-
+        backup_recovery.rc != 0 or
+        not (backup_recovery.stdout | from_json | first).State.Running or
+        ((backup_recovery.stdout | from_json | first).State.Health.Status | default('healthy')) != 'healthy'
+      retries: 12
+      delay: 5
+      until: backup_recovery is succeeded
+      no_log: true
 
-- name: Remove rclone config
-  ansible.builtin.include_role:
-    name: rclone
-    tasks_from: rm_config
+    - name: Protect archive containing application secrets
+      ansible.builtin.file:
+        path: "{{ backup_work_dir.path }}/upload/{{ backup_file_name }}"
+        mode: "0600"
+
+    - name: Read every archive member to detect corruption
+      ansible.builtin.command:
+        argv:
+          - python3
+          - -c
+          - |
+            import gzip, json, tarfile, sys
+            with gzip.open(sys.argv[1], 'rb') as stream:
+                while stream.read(1024 * 1024):
+                    pass
+            with tarfile.open(sys.argv[1], 'r:gz') as archive:
+                for member in archive:
+                    if member.isfile():
+                        with archive.extractfile(member) as stream:
+                            if '/dwman' in member.name and member.name.endswith('/data/db.json'):
+                                data = stream.read()
+                                try:
+                                    tables = json.loads(data)
+                                    status = {k: len(v) for k, v in tables.items()}
+                                except (ValueError, AttributeError, TypeError):
+                                    status = 'WARNING: empty or invalid database preserved unchanged'
+                                print(member.name, len(data), status)
+                            else:
+                                while stream.read(1024 * 1024):
+                                    pass
+          - "{{ backup_work_dir.path }}/upload/{{ backup_file_name }}"
+      register: backup_archive_validation
+      changed_when: false
+
+    - name: Report archived dwman database condition without exposing records
+      ansible.builtin.debug:
+        var: backup_archive_validation.stdout_lines
+
+    - name: Calculate archive checksum
+      ansible.builtin.command:
+        argv: [sha256sum, "{{ backup_file_name }}"]
+        chdir: "{{ backup_work_dir.path }}/upload"
+      register: backup_checksum
+      changed_when: false
+
+    - name: Save checksum alongside archive
+      ansible.builtin.copy:
+        dest: "{{ backup_work_dir.path }}/upload/{{ backup_file_name }}.sha256"
+        content: "{{ backup_checksum.stdout }}\n"
+        mode: "0600"
+
+    - name: Upload archive and checksum without deleting older backups
+      ansible.builtin.command:
+        argv:
+          - rclone
+          - copyto
+          - "{{ backup_work_dir.path }}/upload/{{ backup_file_name }}{{ item }}"
+          - "{{ backup_dest_path }}{{ item }}"
+          - --config
+          - "{{ backup_rclone_config_path }}"
+          - --immutable
+          - --contimeout
+          - 15s
+          - --timeout
+          - 120s
+      loop: ['', .sha256]
+      changed_when: true
+
+    - name: Download and compare cloud bytes rather than trusting upload success
+      ansible.builtin.command:
+        argv:
+          - rclone
+          - check
+          - "{{ backup_work_dir.path }}/upload"
+          - "{{ backup_dest_path | dirname }}"
+          - --download
+          - --one-way
+          - --config
+          - "{{ backup_rclone_config_path }}"
+          - --contimeout
+          - 15s
+          - --timeout
+          - 120s
+      changed_when: false
+
+    - name: Report verified cloud backup
+      ansible.builtin.debug:
+        msg:
+          - "Verified backup: {{ backup_dest_path }}"
+          - "SHA256: {{ backup_checksum.stdout }}"
+
+    - name: Remove staging only after successful cloud verification
+      ansible.builtin.file:
+        path: "{{ backup_work_dir.path }}"
+        state: absent
+  rescue:
+    - name: Report retained recovery files
+      ansible.builtin.fail:
+        msg: >-
+          Backup failed. Private staging retained at {{ backup_work_dir.path }}.
+          Check container recovery and retry upload/verification; no old cloud backups were deleted.
+          Original error: {{ ansible_failed_result.msg | default('see failed task') }}

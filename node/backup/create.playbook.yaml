@@ -4,6 +4,13 @@
   roles:
     - backup
   vars_files:
-    - "{{ lookup('env', 'PWD') }}/external_vars.yml"
+    - "{{ playbook_dir }}/../../external_vars.yml"
   vars:
+    # Override the repository's permissive default for secret-bearing backups.
+    ansible_ssh_host_key_checking: true
     backup_service: "{{ bs | default('all') }}"
+  pre_tasks:
+    - name: Require an explicit host limit before stopping services
+      ansible.builtin.assert:
+        that: ansible_limit | default('') | length > 0
+        fail_msg: Use --limit to explicitly select the host to back up.
