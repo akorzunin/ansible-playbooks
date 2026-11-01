@@ -1,0 +1,57 @@
+---
+- name: Prepare ge2 for the GitHub Actions dwman-test deployment
+  hosts: ge2
+  become: true
+
+  tasks:
+    - name: Create the application deployment directory
+      ansible.builtin.file:
+        path: /srv/deploy/dwman-test
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0755"
+
+    - name: Create Caddy configuration directory
+      ansible.builtin.file:
+        path: /srv/deploy/caddy/config
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Copy Caddy compose definition
+      ansible.builtin.copy:
+        src: caddy/compose.yaml
+        dest: /srv/deploy/caddy/compose.yaml
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Copy Caddy routing configuration
+      ansible.builtin.copy:
+        src: caddy/Caddyfile
+        dest: /srv/deploy/caddy/config/Caddyfile
+        owner: root
+        group: root
+        mode: "0644"
+      notify: Reload Caddy
+
+    - name: Validate Caddy configuration
+      ansible.builtin.command:
+        cmd: docker compose run --rm --no-deps caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+        chdir: /srv/deploy/caddy
+      changed_when: false
+      when: not ansible_check_mode
+
+    - name: Start the HTTPS proxy
+      community.docker.docker_compose_v2:
+        project_src: /srv/deploy/caddy
+        state: present
+
+  handlers:
+    - name: Reload Caddy
+      ansible.builtin.command:
+        cmd: docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+        chdir: /srv/deploy/caddy
+      changed_when: true
