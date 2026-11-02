@@ -28,7 +28,14 @@
         group: root
         mode: "0644"
 
+    # The VPN deployment owns the combined router once its Compose override exists.
+    - name: Check whether VPN routing is installed
+      ansible.builtin.stat:
+        path: /srv/deploy/caddy/compose.override.yaml
+      register: ge2_vpn_router
+
     - name: Copy Caddy routing configuration
+      when: not ge2_vpn_router.stat.exists
       ansible.builtin.copy:
         src: caddy/Caddyfile
         dest: /srv/deploy/caddy/config/Caddyfile

@@ -6,7 +6,7 @@ services:
     user: "{{ ansible_facts.getent_passwd.vpnproxy[1] }}:{{ ansible_facts.getent_passwd.vpnproxy[2] }}"
     # UDP/443 is independent of Naive's TCP/443; use an unprivileged internal port.
     ports:
-      - "0.0.0.0:443:8443/udp"
+      - "0.0.0.0:{{ vpn_node_hysteria2_port }}:8443/udp"
     volumes:
       - /srv/deploy/vpn-hysteria2/server.json:/etc/vpn/server.json:ro
       # Mount the domain directory, not individual inodes, so ACME renewal is visible.

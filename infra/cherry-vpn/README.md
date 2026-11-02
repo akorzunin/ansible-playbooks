@@ -13,7 +13,24 @@ UDP and sustained-throughput testing are not covered by this initial baseline.
 
 ## Current status
 
-One Debian 13 B1 VM is **running** in `NL-Amsterdam`, DNS
+**Retired on 2026-11-01:** dyn1 (server `1044039`, `84.32.231.93`) and its
+Cherry SSH-key registration were destroyed through a reviewed OpenTofu plan.
+The project API subsequently returned zero servers, IPs and storage. The
+`akorz-dyn1.duckdns.org` record was cleared; shared SSH inventory and monitoring
+membership were removed, with VPN probe alerts disabled. Encrypted state was
+backed up to Dropbox; retain state and private backups.
+
+All three public profiles were verified to match the generated Aurora-only
+profiles, defaulting to `aurora-vless`, with the existing URLs/tokens unchanged.
+Two isolated Aurora HTTPS checks passed. Enrolled clients must refresh; the dyn1
+SSH hop to nt1 and any static Cherry/Discord configurations no longer work.
+Native controller and workstation Docker proxy configurations were not changed.
+**Do not run apply/deploy to restore access:** the configuration below can create
+a new billable VM and requires fresh review and approval.
+
+### Historical deployment status (before retirement)
+
+One Debian 13 B1 VM was running in `NL-Amsterdam`, DNS
 `akorz-dyn1.duckdns.org`. It replaced the Lithuania server **destroy-first**,
 retaining the administrator public-key record and
 state-encryption secret but generating a fresh server identity. There is no

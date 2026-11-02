@@ -30,6 +30,10 @@ for verified object paths and the pre-existing empty main database finding.
 
 ### Blocked nt1: use dyn1 as an SSH hop
 
+**Historical only:** dyn1 was destroyed on 2026-11-01; this route no longer works.
+Use a separately verified replacement hop before attempting another nt1 backup.
+The existing cloud backups are unaffected.
+
 Pass `--ssh-common-args` to the above commands. Both hosts must have pinned keys;
 never disable checking or accept a replacement key to work around a failure.
 The create playbook enables host-key checking despite the repository-wide default.

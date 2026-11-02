@@ -24,11 +24,15 @@ class RoleTests(unittest.TestCase):
     def setUp(self):
         self.environment = Environment(loader=FileSystemLoader(ROLE / "templates"), undefined=StrictUndefined)
         self.environment.filters["to_nice_json"] = lambda value: json.dumps(value, indent=2)
+        self.environment.filters["bool"] = bool
         self.credentials = prepare.credentials()
         self.variables = {
             "vpn_node_name": "cherry", "vpn_node_domain": "vpn.example.org",
             "vpn_node_public_address": "192.0.2.10", "vpn_node_reality_server_name": "www.google.com",
             "vpn_node_credentials": self.credentials,
+            "vpn_node_reality_handshake_address": "192.0.2.10",
+            "vpn_node_shared_https": False,
+            "vpn_node_ssh_port": 2222,
             "vpn_node_hysteria2_outbound": {
                 "type": "hysteria2", "tag": "cherry-hysteria2", "server": "192.0.2.10", "server_port": 443,
                 "password": "fixture-hysteria2-password-123456789", "up_mbps": 5, "down_mbps": 20,
@@ -80,6 +84,7 @@ class RoleTests(unittest.TestCase):
         self.assertIn("vpn_node_ssh_private_key_path", connections[0]["private_key"])
         self.assertIn("vpn_node_host_key", connections[0]["host_key"][0])
         self.assertEqual(connections[0]["user"], "vpnprobe")
+        self.assertIn("vpn_node_ssh_port", connections[0]["server_port"])
         self.assertNotIn("admin", json.dumps(connections))
         self.assertNotIn("insecure", json.dumps(connections))
         self.variables["vpn_node_client_outbounds"] = [

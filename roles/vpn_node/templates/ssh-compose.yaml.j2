@@ -1,0 +1,22 @@
+services:
+  ssh:
+    image: vpn-node-ssh:debian13
+    restart: unless-stopped
+    user: "{{ ansible_facts.getent_passwd.vpnproxy[1] }}:{{ ansible_facts.getent_passwd.vpnproxy[2] }}"
+    ports:
+      - "{{ vpn_node_ssh_port }}:2222"
+    volumes:
+      - /srv/deploy/vpn-ssh/sshd_config:/etc/vpn/sshd_config:ro
+      - /srv/deploy/vpn-ssh/authorized_keys:/etc/vpn/authorized_keys:ro
+      - /srv/deploy/vpn-ssh/ssh_host_ed25519_key:/etc/vpn/ssh_host_ed25519_key:ro
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 96m
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

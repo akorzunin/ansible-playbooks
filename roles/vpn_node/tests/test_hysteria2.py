@@ -92,7 +92,7 @@ class Hysteria2Tests(unittest.TestCase):
 
     def test_full_flow_reuses_the_compose_deployment_after_certificate_issuance(self):
         main = yaml.safe_load((ROLE / "tasks/main.yaml").read_text())
-        imports = [task["ansible.builtin.import_tasks"] for task in main]
+        imports = [task["ansible.builtin.import_tasks"] for task in main if "ansible.builtin.import_tasks" in task]
         self.assertLess(imports.index("proxies.yaml"), imports.index("hysteria2.yaml"))
         self.assertLess(imports.index("hysteria2.yaml"), imports.index("clients.yaml"))
         full = yaml.safe_load((ROOT / "infra/cherry-vpn/deploy.yaml").read_text())[1]

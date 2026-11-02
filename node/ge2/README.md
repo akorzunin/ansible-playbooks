@@ -1,4 +1,4 @@
-# dwman-test on ge2
+# ge2: dwman-test and VPN services
 
 GitHub Actions in `akorzunin/dwman` owns application deployment. This repository
 only prepares `/srv/deploy/dwman-test` and Caddy with persistent certificate storage.
@@ -95,13 +95,46 @@ succeeded; image `sha-db8c4a8` is healthy and HTTPS `/health` returns 200.
 Log out and sign in with Spotify again; no database restore or manual re-entry
 of notification settings is needed.
 
+## VPN services (2026-11-01)
+
+The reusable [`vpn_node` role](../../roles/vpn_node/README.md) now deploys
+Dockerized SSH, Naïve, VLESS/REALITY and Hysteria 2 on this existing node:
+
+```sh
+ansible-playbook -i hosts --vault-password-file .ansible_pass \
+  playbooks/vpn-node/deploy.yaml -e vpn_target=ge2
+```
+
+Settings live in `node/ge2/vpn.yaml`, with persistent node-specific credentials
+in `node/ge2/vpn.vault.yaml`. Do not regenerate that Vault on rerun.
+
+- Tunnel SSH uses TCP 2222, separately from unchanged administrator SSH on 22.
+- Naïve uses `akorz-ge2.duckdns.org` on TCP 443 via Caddy layer4 SNI passthrough.
+  Existing dwman HTTPS routing and the domain's A/AAAA records are preserved.
+- VLESS/REALITY + Vision uses TCP 8443, the same owned hostname as SNI, and XUDP.
+- Hysteria uses UDP 8443; Caddy retains UDP 443 for application HTTP/3.
+- All platforms default to `ge2-vless-via-naive`, with direct ge2 protocols,
+  `ge2-ssh-via-workstation` and Aurora available manually. URLs/tokens are unchanged.
+
+All six published ge2 paths passed two isolated HTTPS checks with ge2's IPv4.
+VLESS and VLESS-over-Naïve passed UDP/STUN checks against Cloudflare and Google.
+Hysteria passed HTTPS and both STUN servers in one repeated run but also had
+intermittent HTTPS/STUN failures; it remains a manual option, not the default.
+These are short functional checks, not sustained stability or voice verification.
+The dwman container/Telegraf were not recreated; dwman HTTPS health still passes.
+
+Caddy's SNI image is selected by `/srv/deploy/caddy/compose.override.yaml` and
+uses the original certificate/data volumes. Application preparation does not
+replace VPN-managed routing; rerun the VPN playbook after changing the site-only
+`node/ge2/caddy/Caddyfile`. No local VPN client was enrolled or switched.
+
 ## Rollback
 
 Stop `dwman-test` on ge2 first. Restore test variables to `SERVER_GROUP=nt1` and
 `DEPLOY_URL=https://test-dwman.akorz-nt1.duckdns.org`; delete the environment-level
 `ANSIBLE_HOSTS`, `ANSIBLE_PASS`, and `SSH_KNOWN_HOSTS` overrides to reuse the
 previous repository-level credentials. Then start the existing nt1 test container
-through the documented [SSH hop](../backup/readme.md#blocked-nt1-use-dyn1-as-an-ssh-hop).
+through a separately verified SSH hop. The historical dyn1 route is retired.
 This returns to nt1's pre-migration database; reconcile any writes made on ge2
 before doing so. Caddy on ge2 can remain running, but will return 502 while the
 backend is stopped.

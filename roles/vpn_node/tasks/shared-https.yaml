@@ -1,0 +1,95 @@
+---
+# Build on the controller: a 1 GiB application node has insufficient Go compiler headroom.
+- name: Create the controller HTTPS build cache
+  ansible.builtin.file:
+    path: "{{ lookup('env', 'HOME') }}/.cache/ansible-vpn-node/caddy-l4"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  become: false
+
+- name: Stage the existing version-pinned Caddy layer4 build
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../caddy/files/Dockerfile"
+    dest: "{{ lookup('env', 'HOME') }}/.cache/ansible-vpn-node/caddy-l4/Dockerfile"
+    mode: "0644"
+  register: vpn_node_router_build
+  delegate_to: localhost
+  become: false
+
+- name: Build the HTTPS SNI router image
+  community.docker.docker_image:
+    name: caddy-l4-vpn:2.11.4
+    source: build
+    build:
+      path: "{{ lookup('env', 'HOME') }}/.cache/ansible-vpn-node/caddy-l4"
+    archive_path: "{{ lookup('env', 'HOME') }}/.cache/ansible-vpn-node/caddy-l4.tar"
+    force_source: "{{ vpn_node_router_build.changed }}"
+  delegate_to: localhost
+  become: false
+
+- name: Transfer the built router image to the node
+  ansible.builtin.copy:
+    src: "{{ lookup('env', 'HOME') }}/.cache/ansible-vpn-node/caddy-l4.tar"
+    dest: /srv/deploy/caddy/vpn-router-image.tar
+    mode: "0600"
+  register: vpn_node_router_archive
+
+- name: Inspect the node's router image
+  community.docker.docker_image_info:
+    name: caddy-l4-vpn:2.11.4
+  register: vpn_node_router_image
+
+- name: Load the controller-built router image
+  ansible.builtin.command:
+    argv: [docker, load, --input, /srv/deploy/caddy/vpn-router-image.tar]
+  when: vpn_node_router_archive.changed or not vpn_node_router_image.images
+  changed_when: true
+
+- name: Stage the combined existing sites and VPN SNI route
+  ansible.builtin.template:
+    src: shared-Caddyfile.j2
+    dest: /srv/deploy/caddy/config/Caddyfile.vpn-candidate
+    mode: "0644"
+
+- name: Validate the combined router before replacing the existing configuration
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --network=none
+      - --volume=/srv/deploy/caddy/config/Caddyfile.vpn-candidate:/etc/caddy/Caddyfile:ro
+      - caddy-l4-vpn:2.11.4
+      - caddy
+      - validate
+      - --config=/etc/caddy/Caddyfile
+      - --adapter=caddyfile
+  changed_when: false
+
+- name: Activate the validated combined HTTPS routing
+  ansible.builtin.copy:
+    src: /srv/deploy/caddy/config/Caddyfile.vpn-candidate
+    dest: /srv/deploy/caddy/config/Caddyfile
+    remote_src: true
+    mode: "0644"
+    backup: true
+  register: vpn_node_router_config
+
+- name: Keep the SNI-capable image selected on ordinary Compose reruns
+  ansible.builtin.copy:
+    dest: /srv/deploy/caddy/compose.override.yaml
+    mode: "0644"
+    content: |
+      services:
+        caddy:
+          image: caddy-l4-vpn:2.11.4
+
+- name: Start the shared HTTPS router preserving existing data and application containers
+  community.docker.docker_compose_v2:
+    project_src: /srv/deploy/caddy
+    state: present
+    services: [caddy]
+    recreate: "{{ 'always' if vpn_node_router_config.changed else 'auto' }}"
+    wait: true
+    wait_timeout: 60

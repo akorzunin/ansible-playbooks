@@ -13,7 +13,7 @@
          rejectattr('detour', 'defined') | list }}
     hop_permit_open: >-
       {{ hop_destinations | map(attribute='server') |
-         zip(hop_destinations | map(attribute='server_port')) | map('join', ':') | join(' ') }}
+         zip(hop_destinations | map(attribute='server_port')) | map('join', ':') | join(' ') or 'none' }}
   tasks:
     - name: Load shared hop credentials
       ansible.builtin.include_vars:
@@ -27,7 +27,6 @@
           - hop_ssh.server == ansible_host
           - hop_ssh.server_port == ansible_port | int
           - hop_ssh.host_key | length > 0
-          - hop_destinations | length > 0
           - sing_box_secrets.workstation_ssh_public_key is match('^ssh-ed25519 ')
         quiet: true
       no_log: true
@@ -60,7 +59,14 @@
         group: root
         mode: '0755'
 
+    - name: Remove the shared client key when no SSH exits remain
+      ansible.builtin.file:
+        path: "/home/{{ hop_user }}/.ssh/authorized_keys"
+        state: absent
+      when: hop_destinations | length == 0
+
     - name: Install the shared client key restricted to published SSH exits
+      when: hop_destinations | length > 0
       ansible.builtin.copy:
         dest: "/home/{{ hop_user }}/.ssh/authorized_keys"
         content: >-

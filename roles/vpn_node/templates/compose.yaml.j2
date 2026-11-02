@@ -5,8 +5,13 @@ services:
     restart: unless-stopped
     user: "{{ ansible_facts.getent_passwd.vpnproxy[1] }}:{{ ansible_facts.getent_passwd.vpnproxy[2] }}"
     ports:
+{% if vpn_node_shared_https | bool %}
+      - "127.0.0.1:8089:8080"
+      - "127.0.0.1:8444:8443"
+{% else %}
       - "80:8080"
       - "443:8443"
+{% endif %}
     environment:
       XDG_DATA_HOME: /var/lib/vpn-node
       XDG_CONFIG_HOME: /var/lib/vpn-node

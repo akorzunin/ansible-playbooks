@@ -1,5 +1,5 @@
 ---
-- name: Require a dedicated Debian x86 node and valid public names
+- name: Require a bootstrapped Debian x86 node and valid public names
   ansible.builtin.assert:
     that:
       - not ansible_check_mode
@@ -10,9 +10,15 @@
       - vpn_node_name is match('^[a-z][a-z0-9-]{0,62}$')
       - vpn_node_domain is match('^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$')
       - vpn_node_reality_server_name is match('^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$')
-    fail_msg: Use a dedicated Debian x86_64 node with verified non-root sudo access, strict host-key checking and a DNS hostname.
+      - vpn_node_ssh_port | int > 1024
+      - vpn_node_ssh_port | int < 65536
+      - vpn_node_ssh_port | int != ansible_port | default(22) | int
+      - vpn_node_hysteria2_port | int > 0
+      - vpn_node_hysteria2_port | int < 65536
+      - not vpn_node_shared_https | bool or vpn_node_caddyfile | length > 0
+    fail_msg: Use a bootstrapped Debian x86_64 node with strict host-key checking, a DNS hostname and a separate tunnel SSH port.
 
-- name: Require shared Vault credentials before changing the node
+- name: Require persistent Vault credentials before changing the node
   ansible.builtin.assert:
     that:
       - vpn_node_credentials.naive_username is match('^[a-zA-Z0-9_-]+$')
@@ -25,7 +31,7 @@
       - vpn_node_hysteria2_download_mbps | int > 0
       - vpn_node_hysteria2_upload_mbps | int > 0
       - lookup('ansible.builtin.file', vpn_node_ssh_public_key_path) is match('^ssh-ed25519 ')
-    fail_msg: Restore both shared VPN Vaults and the dedicated SSH keys before deploying.
+    fail_msg: Restore persistent VPN credentials and the dedicated tunnel key before deploying.
   no_log: true
 
 - name: Derive the tunnel public key from the controller private key
@@ -49,7 +55,7 @@
   changed_when: false
   failed_when: vpn_node_identity.rc != 0 or vpn_node_identity.stdout | int == 0
 
-- name: Verify passwordless sudo before restricting SSH
+- name: Verify sudo access before deploying containers
   ansible.builtin.command: id -u
   register: vpn_node_sudo_identity
   changed_when: false

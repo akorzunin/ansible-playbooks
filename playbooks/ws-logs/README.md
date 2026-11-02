@@ -227,13 +227,12 @@ is manual. The workstation cannot send notifications while it is offline.
 
 ## Adding, disabling, and retiring nodes
 
-`dyn1` is the existing Amsterdam Cherry VM, not an automatically allocated target.
-Its key-only SSH record is saved in private `hosts`, retaining the dedicated admin
-key and strict host-key pin from `infra/cherry-vpn/private/inventory.yaml`.
-Telegraf runs separately from its VPN containers. On VM replacement, update the
-private connection and verified host pin, then redeploy the collector and server.
-On VM deletion, remove `dyn1` from the monitoring overlay and redeploy the server;
-OpenTofu does not reconcile monitoring membership automatically.
+`dyn1` was destroyed on 2026-11-01. Its shared SSH record and monitoring membership
+were removed, workstation VPN probes were disabled in the overlay, and this stack
+was redeployed. OpenTofu does not reconcile monitoring membership automatically.
+On future VM replacement, update the private connection and verified host pin,
+then redeploy the collector and server. On deletion, remove the node from the
+monitoring overlay and redeploy the server.
 
 For a fresh Debian/Ubuntu server, use the [automated node bootstrap](../../node/init.md):
 it installs Docker/security updates/SSHGuard, saves SSH and monitoring inventory,

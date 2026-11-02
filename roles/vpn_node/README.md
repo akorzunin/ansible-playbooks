@@ -1,227 +1,119 @@
 # VPN node
 
-Reusable configuration for a **dedicated Debian x86_64 node**, not nt1. The role
-never creates cloud resources, rotates nodes, republishes profiles or changes the
-active client. Native SSH stays on the host; Naïve, VLESS and Hysteria 2 run in Docker.
+Reusable Docker VPN services for an existing, bootstrapped Debian x86_64 node.
+Static servers such as ge2 and disposable servers such as dyn1 use the same role;
+cloud provisioning and administrator bootstrap remain separate. The role does
+not change administrator SSH, host routing, active clients or monitoring.
 
-| Public port | Service |
-| --- | --- |
-| TCP 22 (or inventory SSH port) | Key-only administration and `vpnprobe` TCP forwarding |
-| TCP 80 | ACME certificate issuance / HTTPS redirect |
-| TCP 443 | Authenticated Naïve HTTP/2 proxy |
-| TCP 8443 | VLESS/REALITY + Vision, sing-box server |
-| UDP 443 | Hysteria 2 + Brutal, sing-box server |
+| Service | Dedicated node | ge2 / shared HTTPS |
+| --- | --- | --- |
+| Forwarding-only OpenSSH | TCP 2222 | TCP 2222 |
+| Naïve HTTP/2 CONNECT | TCP 443, HTTP/ACME 80 | TCP 443 through Caddy SNI passthrough |
+| VLESS/REALITY + Vision | TCP 8443 | TCP 8443 |
+| Hysteria 2 / Brutal | UDP 443 | UDP 8443 (Caddy retains HTTP/3 on UDP 443) |
 
-VLESS can relay UDP over its TCP connection; it does not require a public UDP
-listener. SSH and this Naïve setup are TCP-only. Hysteria 2 uses native QUIC/UDP;
-ISP/mobile behavior and application UDP still need separate client tests. Naïve
-owns TCP/443, independently of Hysteria 2's UDP/443; an SNI router would be needed
-to also offer REALITY on TCP/443. There is no Docker socket, management API or panel
-exposed to clients, and no host firewall is installed by this role.
+All four services run in separate unprivileged, capability-dropped containers
+with read-only roots and memory/PID/log limits. SSH is TCP-only and cannot open
+shells, commands, PTYs, remote forwards or agent/Unix-socket forwards. Its host key
+is separate from administrator SSH and is pinned through the authenticated admin
+connection, never by trusting a network scan. Private keys persist on the node.
 
-## Inputs and deployment
+Naïve is TCP-only. VLESS relays UDP with XUDP, including through its Naïve carrier.
+Hysteria uses native outer QUIC/UDP. Protocol availability varies by network; a
+short successful check does not establish sustained reliability or DPI resistance.
 
-Use a public IPv4 and a dedicated DNS hostname (`vpn_node_domain`). With
-`DUCKDNS_TOKEN` loaded from external variables, the role updates **only** that
-DuckDNS hostname to the explicit node IPv4. The hostname must already belong to
-the token's account. Tokens stay in encrypted inputs, are URL-encoded, never
-logged, and never forwarded through HTTP proxies or redirects. Encrypted scalar
-values must use YAML's `!vault |` tag, not a plain string containing Vault armor.
-Other DNS providers must be configured separately. DNS is polled after updating;
-A records must point **only** to this IPv4, with no AAAA records (IPv6 deployment
-is not implemented). Existing records are never automatically cleared. Allow
-inbound TCP 80/443/8443, UDP 443 and SSH in any provider firewall. `vpn_node_reality_server_name`
-defaults to `www.google.com`; its TLS 1.3 handshake endpoint must be reachable from
-the node. Do not repoint nt1's hostname or reuse production credentials.
+## Deploy and publish
 
-Restore the existing administrator/probe SSH keys first (see the Cherry guide).
-For a new project, generate the shared proxy credentials **once**, encrypted
-directly into two Vaults. For an existing project, restore both files instead:
+Create persistent **per-node** credentials once. Existing files are refused:
 
 ```sh
-python infra/cherry-vpn/prepare-secrets.py
-python infra/cherry-vpn/prepare-secrets.py --hysteria2
+python playbooks/vpn-node/prepare-secrets.py --node ge2
 ```
 
-Requires Python, OpenSSL and Ansible Vault on the controller. The script writes
-`infra/cherry-vpn/secrets.vault.yaml` mode 0600 with `vpn_node_credentials`:
-`naive_username`, `naive_password`, `vless_uuid`, `reality_private_key`,
-`reality_public_key`, `reality_short_id`. No plaintext file or command-line secret
-is produced. Existing files/symlinks are refused, not regenerated. Keep this
-**encrypted** file with shared deployment inputs across controllers and transfer
-the Vault password separately. Replacing a VM must not silently rotate these
-credentials. The `--hysteria2` command separately creates `hysteria2.vault.yaml`
-with `vpn_node_hysteria2_password`, also refusing replacement. Both the full Cherry
-deployment and the Hysteria-only entry point load this same Vault; neither
-regenerates a password during node deployment. Do not commit plaintext client files.
+This creates `node/ge2/vpn.vault.yaml`, containing proxy credentials and a dedicated
+unprivileged SSH tunnel key. Keep the encrypted file with shared deployment inputs
+and transfer the Vault password separately. Do not regenerate credentials on rerun
+or reuse administrator keys for clients. The SSH container's host identity and
+Naïve's certificate/ACME state also need secure node backups.
 
-The Cherry entry points use `akorz-dyn1.duckdns.org` and load `DUCKDNS_TOKEN` from
-`external_vars.yml`. To update DNS immediately after creating a VM, without
-making an SSH connection:
-
-```sh
-ansible-playbook -i localhost, --vault-password-file .ansible_pass \
-  infra/cherry-vpn/update-dns.yaml -e vpn_node_public_address=PUBLIC_IP
-```
-
-DNS ownership is **not** SSH host authentication. The Cherry project now prepares
-an Ed25519 server key before provisioning and installs it through cloud-init.
-Run `prepare-bootstrap.py` and, for legacy local state, `tofu.sh migrate-state`
-as described in the Cherry guide. State/plans are encrypted because they contain
-that server private key; the master secret and host identity live in the shared
-Vault alongside (but separate from) proxy credentials. Then `tofu.sh inventory`
-pins the **applied** identity and generates the isolated inventory. No console,
-password bootstrap, scan acceptance or first-use trust is needed for a node
-created by this workflow. Older unpinned nodes still need independent verification.
-
-The optional `inventory --proxy-command 'nc -X connect -x 127.0.0.1:12334 %h %p'`
-selects a controller-specific transport while retaining strict end-to-end SSH
-verification. Do not set a netcat idle timeout; long package installs need a
-persistent connection. Dependence on the active local VPN is not an autonomous
-recovery path. After pinning:
-
-```sh
-ansible-playbook -i hosts -i monitoring.inventory.yml \
-  -i infra/cherry-vpn/private/inventory.yaml \
-  --vault-password-file .ansible_pass infra/cherry-vpn/deploy.yaml
-```
-
-This entry point bootstraps `vpnadmin`, proves fresh key-only non-root login and
-passwordless sudo, then enables administrator-only multiplexing and invokes
-`vpn_node`. SSH reload is followed by a reset and fresh sudo access check.
-Cloud-init's disabled exit code is accepted only with the explicit provider
-marker, exact disabled status and working Python; other failures still stop. After success, change the private
-inventory's `ansible_user` from `root` to `vpnadmin` for reruns. Do not use the
-production `hosts` inventory for node configuration. `--check` is refused: this
-bootstrap needs a real new-connection test before disabling root SSH.
-
-For an already bootstrapped node, use `roles: [vpn_node]` with `become: true`,
-`become_flags: -n`, `ansible_host_key_checking: true`, non-root `ansible_user`,
-`vpn_node_domain`, and the shared Vault variables. Set `vpn_node_name` to a stable
-DNS-safe name when the inventory alias is not suitable. Public address defaults
-to `ansible_host`; SSH key paths and client output default to Cherry's private
-directory. The role verifies sudo and matching probe keys before changing SSH.
-
-## What is installed
-
-- Daily unattended **Debian security** updates, with automatic reboots disabled.
-  Required reboots remain an administrator responsibility. Docker/upstream proxy
-  releases are not automatically upgraded by this security-only apt policy.
-- Restricted `vpnprobe` native SSH forwarding: no shell/subsystem sessions, agent,
-  TTY, remote TCP forwarding or Unix-socket forwarding. Root SSH is disabled only
-  after verified non-root sudo access. Host-key checking remains enabled.
-- Docker Engine/Compose and three unprivileged, read-only, capability-dropped
-  containers with memory/PID/log limits. No Docker group access is granted.
-- Naïve `v2.11.7-naive2`: checksum-verified upstream amd64 binary packaged into a
-  scratch image, without compilation. VLESS: upstream sing-box `1.14.4`, pinned by
-  immutable image digest. The latest Xray `26.10.21` failed REALITY verification
-  with the installed sing-box `1.14.2` client in an isolated local test; this role
-  does **not** work around that by deploying an older Xray release.
-- Private Naïve/VLESS configs under `/srv/deploy/vpn-node`, with persistent
-  certificates and ACME account under `/var/lib/vpn-node`. Hysteria 2 reuses the
-  same pinned sing-box image in the separate `/srv/deploy/vpn-hysteria2` Compose
-  project, deployed after Naïve obtains its certificate. Only the domain's
-  certificate directory is mounted read-only; sing-box reloads renewed files.
-  Recreating containers preserves certificate state. Back it up securely.
-- Hysteria 2's initial Brutal targets are 20 Mbps download / 5 Mbps upload, configured
-  by `vpn_node_hysteria2_download_mbps` / `vpn_node_hysteria2_upload_mbps`. These are
-  trial targets, not measured capacity; keep Hysteria 2 as an additional manual
-  choice. The user found SSH more stable. Existing defaults are unchanged.
-
-All server configurations are checked in their pinned containers before activation.
-Reruns preserve credentials/certificates and recreate containers only when their
-image/configuration changes. Syntax checks are not an end-to-end health gate;
-post-activation failure currently needs manual investigation/rollback. DNS moves
-before ACME/services are ready, so a replacement can briefly interrupt traffic. This must
-be improved before unattended replacement. A failed deployment does not destroy
-the VM or stop billing. No expiry, automatic allocation or automatic retry is
-introduced; the operator supervises running nodes and spend.
-
-## Linux test, then publish
-
-After successful **node-side** HTTPS/certificate verification, the role exports
-the following combined mode-0600 files (plus separate Hysteria-only trial files).
-This self-check proves service readiness only; direct
-regional connectivity is tested separately and must gate publication:
-
-- `infra/cherry-vpn/private/cherry-test.json`: isolated mixed listeners, all bound
-  to loopback: SSH `12340`, Naïve `12341`, VLESS `12342`, Hysteria 2 `12343`. No TUN, system routing,
-  Clash API or active-client configuration changes.
-- `infra/cherry-vpn/private/cherry-outbounds.json`: four complete client outbounds
-  for the profile publisher. Contains the **probe**, never administrator, private
-  key. The server host key is read through the authenticated administrator
-  connection and pinned in the SSH outbound; TLS verification stays enabled.
-
-Start the isolated test client in another terminal (existing listeners cause a
-bind failure, not replacement). Do not run it alongside the Hysteria-only test
-client: both use port `12343`.
-
-```sh
-sing-box run -c infra/cherry-vpn/private/cherry-test.json
-```
-
-Test each local proxy; its returned egress IPv4 should match the Cherry node:
-
-```sh
-for port in 12340 12341 12342 12343; do
-  curl --disable --fail --silent --show-error --noproxy '' \
-    --proxy "http://127.0.0.1:$port" --connect-timeout 10 --max-time 20 \
-    https://api.ipify.org/
-  printf '\n'
-done
-```
-
-Repeat against independent HTTPS destinations, compare with nt1, and test from
-the intended ISP. An active system TUN can still carry the underlying connections;
-verify bypass routes before calling a result a direct-network test. Stop this
-foreground client after testing. Successful website/certificate checks alone do
-not prove authenticated proxy connectivity.
-
-After successful isolated tests, publish alongside nt1, retaining existing URLs
-and nt1 defaults:
+Add the node to private `hosts` with independently verified SSH host-key checking,
+a non-root administrator, sudo access and Python. Configure
+`node/<inventory-alias>/vpn.yaml`; ge2's tracked file is the example. Then run:
 
 ```sh
 ansible-playbook -i hosts --vault-password-file .ansible_pass \
-  playbooks/sing-box-configs/deploy.yaml \
-  -e sing_box_extra_outbounds_file=infra/cherry-vpn/private/cherry-outbounds.json
-sudo systemctl start sing-box-profile-update.service
+  playbooks/vpn-node/deploy.yaml -e vpn_target=ge2
 ```
 
-Then explicitly select `cherry-ssh`, `cherry-naive`, `cherry-vless` or
-`cherry-hysteria2` in the
-client's selector (the Linux Clash API is at `127.0.0.1:9091`). Updating a remote
-profile does not automatically select the new node. Only use already-private
-HTTPS enrollment URLs; they now grant the extra tunnel credentials as well.
-Credentials are shared across enrolled devices, not individually revocable.
+Select one explicit target; do not use `--limit`. The playbook:
 
-**Keep passing the exported file on later publishes** during this supervised
-trial; a normal publish without it removes these extra nodes. Alternatively,
-store the exported list in the shared profile Vault's `extra_outbounds` field and
-publish without the flag. Do not do both (duplicate tags are rejected).
-This explicit publisher input is not yet an automatically reconciled node list;
-use a managed node catalogue before enabling unattended rotation. After replacing
-a VM, rerun the role to export the new address and authenticated host key, then
-republish. Remove the extra entries, republish and return clients to nt1 before
-destroying a node.
+1. Loads node settings and encrypted credentials, restoring controller tunnel keys
+   under ignored `playbooks/vpn-node/private/<node>/`.
+2. Runs `vpn_node`, validates server configurations before activation, and exports
+   private `<node>-outbounds.json` / `<node>-test.json` files.
+3. Checks SSH, Naïve, VLESS, Hysteria and VLESS-over-Naïve using isolated loopback
+   clients, two HTTPS destinations and the expected node egress IP. Any failure
+   stops registration/publication; already-published profiles remain intact.
+4. Idempotently replaces only this node's entries in the encrypted profile Vault,
+   preserving other nodes and existing enrollment tokens. The configured
+   `vpn_node_default_outbound` must name a selectable node choice.
+5. Publishes through the existing `sing-box-configs` workflow. Generation derives
+   `<node>-vless-via-naive` and `<node>-ssh-via-workstation`; the restricted
+   workstation SSH allowlist is updated before publication.
+6. Checks every generated node choice, including the workstation SSH hop.
 
-## Local checks
+A failure in the final checks is reported after publication; it does not
+transactionally roll back already-refreshed remote clients. Enrolled clients must
+refresh/reconnect to receive changes. No local client is enrolled or switched.
+There is no automatic failover or allocation.
+
+## Node settings
+
+- `vpn_node_domain`: an owned hostname for Naïve/Hysteria certificate verification.
+  REALITY SNI defaults to this same owned hostname, not a third-party website; its
+  handshake target defaults to the node's public IPv4 on TCP 443.
+- `vpn_node_manage_dns`: defaults to true for a dedicated, single-label DuckDNS
+  node; load `DUCKDNS_TOKEN` from `external_vars.yml`. This mode retains the original
+  IPv4-only DNS guard. Set false for existing externally managed DNS, as on ge2;
+  ge2's application A/AAAA records remain unchanged.
+- `vpn_node_shared_https`: defaults to false. With true, set
+  `vpn_node_caddyfile` to the existing **site-only** Caddy configuration. The role
+  validates a combined SNI router, preserving those sites, existing Caddy volumes
+  and application containers. Naïve binds only loopback TCP 8089/8444.
+- `vpn_node_ssh_port`: defaults to 2222; must differ from administrator SSH.
+- `vpn_node_hysteria2_port`: defaults to 443; ge2 uses 8443 to preserve HTTP/3.
+- `vpn_node_hysteria2_download_mbps` / `vpn_node_hysteria2_upload_mbps`: initial
+  Brutal targets 20/5 Mbps, not measured capacity.
+
+Shared HTTPS uses the repository's version-pinned Caddy/layer4 build. It builds
+on the controller (Docker required there), not on a 1 GiB application node, then
+transfers the image. A Compose override keeps that image selected on normal
+reruns. ge2's application-preparation playbook leaves VPN-managed routing intact;
+rerun this VPN deployment to incorporate changes to its site-only source.
+
+For a dynamic node, first provision and verify its administrator identity, then
+use the same playbook with its inventory alias and settings. Override
+`vpn_node_config_file` and `vpn_node_secrets_file` for infrastructure-specific
+locations. No cloud API/token/state is required by this role or playbook. The
+legacy Cherry entry point remains for its separate provisioning/bootstrap flow.
+
+## Isolated checks and maintenance
 
 ```sh
-python -m unittest discover -s roles/vpn_node/tests -p 'test_*.py'
-python -m unittest discover -s infra/cherry-vpn -p 'test_*.py'
-python -m unittest discover -s playbooks/vpn-probe -p 'test_*.py'
-python -m unittest discover -s playbooks/sing-box-configs -p 'test_*.py'
-ansible-lint roles/vpn_node infra/cherry-vpn/deploy.yaml playbooks/vpn-probe/deploy.yaml
+python roles/vpn_node/files/check.py \
+  --input playbooks/sing-box-configs/private/linux.json \
+  --node ge2 --expected-ip 94.249.187.177 --udp
 ```
 
-Live Cherry deployment now verifies the pre-pinned identity, non-root sudo,
-security-update policy, restricted SSH forwarding, both containers and Naïve's
-real Let's Encrypt certificate. Lithuania failed all direct checks but passed
-its SSH-forwarded reference; an approved destroy-first move to Amsterdam passed
-**6/6 direct Linux checks** across all protocols and two HTTPS targets. A further
-6/6 checks passed using the actual published Linux profile in an isolated core.
-All three platform profiles now include Cherry alongside nt1, without URL/token
-or default changes. The workstation's active local profile was deliberately not
-enrolled/replaced and its update timer remains inactive. Other platform runtimes,
-UDP, sustained performance and autonomous failover are not established by these
-short TCP tests. See the Cherry guide's current status for the live node.
+`--udp` additionally checks VLESS/Hysteria relay against two STUN servers. SSH and
+Naïve are deliberately not tested as UDP-capable. Cores use temporary private
+configuration and OS-assigned loopback ports; no TUN, system proxy or routing
+changes are made. An existing host TUN can still carry the underlying connection;
+verify the physical route before describing results as direct-ISP tests.
+
+Pinned Naïve/sing-box versions are unchanged from the Cherry trial. The SSH image
+uses Debian 13's OpenSSH packages; rebuilding it is needed for package updates.
+Reruns preserve credentials, SSH host keys and certificate state. Activation has
+syntax checks, not transactional rollback; supervise changes and retain backups.
+Remove a node's Vault outbounds, change the default and republish **before**
+destroying it. Infrastructure deletion does not automatically reconcile profiles.

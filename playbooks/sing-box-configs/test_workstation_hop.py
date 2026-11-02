@@ -12,6 +12,24 @@ import generate
 
 
 class WorkstationHopTests(unittest.TestCase):
+    def test_no_ssh_exits_denies_forwarding_and_removes_key(self):
+        play = yaml.safe_load((Path(__file__).with_name("workstation-hop.yaml")).read_text())[0]
+        environment = NativeEnvironment()
+        environment.filters.update(zip=zip)
+        permit_open = environment.from_string(play["vars"]["hop_permit_open"]).render(hop_destinations=[])
+        self.assertEqual(permit_open, "none")
+        policy_task = next(t for t in play["tasks"] if "ansible.builtin.blockinfile" in t)
+        policy = environment.from_string(policy_task["ansible.builtin.blockinfile"]["block"]).render(
+            hop_user="sing-box-hop", hop_permit_open=permit_open)
+        self.assertIn("PermitOpen none\n", policy)
+        removal = next(t for t in play["tasks"] if t.get("ansible.builtin.file", {}).get("state") == "absent")
+        self.assertEqual(removal["ansible.builtin.file"]["path"], "/home/{{ hop_user }}/.ssh/authorized_keys")
+        self.assertEqual(removal["when"], "hop_destinations | length == 0")
+        install = next(t for t in play["tasks"] if "ansible.builtin.copy" in t)
+        self.assertEqual(install["when"], "hop_destinations | length > 0")
+        validation = next(t for t in play["tasks"] if t["name"] == "Validate hop identity and forwarding destination")
+        self.assertNotIn("hop_destinations | length > 0", validation["ansible.builtin.assert"]["that"])
+
     def test_both_allowlists_follow_published_direct_ssh_exits(self):
         play = yaml.safe_load((Path(__file__).with_name("workstation-hop.yaml")).read_text())[0]
         environment = NativeEnvironment()

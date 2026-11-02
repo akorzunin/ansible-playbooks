@@ -31,16 +31,17 @@ NT1/V2RayA proxy, preserving port `20171` for existing app containers and client
 
 See [the Cherry Servers/OpenTofu trial guide](infra/cherry-vpn/README.md) for
 credential setup, price guardrails, a disposable SSH proxy and regional probes.
-One Debian 13 Cherry VM is running at `akorz-dyn1.duckdns.org`, with pre-pinned
-SSH identity and encrypted OpenTofu state/plans. No password bootstrap is needed.
-The [`vpn_node` role](roles/vpn_node/README.md) configures
-non-root administration, unattended security updates, native SSH forwarding and
-Dockerized Naïve/VLESS, with private Linux test and profile-publisher outputs.
-The Amsterdam node passes direct Linux checks for all three protocols. Its
-connections are published at the existing private profile URLs. Blocked nt1
-routes have been removed; all platforms default to Cherry VLESS over Naïve.
-The controller's non-enrolled native sing-box configuration is unchanged;
-the workstation's Docker proxy is managed separately as described above.
+The Cherry VM `dyn1` was destroyed on 2026-11-01. Its DNS, shared SSH inventory
+entry, monitoring membership and published VPN connections were removed.
+The Cherry project has no servers, IPs or storage; encrypted state and backups
+are retained. Do not apply the provisioning configuration unless creating a new
+VM is explicitly intended.
+VPN services now run on the existing ge2 node through the reusable
+[`vpn_node` role](roles/vpn_node/README.md). All platforms default to
+`ge2-vless-via-naive`; ge2 SSH, Naïve, direct VLESS, Hysteria 2 and
+SSH-via-workstation are also selectable, with Aurora retained. Private URLs/tokens
+are unchanged; refresh enrolled clients. The dyn1 SSH hop to nt1 is no longer
+available. Active local clients and the workstation Docker proxy were not changed.
 See the [current status](infra/cherry-vpn/README.md#current-status)
 and [controller handoff instructions](infra/cherry-vpn/README.md#dropbox-inputs-and-switching-controllers).
 Further provisioning requires a fresh reviewed plan and explicit approval.

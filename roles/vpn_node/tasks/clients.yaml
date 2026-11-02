@@ -1,7 +1,7 @@
 ---
-- name: Read the host public key through the authenticated administrator connection
+- name: Read the tunnel public host key through the authenticated administrator connection
   ansible.builtin.slurp:
-    src: /etc/ssh/ssh_host_ed25519_key.pub
+    src: /srv/deploy/vpn-ssh/ssh_host_ed25519_key.pub
   register: vpn_node_host_key
 
 - name: Prepare private client connections without the administrator key
@@ -10,7 +10,7 @@
       - type: ssh
         tag: "{{ vpn_node_name }}-ssh"
         server: "{{ vpn_node_public_address }}"
-        server_port: "{{ ansible_port | default(22) | int }}"
+        server_port: "{{ vpn_node_ssh_port | int }}"
         user: vpnprobe
         private_key: "{{ lookup('ansible.builtin.file', vpn_node_ssh_private_key_path) }}"
         host_key: ["{{ vpn_node_host_key.content | b64decode | trim }}"]
@@ -29,6 +29,7 @@
         server_port: 8443
         uuid: "{{ vpn_node_credentials.vless_uuid }}"
         flow: xtls-rprx-vision
+        packet_encoding: xudp
         tls:
           enabled: true
           server_name: "{{ vpn_node_reality_server_name }}"

@@ -1,0 +1,93 @@
+---
+- name: Create the private SSH container directory
+  ansible.builtin.file:
+    path: /srv/deploy/vpn-ssh
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Exclude tunnel keys and configuration from the Docker build context
+  ansible.builtin.copy:
+    dest: /srv/deploy/vpn-ssh/.dockerignore
+    content: "*\n!Dockerfile\n"
+    mode: "0644"
+
+- name: Stage the forwarding-only OpenSSH image definition
+  ansible.builtin.copy:
+    src: ssh.Dockerfile
+    dest: /srv/deploy/vpn-ssh/Dockerfile
+    mode: "0644"
+  register: vpn_node_ssh_build
+
+- name: Build the rootless OpenSSH server image
+  community.docker.docker_image:
+    name: vpn-node-ssh:debian13
+    source: build
+    build:
+      path: /srv/deploy/vpn-ssh
+      args:
+        VPN_UID: "{{ ansible_facts.getent_passwd.vpnproxy[1] }}"
+        VPN_GID: "{{ ansible_facts.getent_passwd.vpnproxy[2] }}"
+    force_source: "{{ vpn_node_ssh_build.changed }}"
+
+- name: Generate a persistent tunnel identity separate from administrator SSH
+  ansible.builtin.command:
+    argv: [ssh-keygen, -q, -t, ed25519, -N, "", -f, /srv/deploy/vpn-ssh/ssh_host_ed25519_key]
+    creates: /srv/deploy/vpn-ssh/ssh_host_ed25519_key
+  no_log: true
+
+- name: Restrict the tunnel host key to its unprivileged container user
+  ansible.builtin.file:
+    path: /srv/deploy/vpn-ssh/ssh_host_ed25519_key
+    owner: vpnproxy
+    group: vpnproxy
+    mode: "0600"
+
+- name: Install the forwarding-only client authorization
+  ansible.builtin.copy:
+    content: "restrict,port-forwarding {{ lookup('file', vpn_node_ssh_public_key_path) | trim }}\n"
+    dest: /srv/deploy/vpn-ssh/authorized_keys
+    owner: root
+    group: vpnproxy
+    mode: "0640"
+  register: vpn_node_ssh_authorization
+  no_log: true
+
+- name: Install the isolated SSH policy
+  ansible.builtin.template:
+    src: sshd_config.j2
+    dest: /srv/deploy/vpn-ssh/sshd_config
+    mode: "0644"
+  register: vpn_node_ssh_policy
+
+- name: Validate the rootless SSH daemon before starting it
+  ansible.builtin.command:
+    argv:
+      - docker
+      - run
+      - --rm
+      - --network=none
+      - --cap-drop=ALL
+      - --security-opt=no-new-privileges:true
+      - --volume=/srv/deploy/vpn-ssh/sshd_config:/etc/vpn/sshd_config:ro
+      - --volume=/srv/deploy/vpn-ssh/ssh_host_ed25519_key:/etc/vpn/ssh_host_ed25519_key:ro
+      - vpn-node-ssh:debian13
+      - -t
+  changed_when: false
+
+- name: Install the SSH Compose definition
+  ansible.builtin.template:
+    src: ssh-compose.yaml.j2
+    dest: /srv/deploy/vpn-ssh/compose.yaml
+    mode: "0600"
+    validate: docker compose -f %s config --quiet
+
+- name: Start the isolated SSH service without changing host SSH
+  community.docker.docker_compose_v2:
+    project_src: /srv/deploy/vpn-ssh
+    project_name: vpn-ssh
+    state: present
+    recreate: "{{ 'always' if vpn_node_ssh_authorization.changed or vpn_node_ssh_policy.changed else 'auto' }}"
+    wait: true
+    wait_timeout: 30

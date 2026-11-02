@@ -6,15 +6,32 @@
 # DNS switch before using this workflow for zero-downtime automatic rotation.
 - name: Update and verify the node DNS record
   ansible.builtin.import_tasks: dns.yaml
+  when: vpn_node_manage_dns | bool
 
-- name: Configure security updates and native SSH forwarding
-  ansible.builtin.import_tasks: ssh.yaml
-
-- name: Install Docker on the dedicated Debian node
+- name: Install Docker on the Debian node
   ansible.builtin.import_tasks: docker.yaml
 
 - name: Package and configure the pinned proxy servers
   ansible.builtin.import_tasks: proxies.yaml
+
+- name: Configure the isolated forwarding-only SSH container
+  ansible.builtin.import_tasks: container-ssh.yaml
+
+- name: Share HTTPS with the node's existing Caddy sites
+  ansible.builtin.import_tasks: shared-https.yaml
+  when: vpn_node_shared_https | bool
+
+- name: Verify the public Naive certificate and HTTPS site on the node
+  ansible.builtin.uri:
+    url: "https://{{ vpn_node_domain }}/"
+    use_proxy: false
+    validate_certs: true
+    status_code: 200
+    timeout: 15
+  register: vpn_node_https
+  until: vpn_node_https.status | default(0) == 200
+  retries: 12
+  delay: 10
 
 # Naive must obtain its certificate before Hysteria 2 can mount it read-only.
 - name: Configure Hysteria 2 alongside the TCP protocols

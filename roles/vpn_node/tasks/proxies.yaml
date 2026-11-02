@@ -187,18 +187,4 @@
     host: 127.0.0.1
     port: "{{ item }}"
     timeout: 60
-  loop: [443, 8443]
-
-# Node-side readiness is separate from ISP reachability. Regional client checks
-# must gate publication; a successful self-check is not proof of a usable VPN path.
-- name: Verify the public Naive certificate and HTTPS site on the node
-  ansible.builtin.uri:
-    url: "https://{{ vpn_node_domain }}/"
-    use_proxy: false
-    validate_certs: true
-    status_code: 200
-    timeout: 15
-  register: vpn_node_https
-  until: vpn_node_https.status | default(0) == 200
-  retries: 12
-  delay: 10
+  loop: "{{ [8444, 8443] if vpn_node_shared_https | bool else [443, 8443] }}"

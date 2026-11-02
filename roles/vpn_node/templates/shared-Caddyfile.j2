@@ -1,0 +1,25 @@
+{
+    servers :443 {
+        listener_wrappers {
+            layer4 {
+                @vpn_naive tls sni {{ vpn_node_domain }}
+                route @vpn_naive {
+                    proxy 127.0.0.1:8444
+                }
+            }
+            tls
+        }
+    }
+}
+
+http://{{ vpn_node_domain }} {
+    handle /.well-known/acme-challenge/* {
+        reverse_proxy 127.0.0.1:8089
+    }
+    handle {
+        redir https://{{ vpn_node_domain }}{uri} permanent
+    }
+}
+
+# Existing site-only configuration; this file must not contain a global options block.
+{{ lookup('ansible.builtin.file', vpn_node_caddyfile) }}

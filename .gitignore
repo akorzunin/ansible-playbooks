@@ -17,6 +17,7 @@ external_vars.yml
 /playbooks/sing-box-configs/android.json
 /playbooks/sing-box-configs/win-all-proxy.json
 /playbooks/sing-box-configs/private/
+/playbooks/vpn-node/private/
 
 # Python caches.
 __pycache__/

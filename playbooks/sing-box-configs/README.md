@@ -45,7 +45,20 @@ supplied Windows profile, so VLESS connectivity (and consequently UDP) needs
 separate investigation; hosting/config distribution itself is working. Those
 observations refer to the earlier nt1-only trial, not the new Cherry VLESS endpoint.
 
-Current Cherry publication: `cherry-ssh`, `cherry-naive`, `cherry-vless` and
+**Current publication (2026-11-01):** dyn1 is retired. The existing ge2 node now
+provides `ge2-ssh`, `ge2-naive`, `ge2-vless`, `ge2-hysteria2`,
+`ge2-vless-via-naive` and `ge2-ssh-via-workstation`. Every platform defaults to
+`ge2-vless-via-naive`; `aurora-vless` remains selectable. All six ge2 routes passed
+two isolated HTTPS checks with ge2's egress IP. URLs/tokens are unchanged; refresh
+enrolled clients. No active local client was switched. REALITY uses the owned
+`akorz-ge2.duckdns.org` SNI, not Google. VLESS and its Naïve chain also passed
+UDP/STUN checks; Hysteria had intermittent HTTPS/STUN failures and remains a
+manual option. These checks do not establish sustained stability. The reusable
+[`vpn_node` deployment](../../roles/vpn_node/README.md) registers verified node
+exports idempotently in Vault, so ordinary publishes retain them without a
+controller-local extra-outbounds flag.
+
+Historical Cherry publication (before retirement): `cherry-ssh`, `cherry-naive`, `cherry-vless` and
 `cherry-vless-via-naive` and `cherry-hysteria2` are available through the same private
 URLs/tokens. `aurora-vless` is an additional manual option from the Aurora VLESS
 connection, verified with an isolated HTTPS request on this workstation; UDP and
@@ -70,7 +83,7 @@ additional people. Treat enrollment/import links as passwords, not public links.
 ## Connections and routing
 
 All profiles use `secrets.vault.yaml`, an Ansible Vault-encrypted file tracked in
-Git. `sing_box_secrets.connections` is now empty; Cherry credentials and the
+Git. `sing_box_secrets.connections` is now empty; ge2, Aurora and the
 workstation hop are stored in `sing_box_secrets.extra_outbounds`. The Vault also
 stores the existing platform tokens in `sing_box_secrets.tokens` and the shared
 selector default in `sing_box_secrets.default_outbound`. No controller-local
@@ -78,16 +91,14 @@ outbound files are needed, and a fresh controller never generates replacement to
 
 - Manual selection only through `proxy`; Auto/URLTest is removed because successful
   probes did not reliably predict usable connections on mobile networks.
-- All platforms default to `cherry-vless-via-naive`, which carries both TCP and UDP
-  through Cherry VLESS over Naïve. Other Cherry protocols remain manual choices.
-- `cherry-ssh-via-workstation` reaches Cherry SSH through the workstation. It is
-  TCP-only; `workstation-hop` is an internal transport, not a selectable exit.
-  nt1's `ssh-via-workstation` route is no longer generated.
+- All platforms default to `ge2-vless-via-naive`; Cherry and nt1 routes are retired.
+- `workstation-hop` is an internal transport, not a selectable exit. Its restricted
+  allowlist permits only ge2's tunnel SSH port, generating `ge2-ssh-via-workstation`.
 - Manual changes interrupt existing connections. Selector choices are not persisted
   by the core cache; restarting may restore the platform default.
 - Proxied TCP and UDP follow the selected protocol. UDP/443 is no longer rejected.
-  Direct Naïve and SSH do not provide UDP relay: select working VLESS, its Naïve
-  chain, or Hysteria 2 for UDP applications. TCP fallback depends on the application.
+  Aurora UDP behavior has not been verified. Direct Naïve and SSH do not provide
+  UDP relay; TCP fallback depends on the application.
 - Existing Russian-domain/GeoIP direct routing and platform inbounds are preserved.
 - Linux retains the existing local mixed/system-proxy listener on `127.0.0.1:12334`;
   it does not gain a TUN interface. Linux omits `auto_detect_interface`: it is
@@ -112,6 +123,10 @@ not redundancy against a complete Cherry outage. `aurora-vless` uses a separate
 endpoint and can be selected manually; there is no automatic failover.
 
 ## Discord-only Linux networking (opt-in)
+
+**Historical dyn1 setup:** the static Cherry configuration below stopped working
+when dyn1 was destroyed on 2026-11-01. It is not updated by profile publication.
+Do not launch it without configuring and testing a replacement endpoint.
 
 An HTTP/system proxy does not capture Discord's WebRTC UDP. `sb test` uses its
 own UDP-capable SOCKS probe; a passing result alone does not fix the application.
@@ -220,8 +235,8 @@ tags. Removing `workstation-hop` removes the generated chained options.
 The workstation's `sing-box-hop` account must allow each destination in **both**
 its `authorized_keys` `permitopen` options and its sshd `Match User` `PermitOpen`.
 `workstation-hop.yaml`, included by the publish playbook, configures both allowlists
-from the validated generated Linux profile's direct SSH exits (currently Cherry
-only). It uses the existing `workstation-hop` outbound and
+from the validated generated Linux profile's direct SSH exits (currently ge2
+TCP/2222). With no SSH exits, it removes the authorized key and sets `PermitOpen none`. It uses the existing `workstation-hop` outbound and
 `workstation_ssh_public_key` in Vault, with a dedicated forwarding-only account:
 no shell, commands, PTY, agent/X11/Unix-socket or reverse forwarding. The complete
 sshd configuration is validated before reload. Generate profiles before running

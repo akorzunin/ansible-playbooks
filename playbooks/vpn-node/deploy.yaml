@@ -1,0 +1,121 @@
+---
+# One explicit inventory target; provisioning and administrator bootstrap are separate.
+- name: Require an explicit existing inventory node before deployment or publication
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Validate the selected inventory alias
+      ansible.builtin.assert:
+        that:
+          - vpn_target is defined
+          - vpn_target | default('') in hostvars
+          - vpn_target | default('') != 'localhost'
+          - ansible_limit is not defined
+        fail_msg: Load hosts and pass -e vpn_target=ge2; do not use --limit.
+
+- name: Deploy VPN services on an existing verified node
+  hosts: "{{ vpn_target | default('vpn_nodes') }}"
+  any_errors_fatal: true
+  become: true
+  vars:
+    ansible_host_key_checking: true
+    vpn_node_client_dir: "{{ playbook_dir }}/private/{{ inventory_hostname }}"
+  pre_tasks:
+    - name: Require one explicitly selected node
+      ansible.builtin.assert:
+        that: ansible_play_hosts_all | length == 1
+
+    - name: Load node VPN settings
+      ansible.builtin.include_vars:
+        file: "{{ vpn_node_config_file | default(playbook_dir ~ '/../../node/' ~ inventory_hostname ~ '/vpn.yaml') }}"
+
+    - name: Load shared external variables
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../../external_vars.yml"
+      no_log: true
+
+    - name: Load the node's persistent encrypted credentials
+      ansible.builtin.include_vars:
+        file: "{{ vpn_node_secrets_file | default(playbook_dir ~ '/../../node/' ~ inventory_hostname ~ '/vpn.vault.yaml') }}"
+      no_log: true
+
+    - name: Restore the private controller client directory
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/private/{{ inventory_hostname }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      become: false
+
+    - name: Restore the node-specific tunnel key without regenerating it
+      ansible.builtin.copy:
+        content: "{{ item.content }}\n"
+        dest: "{{ playbook_dir }}/private/{{ inventory_hostname }}/{{ item.name }}"
+        mode: "0600"
+      loop:
+        - name: probe
+          content: "{{ vpn_node_probe_private_key | trim }}"
+        - name: probe.pub
+          content: "{{ vpn_node_probe_public_key | trim }}"
+      delegate_to: localhost
+      become: false
+      no_log: true
+
+  roles:
+    - vpn_node
+
+  post_tasks:
+    - name: Test isolated authenticated exits before changing published profiles
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../../roles/vpn_node/files/check.py"
+          - --input
+          - "{{ vpn_node_client_dir }}/{{ vpn_node_name }}-outbounds.json"
+          - --node
+          - "{{ vpn_node_name }}"
+          - --expected-ip
+          - "{{ vpn_node_public_address }}"
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+    - name: Register the verified node in the encrypted profile source
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../sing-box-configs/register-node.py"
+          - --node
+          - "{{ vpn_node_name }}"
+          - --outbounds-file
+          - "{{ vpn_node_client_dir }}/{{ vpn_node_name }}-outbounds.json"
+          - --default
+          - "{{ vpn_node_default_outbound }}"
+      delegate_to: localhost
+      become: false
+      register: vpn_node_registration
+      changed_when: "'source updated' in vpn_node_registration.stdout"
+      no_log: true
+
+- name: Publish verified connections with unchanged enrollment URLs and tokens
+  ansible.builtin.import_playbook: ../sing-box-configs/deploy.yaml
+
+- name: Verify the published node paths including the restricted workstation hop
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Test all generated node choices without changing the active client
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../../roles/vpn_node/files/check.py"
+          - --input
+          - "{{ playbook_dir }}/../sing-box-configs/private/linux.json"
+          - --node
+          - "{{ hostvars[vpn_target].vpn_node_name | default(vpn_target) }}"
+          - --expected-ip
+          - "{{ hostvars[vpn_target].vpn_node_public_address | default(hostvars[vpn_target].ansible_host) }}"
+      changed_when: false
