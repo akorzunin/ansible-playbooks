@@ -10,15 +10,15 @@ $Config = Join-Path $Root 'config.json'
 $Work = $null
 $Lock = $null
 $Client = $null
-$Stage = 'Open PowerShell as Administrator, then run the setup link again.'
+# Fail before the credential-safe catch so the elevation error stays actionable.
+$Identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$Principal = New-Object Security.Principal.WindowsPrincipal($Identity)
+if (-not $Principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw 'sing-box setup requires Administrator privileges. Close this window, right-click Windows PowerShell, choose "Run as administrator", accept the UAC prompt, then run the same setup command again. No changes were made.'
+}
 
+$Stage = 'Check directory permissions and whether another update is running.'
 try {
-    $Identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $Principal = New-Object Security.Principal.WindowsPrincipal($Identity)
-    if (-not $Principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        throw 'Open PowerShell as Administrator, then run the setup link again.'
-    }
-    $Stage = 'Check directory permissions and whether another update is running.'
     Add-Type -AssemblyName System.Net.Http
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     New-Item -ItemType Directory -Force -Path $Root | Out-Null
@@ -145,7 +145,8 @@ try {
     # HTTP/core exceptions may contain enrollment URLs or credentials; do not print them.
     Write-Host "Setup failed. $Stage" -ForegroundColor Red
     Write-Host 'Existing config is retained/restored unless rollback itself failed; inspect the managed directory if needed.'
-    throw 'sing-box setup failed (details suppressed to protect credentials).'
+    # Include the safe stage in the terminating error, even if host output is hidden.
+    throw "sing-box setup failed. $Stage (Technical details suppressed to protect credentials.)"
 } finally {
     if ($Client) { $Client.Dispose() }
     if ($Work -and (Test-Path $Work)) { Remove-Item $Work -Recurse -Force }

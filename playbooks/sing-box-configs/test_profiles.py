@@ -320,6 +320,19 @@ class ProfileTests(unittest.TestCase):
             generate.generate(output, self.connections, self.tokens, [{"type": "ssh", "tag": "new-node"}])
             self.assertEqual(before, {name: (output / name).read_bytes() for name in before})
 
+    def test_windows_setup_keeps_elevation_and_stage_errors_actionable(self):
+        # Source-level guard only; Windows PowerShell 5.1 runtime testing is still required.
+        script = (generate.ROOT / "setup-windows.ps1").read_text()
+        preflight, setup = script.split("\ntry {", 1)
+        self.assertIn("IsInRole", preflight)
+        self.assertIn("requires Administrator privileges", preflight)
+        self.assertIn('choose "Run as administrator"', preflight)
+        self.assertIn("No changes were made.", preflight)
+        self.assertNotIn("New-Item", preflight)
+        self.assertIn('throw "sing-box setup failed. $Stage ', setup)
+        self.assertNotIn("$_.", setup)
+        self.assertNotIn("$Error[", setup)
+
     def test_failed_validation_does_not_replace_published_profiles(self):
         with tempfile.TemporaryDirectory() as work:
             output = Path(work) / "output"

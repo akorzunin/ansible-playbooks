@@ -378,6 +378,12 @@ with the private Windows setup link, and run:
 & ([scriptblock]::Create((curl.exe --noproxy '*' --proto '=https' --fail --silent 'PASTE_WINDOWS_SETUP_LINK' | Out-String)))
 ```
 
+If setup reports that Administrator privileges are required, close that window,
+right-click **Windows PowerShell**, choose **Run as administrator**, accept the UAC
+prompt, and rerun the same command. The check runs before any installation changes.
+Other setup errors include a safe failure-stage hint; raw diagnostics remain hidden
+to avoid exposing private URLs or credentials.
+
 On macOS (Apple Silicon/Intel), open Terminal as your ordinary desktop user
 (**not** sudo), replace the placeholder with the private macOS setup link, and run:
 
@@ -414,9 +420,44 @@ The scripts do not automatically upgrade the core on each refresh.
   proxy changes or root privileges are added on macOS. An app's own bundled core
   outside `PATH` is not detected.
 
-To stop/uninstall, disable/delete the Windows task in Task Scheduler and remove its
-managed directory. On macOS, run
-`launchctl bootout "gui/$(id -u)/io.github.akorzunin.sing-box-remote"`, then remove
+### Windows: disable, re-enable, or uninstall
+
+Open **Windows PowerShell as Administrator** for all commands below. These commands
+only affect the managed `sing-box-remote-profile` task, not other sing-box clients.
+
+**Disable:** stop sing-box now and prevent it from starting at boot. Keep the installed
+core and saved profile so you can enable it again later:
+
+```powershell
+Disable-ScheduledTask -TaskName 'sing-box-remote-profile' | Out-Null
+Stop-ScheduledTask -TaskName 'sing-box-remote-profile'
+```
+
+Disabling alone does not stop a running task; run both commands. Do not rerun the
+setup link while you want it disabled: setup registers and starts the task again.
+
+**Re-enable:** restore startup at boot and start sing-box now using the saved profile:
+
+```powershell
+Enable-ScheduledTask -TaskName 'sing-box-remote-profile' | Out-Null
+Start-ScheduledTask -TaskName 'sing-box-remote-profile'
+```
+
+**Uninstall:** first run the two **Disable** commands above. Once the task has stopped,
+remove it and its managed directory:
+
+```powershell
+Unregister-ScheduledTask -TaskName 'sing-box-remote-profile' -Confirm:$false
+Remove-Item -LiteralPath (Join-Path $env:ProgramData 'sing-box-remote') -Recurse -Force
+```
+
+This permanently deletes the managed core and saved profile (including credentials).
+It does not uninstall a separate sing-box GUI or an executable elsewhere on `PATH`.
+To reinstall, rerun the private setup link in an Administrator PowerShell window.
+
+### macOS: stop or uninstall
+
+Run `launchctl bootout "gui/$(id -u)/io.github.akorzunin.sing-box-remote"`, then remove
 `~/Library/LaunchAgents/io.github.akorzunin.sing-box-remote.plist` and the managed
 directory. Undo any manually configured macOS proxy settings as well.
 Native Windows/macOS runtime testing is still required; Linux tests simulate the
