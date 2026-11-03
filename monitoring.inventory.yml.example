@@ -36,15 +36,13 @@ all:
         nk1:
           monitoring_availability_alert: true
           monitoring_telegraf_allowed_sources: *workstation_scraper_sources
-        nt1:
-          monitoring_availability_alert: true
-          monitoring_telegraf_allowed_sources: *workstation_scraper_sources
         dyn1:
           monitoring_availability_alert: true
           monitoring_telegraf_allowed_sources: *workstation_scraper_sources
     # Retain SSH records in ./hosts, but never scrape or deploy exporters here.
     retired_nodes:
       hosts:
+        nt1:
         kr1:
         sw1:
         pl1:

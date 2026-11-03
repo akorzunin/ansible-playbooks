@@ -4,7 +4,7 @@
   "description": "Node and container metrics for inventory-managed hosts with a shared node filter. Container CPU is measured in cores, not divided by CPUs on unrelated hosts.",
   "tags": ["monitoring", "ansible"],
   "schemaVersion": 39,
-  "version": 7,
+  "version": 8,
   "graphTooltip": 1,
   "editable": false,
   "timezone": "browser",
@@ -16,13 +16,13 @@
       "label": "Node",
       "type": "query",
       "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
-      "query": {"query": "label_values(up{job=~\"nodeexporter|cadvisor|telegraf\"}, node)", "refId": "StandardVariableQuery"},
-      "definition": "label_values(up{job=~\"nodeexporter|cadvisor|telegraf\"}, node)",
+      "query": {"query": "query_result(count by (node) (up{job=~\"nodeexporter|cadvisor|telegraf\"}))", "refId": "StandardVariableQuery"},
+      "definition": "query_result(count by (node) (up{job=~\"nodeexporter|cadvisor|telegraf\"}))",
+      "regex": "/node=\"([^\"]+)\"/",
       "refresh": 1,
       "sort": 1,
       "multi": true,
       "includeAll": true,
-      "allValue": ".*",
       "current": {"text": "All", "value": "$__all"},
       "options": []
     }, {
@@ -44,9 +44,10 @@
   },
   "panels": [
     {
-      "id": 1, "title": "Host collector availability", "type": "stat",
+      "id": 1, "title": "Collector availability", "type": "stat",
+      "description": "Telegraf scrape availability for both host and container metrics; not a check of individual input health. Historical node-exporter availability is retained as a fallback.",
       "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
-      "gridPos": {"h": 5, "w": 8, "x": 0, "y": 0},
+      "gridPos": {"h": 5, "w": 12, "x": 0, "y": 0},
       "targets": [{"refId": "A", "expr": "max by (node) (up{job=~\"nodeexporter|telegraf\", node=~\"$node\"})", "instant": true, "range": false, "legendFormat": "{{node}}"}],
       "fieldConfig": {"defaults": {
         "min": 0, "max": 1,
@@ -95,7 +96,7 @@
       "id": 6, "title": "CPU count", "type": "stat",
       "description": "Logical CPUs per node, including hardware threads.",
       "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
-      "gridPos": {"h": 5, "w": 8, "x": 8, "y": 0},
+      "gridPos": {"h": 5, "w": 12, "x": 12, "y": 0},
       "targets": [{"refId": "A", "expr": "max by (node) (system_n_cpus{job=\"telegraf\", node=~\"$node\"}) or on (node) count by (node) (node_cpu_seconds_total{job=\"nodeexporter\", node=~\"$node\", mode=\"idle\"})", "instant": true, "range": false, "legendFormat": "{{node}}"}],
       "fieldConfig": {"defaults": {"unit": "short", "min": 0, "decimals": 0}, "overrides": []},
       "options": {"colorMode": "value", "graphMode": "none", "textMode": "value_and_name", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
@@ -121,18 +122,6 @@
       ],
       "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []},
       "options": {"legend": {"displayMode": "list", "placement": "bottom"}}
-    },
-    {
-      "id": 9, "title": "Container collector availability", "type": "stat",
-      "datasource": {"type": "prometheus", "uid": "monitoring-prometheus"},
-      "gridPos": {"h": 5, "w": 8, "x": 16, "y": 0},
-      "targets": [{"refId": "A", "expr": "max by (node) (up{job=~\"cadvisor|telegraf\", node=~\"$node\"})", "instant": true, "range": false, "legendFormat": "{{node}}"}],
-      "fieldConfig": {"defaults": {
-        "min": 0, "max": 1,
-        "mappings": [{"type": "value", "options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}}],
-        "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}
-      }, "overrides": []},
-      "options": {"colorMode": "background", "graphMode": "none", "textMode": "value_and_name", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
     },
     {
       "id": 10, "title": "Container CPU (cores)", "type": "timeseries",

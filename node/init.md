@@ -34,8 +34,8 @@ Run only one bootstrap at a time against the same inventory files.
   unlike the default managed agent, that existing agent is not cleaned up by Ansible.
 - In `external_vars.yml`, optionally set `NODE_USER` (default `ansible`). Bootstrap
   reuses `monitoring_workstation_allowed_sources` from `monitoring.inventory.yml`,
-  the same allowlist used by `nk1` and `nt1`. Override it with a non-empty YAML list
-  in `NODE_MONITORING_ALLOWED_SOURCES` if needed. Prefer a stable VPN /32 rather
+  the same allowlist used by `nk1` and other active VPS nodes. Override it with a
+  non-empty YAML list in `NODE_MONITORING_ALLOWED_SOURCES` if needed. Prefer a stable VPN /32 rather
   than a dynamic ISP pool. Bootstrap only prompts if neither list is configured.
   Unrestricted `/0` sources are rejected. This is a Telegraf HTTP allowlist, not a
   network firewall.

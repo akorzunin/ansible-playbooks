@@ -116,7 +116,7 @@ class BootstrapTests(unittest.TestCase):
             self.assertTrue(settings["monitoring_enabled"])
             self.assertEqual(settings["monitoring_telegraf_allowed_sources"],
                              ["198.51.100.5/32", "2001:db8::1/128"])
-        self.assertEqual(set(inventory["retired_nodes"]["hosts"]), {"kr1", "sw1", "pl1"})
+        self.assertEqual(set(inventory["retired_nodes"]["hosts"]), {"nt1", "kr1", "sw1", "pl1"})
 
     def test_portable_keys_are_encrypted_distinct_and_need_no_personal_key_files(self):
         self.key.unlink()
@@ -210,7 +210,7 @@ class BootstrapTests(unittest.TestCase):
         inventory = yaml.safe_load(self.overlay.read_text())
         expected = inventory["all"]["vars"]["monitoring_workstation_allowed_sources"]
         monitored = self.monitoring_inventory()["_meta"]["hostvars"]
-        for name in ("new1", "nk1", "nt1"):
+        for name in ("new1", "nk1"):
             self.assertEqual(monitored[name]["monitoring_telegraf_allowed_sources"], expected)
 
     def test_comment_free_reformatted_overlay_is_preserved_and_extended(self):
@@ -225,8 +225,8 @@ class BootstrapTests(unittest.TestCase):
         parsed = self.monitoring_inventory()
         self.assertIn("new1", parsed["monitored_nodes"]["hosts"])
         self.assertEqual(parsed["monitoring_servers"]["hosts"], ["remote_workstation"])
-        self.assertEqual(set(parsed["retired_nodes"]["hosts"]), {"kr1", "sw1", "pl1"})
-        for name in ("remote_workstation", "remote_pi", "nk1", "nt1", "dyn1"):
+        self.assertEqual(set(parsed["retired_nodes"]["hosts"]), {"nt1", "kr1", "sw1", "pl1"})
+        for name in ("remote_workstation", "remote_pi", "nk1", "dyn1"):
             self.assertIn(name, parsed["monitored_nodes"]["hosts"])
 
     def test_top_level_monitoring_groups_are_supported(self):

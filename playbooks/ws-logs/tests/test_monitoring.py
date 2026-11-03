@@ -59,22 +59,23 @@ class MonitoringTests(unittest.TestCase):
 
     def test_active_nodes_ports_and_alert_opt_in(self):
         targets = self.targets("telegraf")
-        self.assertEqual(set(targets), {"workstation", "pi", "nk1", "nt1", "dyn1"})
+        self.assertEqual(set(targets), {"workstation", "pi", "nk1", "dyn1"})
         self.assertEqual(targets["workstation"]["targets"], ["telegraf:9273"])
         self.assertEqual(targets["pi"]["targets"], ["192.168.1.58:9273"])
         self.assertEqual(targets["nk1"]["targets"], ["nk1.example.test:9273"])
-        self.assertEqual(targets["nt1"]["targets"], ["nt1.example.test:9273"])
         self.assertEqual(targets["dyn1"]["targets"], ["dyn1.example.test:9273"])
         opted_in = {node for node, target in targets.items() if target["labels"]["availability_alert"] == "true"}
-        self.assertEqual(opted_in, {"nk1", "nt1", "dyn1"})
+        self.assertEqual(opted_in, {"nk1", "dyn1"})
         jobs = {job["job_name"] for job in self.prometheus()["scrape_configs"]}
         self.assertEqual(jobs, {"prometheus", "telegraf", "nvidia-gpu-exporter"})
 
     def test_retired_nodes_are_excluded_even_if_added_to_monitored_group(self):
+        self.assertIn("nt1", self.groups["retired_nodes"])
+        self.assertNotIn("nt1", self.groups["monitored_nodes"])
         for host in self.groups["retired_nodes"]:
             self.groups["monitored_nodes"].append(host)
             self.hostvars[host] = copy.deepcopy(self.hostvars["nk1"])
-        self.assertEqual(set(self.targets("telegraf")), {"workstation", "pi", "nk1", "nt1", "dyn1"})
+        self.assertEqual(set(self.targets("telegraf")), {"workstation", "pi", "nk1", "dyn1"})
 
     def test_disabled_nodes_are_not_scraped(self):
         for disabled in (False, "false"):
@@ -159,7 +160,7 @@ class MonitoringTests(unittest.TestCase):
 
     def test_remote_agents_have_stable_hostnames_and_source_restrictions(self):
         template = self.environment.from_string((ROOT / "roles/monitoring_client/templates/telegraf.conf.j2").read_text())
-        for host in ("remote_pi", "nk1", "nt1", "dyn1"):
+        for host in ("remote_pi", "nk1", "dyn1"):
             variables = self.hostvars[host]
             config = tomllib.loads(template.render(**variables, inventory_hostname=host))
             self.assertEqual(config["agent"]["hostname"], variables.get("monitoring_node", host))
@@ -169,7 +170,7 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(self.hostvars["remote_pi"]["monitoring_client_telegraf_bind_address"], "192.168.1.58")
 
     def test_example_vps_allowlists_restrict_public_access_to_scraper(self):
-        for host in ("nk1", "nt1", "dyn1"):
+        for host in ("nk1", "dyn1"):
             sources = self.hostvars[host]["monitoring_telegraf_allowed_sources"]
             self.assertIn("198.51.100.5/32", sources)
             networks = [ipaddress.ip_network(source) for source in sources]
@@ -266,20 +267,30 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual([variable["name"] for variable in variables], ["node", "container"])
         self.assertEqual(
             variables[0]["query"]["query"],
-            'label_values(up{job=~"nodeexporter|cadvisor|telegraf"}, node)',
+            'query_result(count by (node) (up{job=~"nodeexporter|cadvisor|telegraf"}))',
         )
         self.assertEqual(variables[0]["definition"], variables[0]["query"]["query"])
         self.assertTrue(variables[0]["multi"])
         self.assertTrue(variables[0]["includeAll"])
+        self.assertEqual(variables[0]["regex"], '/node="([^"]+)"/')
+        # Expand All to discovered nodes, not .* matching retired nodes' history.
+        self.assertFalse(variables[0].get("allValue"))
         panels = {panel["title"]: panel for panel in dashboard["panels"]}
-        self.assertIn("Host collector availability", panels)
-        self.assertIn("Container collector availability", panels)
+        self.assertNotIn("Host collector availability", panels)
+        self.assertNotIn("Container collector availability", panels)
+        availability = panels["Collector availability"]
+        self.assertEqual(availability["targets"][0]["expr"],
+                         'max by (node) (up{job=~"nodeexporter|telegraf", node=~"$node"})')
+        self.assertTrue(availability["targets"][0]["instant"])
+        self.assertFalse(availability["targets"][0]["range"])
+        self.assertEqual(availability["gridPos"], {"h": 5, "w": 12, "x": 0, "y": 0})
+        self.assertEqual(panels["CPU count"]["gridPos"], {"h": 5, "w": 12, "x": 12, "y": 0})
         self.assertIn("CPU utilization", panels)
         self.assertIn("Memory utilization", panels)
         self.assertIn("Filesystem utilization", panels)
         self.assertIn('(disk_total{job="telegraf", node=~"$node"} > 0)', panels["Filesystem utilization"]["targets"][0]["expr"])
         self.assertIn("Network traffic", panels)
-        self.assertEqual(len(dashboard["panels"]), 13)
+        self.assertEqual(len(dashboard["panels"]), 12)
         self.assertNotIn("Disk usage (used bytes)", panels)
         disk = panels["Available disk space"]
         self.assertEqual(disk["fieldConfig"]["defaults"]["unit"], "bytes")
