@@ -5,6 +5,9 @@ import ipaddress
 import json
 from pathlib import Path
 import re
+import shutil
+import subprocess
+import tempfile
 import unittest
 import tomllib
 
@@ -19,7 +22,7 @@ ROOT = STACK.parents[1]
 
 class MonitoringTests(unittest.TestCase):
     def setUp(self):
-        inventory = yaml.safe_load((ROOT / "monitoring.inventory.yml.example").read_text())
+        inventory = yaml.safe_load((ROOT / "hosts.example.yml").read_text())
         children = inventory["all"]["children"]
         self.groups = {
             name: list(group.get("hosts", {})) for name, group in children.items()
@@ -56,6 +59,44 @@ class MonitoringTests(unittest.TestCase):
             entry["labels"]["node"]: entry
             for entry in jobs[job]["static_configs"]
         }
+
+    def test_environment_is_rendered_from_shared_credentials_without_local_env(self):
+        play = yaml.safe_load((STACK / "deploy.yml").read_text())[0]
+        self.assertNotIn("monitoring_env_file", play["vars"])
+        task = next(task for task in play["tasks"] if task.get("register") == "monitoring_environment")
+        self.assertEqual(task["ansible.builtin.template"]["src"], "grafana.env.j2")
+        self.assertEqual(task["ansible.builtin.template"]["mode"], "0600")
+        self.assertTrue(task["no_log"])
+        validate = next(task for task in play["tasks"] if task["name"] == "Validate Grafana administrator credentials")
+        self.assertNotIn("when", validate)
+        rendered = self.environment.from_string((STACK / "grafana.env.j2").read_text()).render(
+            monitoring_grafana_admin_user="fixture-user", monitoring_grafana_admin_password="fixture-secret")
+        self.assertIn('GF_SECURITY_ADMIN_USER="fixture-user"', rendered)
+        self.assertIn('GF_SECURITY_ADMIN_PASSWORD="fixture-secret"', rendered)
+        self.assertIn("GF_PATHS_PROVISIONING=/etc/grafana/provisioning", rendered)
+        self.assertIn("GF_USERS_ALLOW_SIGN_UP=false", rendered)
+        self.assertIn("NO_PROXY=localhost,127.0.0.1,prometheus,loki", rendered)
+
+    @unittest.skipUnless(shutil.which("docker"), "Docker Compose is needed to check dotenv quoting")
+    def test_environment_quotes_credentials_without_compose_interpolation(self):
+        template = self.environment.from_string((STACK / "grafana.env.j2").read_text())
+        # Offline `config` only: never starts containers or talks to a Docker daemon.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            compose = root / "compose.yml"
+            compose.write_text("services:\n  fixture:\n    image: scratch\n    env_file: .env\n")
+            for secret in ("p$a$$s${UNSET}", "quotes'\"\\\\", "пароль", "line\nnext"):
+                with self.subTest(secret=secret):
+                    (root / ".env").write_text(template.render(
+                        monitoring_grafana_admin_user="fixture-user", monitoring_grafana_admin_password=secret))
+                    result = subprocess.run(
+                        ["docker", "compose", "--env-file", "/dev/null", "-f", str(compose), "config", "--format", "json"],
+                        capture_output=True, text=True, timeout=20)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    value = json.loads(result.stdout)["services"]["fixture"]["environment"]["GF_SECURITY_ADMIN_PASSWORD"]
+                    # Compose config escapes literal dollars again for round-trip serialization.
+                    self.assertEqual(value.replace("$$", "$"), secret)
+                    self.assertNotIn("not set", result.stderr)
 
     def test_active_nodes_ports_and_alert_opt_in(self):
         targets = self.targets("telegraf")

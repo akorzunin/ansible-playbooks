@@ -11,10 +11,10 @@
         backup: true
         remote_src: false
       loop:
-        - ~/documents/ansible/playbooks/firefly/compose.yml
-        - ~/documents/ansible/playbooks/firefly/.env
-        - ~/documents/ansible/playbooks/firefly/.db.env
-        - ~/documents/ansible/playbooks/firefly/.importer.env
+        - "{{ playbook_dir }}/compose.yml"
+        - "{{ playbook_dir }}/.env"
+        - "{{ playbook_dir }}/.db.env"
+        - "{{ playbook_dir }}/.importer.env"
 
     - name: Create docker network
       ansible.builtin.command:

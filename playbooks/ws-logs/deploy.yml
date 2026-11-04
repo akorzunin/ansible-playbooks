@@ -5,7 +5,6 @@
   any_errors_fatal: true
   vars:
     remote_install_path: "{{ ansible_facts.env.HOME }}/deploy/ws-logs"
-    monitoring_env_file: "{{ playbook_dir }}/.env"
     monitoring_replace_ui: false
     monitoring_telegram_bot_token: "{{ MONITORING_TELEGRAM_BOT_TOKEN | default('') }}"
     monitoring_telegram_chat_id: "{{ MONITORING_TELEGRAM_CHAT_ID | default('') }}"
@@ -23,7 +22,7 @@
           - groups.get('monitored_nodes', []) | length > 0
           - inventory_hostname in groups.get('monitored_nodes', [])
           - monitoring_dashboard_files | length > 0
-        fail_msg: Use both -i ./hosts and -i ./monitoring.inventory.yml.
+        fail_msg: Configure monitoring_servers and monitored_nodes in ./hosts; load it with -i ./hosts.
 
     - name: Validate Telegraf addresses and ports
       ansible.builtin.assert:
@@ -33,7 +32,7 @@
             hostvars[item].ansible_host is defined or
             hostvars[item].monitoring_telegraf_target is defined
           - hostvars[item].monitoring_client_telegraf_port | int > 0
-        fail_msg: "Missing connection/monitoring settings for {{ item }}; load ./hosts as well as the overlay."
+        fail_msg: "Missing connection/monitoring settings for {{ item }} in ./hosts."
       loop: "{{ groups['monitored_nodes'] | difference(groups.get('retired_nodes', [])) }}"
       when: hostvars[item].monitoring_enabled | default(true) | bool
 
@@ -45,25 +44,13 @@
         fail_msg: Set MONITORING_TELEGRAM_BOT_TOKEN and MONITORING_TELEGRAM_CHAT_ID in external_vars.yml (Vault).
       no_log: true
 
-    - name: Validate credentials for destructive migration
+    - name: Validate Grafana administrator credentials
       ansible.builtin.assert:
         that:
           - monitoring_grafana_admin_user | length > 0
           - monitoring_grafana_admin_password | length > 0
-        fail_msg: Set the current Grafana org-1 admin credentials in external_vars.yml before replacing UI objects.
-      when: monitoring_replace_ui | bool
+        fail_msg: Set MONITORING_GRAFANA_ADMIN_USER and MONITORING_GRAFANA_ADMIN_PASSWORD in external_vars.yml.
       no_log: true
-
-    - name: Check local environment file
-      ansible.builtin.stat:
-        path: "{{ monitoring_env_file }}"
-      delegate_to: localhost
-      register: monitoring_env_stat
-
-    - name: Require an environment file
-      ansible.builtin.assert:
-        that: monitoring_env_stat.stat.exists
-        fail_msg: Copy playbooks/ws-logs/.env.example to .env and configure it, or set monitoring_env_file to your existing file.
 
     - name: Check existing Grafana data
       ansible.builtin.stat:
@@ -123,9 +110,9 @@
         mode: "0644"
       register: monitoring_telegraf_config
 
-    - name: Copy environment file
-      ansible.builtin.copy:
-        src: "{{ monitoring_env_file }}"
+    - name: Render Grafana environment from shared credentials
+      ansible.builtin.template:
+        src: grafana.env.j2
         dest: "{{ remote_install_path }}/.env"
         mode: "0600"
       register: monitoring_environment

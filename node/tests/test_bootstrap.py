@@ -22,19 +22,19 @@ class BootstrapTests(unittest.TestCase):
         self.directory = Path(self.temp.name)
         (self.directory / "ansible.cfg").write_text("[defaults]\n")
         self.source = self.directory / "private-hosts.yml"
-        self.original = "seed:\n  hosts:\n    old:\n      note: !vault |\n        encrypted-fixture\n"
+        ciphertext = VaultLib([('default', VaultSecret(b'NODE_TEST_VAULT_SECRET'))]).encrypt(b'fixture').decode()
+        self.original = ("seed:\n  hosts:\n    old:\n      note: !vault |\n"
+                         + "".join("        " + line + "\n" for line in ciphertext.splitlines())
+                         + "\n" + (ROOT / "hosts.example.yml").read_text().removeprefix("---\n"))
         self.source.write_text(self.original)
         self.hosts = self.directory / "hosts"
         self.hosts.symlink_to(self.source)
-        self.overlay = self.directory / "monitoring.yml"
-        self.overlay.write_text((ROOT / "monitoring.inventory.yml.example").read_text())
+        self.overlay = self.source  # Monitoring and SSH now persist in the same shared inventory.
         self.key = self.directory / "id_ed25519"
         self.key.write_text("unused private key fixture")
         self.key.with_suffix(".pub").write_text("ssh-ed25519 AAAAtest fixture")
         self.vault_password = self.directory / "vault-password"
         self.vault_password.write_text("NODE_TEST_VAULT_SECRET\n")
-        self.env_file = self.directory / ".env"
-        self.env_file.write_text("UNUSED=fixture\n")
         self.playbook = self.directory / "offline.yml"
         self.playbook.write_text(yaml.safe_dump([
             {
@@ -54,11 +54,11 @@ class BootstrapTests(unittest.TestCase):
             "nn": name, "node_address": "192.0.2.10", "node_root_pass": "ROOT_SECRET_FIXTURE",
             "node_user": "admin", "node_private_key_file": str(self.key),
             "node_inventory_file": str(self.hosts),
-            "node_monitoring_inventory_file": str(self.overlay),
-            "monitoring_env_file": str(self.env_file),
             "NODE_MONITORING_ALLOWED_SOURCES": ["198.51.100.5/32", "2001:db8::1/128"],
             "MONITORING_TELEGRAM_BOT_TOKEN": "fixture",
             "MONITORING_TELEGRAM_CHAT_ID": "-100123",
+            "MONITORING_GRAFANA_ADMIN_USER": "admin",
+            "MONITORING_GRAFANA_ADMIN_PASSWORD": "GRAFANA_SECRET_FIXTURE",
             **overrides,
         }
         variables_path = self.directory / "vars.json"
@@ -72,7 +72,7 @@ class BootstrapTests(unittest.TestCase):
             "ANSIBLE_NOCOLOR": "1",
         }
         result = subprocess.run(
-            ["ansible-playbook", "-i", str(self.hosts), "-i", str(self.overlay),
+            ["ansible-playbook", "-i", str(self.hosts),
              str(self.playbook), "--vault-password-file", str(self.vault_password),
              "--skip-tags", "node_ssh_readiness",
              "-e", "@" + str(variables_path)],
@@ -83,7 +83,8 @@ class BootstrapTests(unittest.TestCase):
 
     def monitoring_inventory(self):
         result = subprocess.run(
-            ["ansible-inventory", "-i", str(self.overlay), "--list"],
+            ["ansible-inventory", "-i", str(self.hosts), "--list",
+             "--vault-password-file", str(self.vault_password)],
             env={**os.environ, "ANSIBLE_CONFIG": str(self.directory / "ansible.cfg")},
             cwd=ROOT, capture_output=True, text=True, timeout=30,
         )
@@ -207,14 +208,14 @@ class BootstrapTests(unittest.TestCase):
         result = self.run_bootstrap(NODE_MONITORING_ALLOWED_SOURCES=[])
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotIn("Enter allowed monitoring scraper source CIDRs", result.stdout)
-        inventory = yaml.safe_load(self.overlay.read_text())
+        inventory = yaml.load(self.overlay.read_text(), Loader=yaml.BaseLoader)
         expected = inventory["all"]["vars"]["monitoring_workstation_allowed_sources"]
         monitored = self.monitoring_inventory()["_meta"]["hostvars"]
         for name in ("new1", "nk1"):
             self.assertEqual(monitored[name]["monitoring_telegraf_allowed_sources"], expected)
 
-    def test_comment_free_reformatted_overlay_is_preserved_and_extended(self):
-        inventory = yaml.safe_load(self.overlay.read_text())
+    def test_comment_free_reformatted_inventory_is_preserved_and_extended(self):
+        inventory = yaml.load(self.overlay.read_text(), Loader=yaml.BaseLoader)
         # Different indentation/order and no comments or anchors to insert against.
         original = yaml.safe_dump(inventory, indent=4, sort_keys=True)
         self.assertNotIn("# Retain SSH records", original)
@@ -248,19 +249,20 @@ class BootstrapTests(unittest.TestCase):
         result = self.run_bootstrap()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         # Simulate a previous bootstrap's indented managed monitoring block.
-        original = (ROOT / "monitoring.inventory.yml.example").read_text()
+        original = self.source.read_text()
         legacy = (
-            "        # BEGIN ANSIBLE BOOTSTRAP new1\n"
+            "        # BEGIN ANSIBLE MONITORING new1\n"
             "        new1:\n"
             "          monitoring_availability_alert: true\n"
             "          monitoring_telegraf_allowed_sources: [198.51.100.5/32]\n"
-            "        # END ANSIBLE BOOTSTRAP new1\n"
+            "        # END ANSIBLE MONITORING new1\n"
         )
         self.overlay.write_text(original.replace("    # Retain SSH records", legacy + "    # Retain SSH records"))
         result = self.run_bootstrap(node_root_pass="")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         saved = self.overlay.read_text()
         self.assertNotIn(legacy, saved)
+        self.assertEqual(saved.count("# BEGIN ANSIBLE MONITORING new1"), 1)
         self.assertEqual(saved.count("# BEGIN ANSIBLE BOOTSTRAP new1"), 1)
         self.assertTrue(saved.startswith(original))
         self.assertIn("new1", self.monitoring_inventory()["monitored_nodes"]["hosts"])
@@ -275,6 +277,7 @@ class BootstrapTests(unittest.TestCase):
             {"node_monitoring_allowed_sources": ["1.2.3.4/0"]},
             {"node_monitoring_allowed_sources": ["not-a-network"]},
             {"MONITORING_TELEGRAM_BOT_TOKEN": ""},
+            {"MONITORING_GRAFANA_ADMIN_PASSWORD": ""},
         ):
             with self.subTest(overrides=overrides):
                 result = self.run_bootstrap(**overrides)

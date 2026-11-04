@@ -5,7 +5,7 @@ Run from the repository root:
 ```sh
 ansible-galaxy collection install -r requirements.yml
 ansible-playbook --vault-password-file=.ansible_pass \
-  -i ./hosts -i ./monitoring.inventory.yml node/init_node.playbook.yaml
+  -i ./hosts node/init_node.playbook.yaml
 ```
 
 Enter the **new node name**, **IP/DNS address**, and **root password**. No inventory
@@ -19,8 +19,9 @@ Run only one bootstrap at a time against the same inventory files.
 
 - Link the private YAML `hosts` and `external_vars.yml` files (`./install.sh`).
   Bootstrap preserves existing records, Vault text, and the `hosts` symlink.
-- Copy `monitoring.inventory.yml.example` to the ignored `monitoring.inventory.yml`
-  if not already present. Configure its scraper source CIDRs before deployment.
+- Configure monitoring groups and scraper source CIDRs in `hosts`, using
+  `hosts.example.yml` as a reference. Existing controllers can merge the old overlay
+  once with `python3 playbooks/ws-logs/migrate-inventory.py` (see the monitoring guide).
   Existing block-style YAML inventories also work: no particular comments,
   indentation, or group ordering are required. Do not add the new node manually.
 - Use Ansible Core **2.19+** and have OpenSSH's `ssh-agent` available. The repository
@@ -33,7 +34,7 @@ Run only one bootstrap at a time against the same inventory files.
   select that socket with `ANSIBLE_SSH_AGENT=$SSH_AUTH_SOCK` for the migration;
   unlike the default managed agent, that existing agent is not cleaned up by Ansible.
 - In `external_vars.yml`, optionally set `NODE_USER` (default `ansible`). Bootstrap
-  reuses `monitoring_workstation_allowed_sources` from `monitoring.inventory.yml`,
+  reuses `monitoring_workstation_allowed_sources` from `hosts`,
   the same allowlist used by `nk1` and other active VPS nodes. Override it with a
   non-empty YAML list in `NODE_MONITORING_ALLOWED_SOURCES` if needed. Prefer a stable VPN /32 rather
   than a dynamic ISP pool. Bootstrap only prompts if neither list is configured.
@@ -41,8 +42,10 @@ Run only one bootstrap at a time against the same inventory files.
   network firewall.
 - The existing workstation monitoring stack must be reachable via its inventory
   connection, with Docker permissions. Keep `MONITORING_TELEGRAM_BOT_TOKEN` and
-  `MONITORING_TELEGRAM_CHAT_ID` configured in Vault-backed `external_vars.yml`, and
-  `playbooks/ws-logs/.env` present (see the [monitoring guide](../playbooks/ws-logs/README.md)).
+  `MONITORING_TELEGRAM_CHAT_ID`, plus `MONITORING_GRAFANA_ADMIN_USER` and
+  `MONITORING_GRAFANA_ADMIN_PASSWORD`, configured in Vault-backed `external_vars.yml`.
+  The remote Grafana environment is rendered from a tracked template; no local
+  `.env` is needed (see the [monitoring guide](../playbooks/ws-logs/README.md)).
 - Permit SSH from your controller and TCP 9273 from the scraper in your provider
   firewall. Bootstrap does not change provider/network firewall rules.
 
@@ -78,8 +81,7 @@ Run only one bootstrap at a time against the same inventory files.
    do not always create this marker: its absence does not guarantee no reboot
    is needed. Plan maintenance reboots after kernel/security updates.
 6. Deploy Telegraf for host and Docker metrics, then save monitoring
-   membership/allowlist in
-   `monitoring.inventory.yml`. Managed top-level blocks extend the existing
+   membership/allowlist in the same private `hosts`. Managed top-level blocks extend the existing
    `monitored_nodes` group without rewriting unrelated inventory text. Backups
    are made before inventory changes; reruns update the same managed blocks.
 7. Redeploy the existing monitoring stack, including shared dashboards, alert
@@ -116,8 +118,8 @@ If the image disables AppArmor in the kernel, bootstrap stops before installing
 Docker. Enable AppArmor in the image's kernel boot configuration (or use a
 supported kernel), reboot manually, and retry. Bootstrap does not change the
 bootloader.
-Keep the monitoring overlay private and backed up: it is ignored by Git because
-source CIDRs may reveal private infrastructure details.
+Keep `hosts` private and backed up: it contains SSH identities and monitoring
+source CIDRs, and is already synced through Dropbox.
 
 ### Connect from another machine
 
@@ -155,11 +157,11 @@ administrator creation actually succeeded.
 
 Older bootstrap runs could update Prometheus even after the new server was
 unreachable. To remove an unsaved failed target, redeploy monitoring from the
-persisted inventories (this updates the live workstation stack):
+persisted inventory (this updates the live workstation stack):
 
 ```sh
 ansible-playbook --vault-password-file=.ansible_pass \
-  -i ./hosts -i ./monitoring.inventory.yml playbooks/ws-logs/deploy.yml
+  -i ./hosts playbooks/ws-logs/deploy.yml
 ```
 
 ### Connection reset during SSH key exchange

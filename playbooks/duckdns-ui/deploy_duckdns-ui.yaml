@@ -11,8 +11,8 @@
         backup: true
         remote_src: false
       loop:
-        - ~/documents/ansible/playbooks/duckdns-ui/compose.yaml
-        - ~/documents/ansible/playbooks/duckdns-ui/.env
+        - "{{ playbook_dir }}/compose.yaml"
+        - "{{ playbook_dir }}/.env"
 
     - name: Pull new image duckdns-ui
       ansible.builtin.command:

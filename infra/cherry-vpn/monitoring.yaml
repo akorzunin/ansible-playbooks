@@ -7,7 +7,7 @@
   become: false
   any_errors_fatal: true
   tasks:
-    - name: Require both shared inventories and the applied Cherry inventory
+    - name: Require the shared inventory and the applied Cherry inventory
       ansible.builtin.assert:
         that:
           - not ansible_check_mode
@@ -17,7 +17,7 @@
           - groups.get('monitored_nodes', []) | length > 0
           - monitoring_workstation_allowed_sources | default([]) | length > 0
           - (groups['monitoring_servers'] | first) in groups['monitored_nodes']
-        fail_msg: Load hosts, monitoring.inventory.yml and private/inventory.yaml; run without --limit or --check.
+        fail_msg: Load hosts (including monitoring groups) and private/inventory.yaml; run without --limit or --check.
 
 - name: Install Cherry host and container metrics
   hosts: vpn_test
@@ -49,7 +49,7 @@
     # A top-level group extends monitored_nodes without rewriting private YAML.
     - name: Persist Cherry host monitoring membership
       ansible.builtin.blockinfile:
-        path: "{{ playbook_dir }}/../../monitoring.inventory.yml"
+        path: "{{ playbook_dir }}/../../hosts"
         marker: "# {mark} ANSIBLE CHERRY MONITORING"
         block: |
           cherry_monitoring:

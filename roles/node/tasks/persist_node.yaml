@@ -1,8 +1,8 @@
 ---
 - name: Remove the old layout-dependent monitoring entry when present
   ansible.builtin.blockinfile:
-    path: "{{ node_monitoring_inventory_file }}"
-    marker: "        # {mark} ANSIBLE BOOTSTRAP {{ inventory_hostname }}"
+    path: "{{ node_inventory_file }}"
+    marker: "        # {mark} ANSIBLE MONITORING {{ inventory_hostname }}"
     state: absent
     backup: true
   delegate_to: localhost
@@ -12,8 +12,8 @@
 # extend monitored_nodes without rewriting existing YAML, comments, or Vault text.
 - name: Save monitoring membership allowlist and alert opt-in
   ansible.builtin.blockinfile:
-    path: "{{ node_monitoring_inventory_file }}"
-    marker: "# {mark} ANSIBLE BOOTSTRAP {{ inventory_hostname }}"
+    path: "{{ node_inventory_file }}"
+    marker: "# {mark} ANSIBLE MONITORING {{ inventory_hostname }}"
     block: |
       monitoring_bootstrap_{{ inventory_hostname }}:
         children:
@@ -25,6 +25,6 @@
                 monitoring_client_telegraf_port: 9273
                 monitoring_telegraf_allowed_sources: {{ monitoring_telegraf_allowed_sources | to_json }}
     backup: true
-    mode: "0644"
+    mode: "0600"
   delegate_to: localhost
   become: false

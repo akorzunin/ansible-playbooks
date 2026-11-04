@@ -11,8 +11,8 @@
         backup: true
         remote_src: false
       loop:
-        - ~/documents/ansible/playbooks/wake-on-lan/compose.yaml
-        - ~/documents/ansible/playbooks/wake-on-lan/computers.txt
+        - "{{ playbook_dir }}/compose.yaml"
+        - "{{ playbook_dir }}/computers.txt"
 
     - name: Deploy wol
       ansible.builtin.command:

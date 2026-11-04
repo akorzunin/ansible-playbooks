@@ -1,6 +1,6 @@
 ---
-# Copy to monitoring.inventory.yml (ignored) and configure private source CIDRs.
-# Overlay for ./hosts: one entry per machine
+# Monitoring sections for private ./hosts, alongside existing SSH connection entries.
+# Configure your real monitored membership and private scraper source CIDRs.
 all:
   vars:
     monitoring_workstation_allowed_sources: &workstation_scraper_sources

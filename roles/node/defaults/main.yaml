@@ -4,5 +4,4 @@ node_port: 22
 # Used only to migrate a node that still trusts an existing controller key.
 node_private_key_file: "{{ lookup('env', 'HOME') }}/.ssh/id_ed25519"
 node_inventory_file: "{{ playbook_dir }}/../hosts"
-node_monitoring_inventory_file: "{{ playbook_dir }}/../monitoring.inventory.yml"
 node_monitoring_allowed_sources: "{{ NODE_MONITORING_ALLOWED_SOURCES | default(monitoring_workstation_allowed_sources | default([]), true) }}"

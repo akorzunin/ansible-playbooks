@@ -182,19 +182,18 @@ Credentials, certificate state and other VPN services are left intact.
 ## Host monitoring
 
 [`monitoring.yaml`](monitoring.yaml), included by `deploy.yaml`, installs Telegraf,
-persists Cherry membership in the private monitoring overlay, redeploys the shared
+persists Cherry membership in the shared private `hosts`, redeploys the shared
 stack, and verifies host/container metrics. It does not check VPN protocols.
 
 ```sh
-ansible-playbook -i hosts -i monitoring.inventory.yml \
-  -i infra/cherry-vpn/private/inventory.yaml \
+ansible-playbook -i hosts -i infra/cherry-vpn/private/inventory.yaml \
   --vault-password-file .ansible_pass infra/cherry-vpn/monitoring.yaml
 ```
 
-Restore the applied private inventory and dedicated keys first. Load all three
+Restore the applied private inventory and dedicated keys first. Load both
 inventories and run without `--limit` or `--check`. Existing Docker/Compose,
-passwordless `vpnadmin` sudo, workstation sudo, and the monitoring stack's private
-environment/Telegram credentials are required. Port 9273 remains restricted to
+passwordless `vpnadmin` sudo, workstation sudo, and shared Grafana/Telegram
+credentials in `external_vars.yml` are required. Port 9273 remains restricted to
 `monitoring_workstation_allowed_sources`; verify the scraper's actual source CIDRs.
 Exporter failure alone is not evidence of VPN blocking. Retire monitoring membership
 separately when destroying a VM.
@@ -239,8 +238,7 @@ bash infra/cherry-vpn/tofu.sh inventory
 # If direct administration is blocked, explicitly select a controller transport:
 bash infra/cherry-vpn/tofu.sh inventory \
   --proxy-command 'nc -X connect -x 127.0.0.1:12334 %h %p'
-ansible-playbook -i hosts -i monitoring.inventory.yml \
-  -i infra/cherry-vpn/private/inventory.yaml \
+ansible-playbook -i hosts -i infra/cherry-vpn/private/inventory.yaml \
   --vault-password-file .ansible_pass infra/cherry-vpn/deploy.yaml
 ```
 
@@ -467,6 +465,7 @@ The Dropbox layout is:
 ssh/
   hosts
   external_vars.yml
+  # Optional legacy service inputs use their repository-relative playbooks/ paths.
   cherry-vpn/
     cherry-token.vault
     terraform.tfvars
@@ -481,10 +480,11 @@ On a fresh controller, wait for Dropbox to sync, then run from the repository ro
 # Alternatively: DROPBOX_SSH_DIR=/path/to/Dropbox/ssh ./install.sh
 ```
 
-This restores all four links. Reruns retain correct links and refuse to overwrite
-any existing file or different/broken link. When adopting existing local Cherry
-inputs, securely move them into the Dropbox layout first, checking for existing
-shared copies rather than overwriting them. Both Cherry inputs are required when
+This restores the base and Cherry links plus any shared legacy service inputs
+(see [Setup](../../README.md#setup)). Reruns retain correct links and refuse to
+overwrite any existing file or different/broken link. On the working controller,
+use `./install.sh --migrate` once to move existing local inputs into this layout
+and replace them with links; conflicting shared copies are refused. Both Cherry inputs are required when
 `cherry-vpn/` exists; when absent, the installer reports skipping OpenTofu links.
 
 Install OpenTofu as described above and securely restore `.ansible_pass` separately.

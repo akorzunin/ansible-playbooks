@@ -11,9 +11,10 @@ PROJECT = Path(__file__).resolve().parent
 
 
 class CherryMonitoringTests(unittest.TestCase):
-    def test_persisted_overlay_survives_normal_monitoring_deployment(self):
+    def test_monitoring_membership_is_persisted_in_shared_hosts(self):
         plays = yaml.safe_load((PROJECT / "monitoring.yaml").read_text())
         task = next(task for task in plays[1]["post_tasks"] if "ansible.builtin.blockinfile" in task)
+        self.assertTrue(task["ansible.builtin.blockinfile"]["path"].endswith("/hosts"))
         block = task["ansible.builtin.blockinfile"]["block"]
         env = jinja2.Environment(undefined=jinja2.StrictUndefined)
         env.filters["to_json"] = json.dumps
@@ -22,7 +23,7 @@ class CherryMonitoringTests(unittest.TestCase):
             ansible_ssh_private_key_file="/private/admin", ansible_ssh_common_args="-o StrictHostKeyChecking=yes",
             monitoring_workstation_allowed_sources=["198.51.100.5/32"],
         )
-        overlay = yaml.safe_load((ROOT / "monitoring.inventory.yml.example").read_text() + "\n" + rendered)
+        overlay = yaml.safe_load((ROOT / "hosts.example.yml").read_text() + "\n" + rendered)
         cherry = overlay["cherry_monitoring"]["children"]["monitored_nodes"]["hosts"]["cherry_vpn_test"]
         self.assertEqual(cherry["monitoring_node"], "cherry")
         self.assertTrue(cherry["monitoring_availability_alert"])

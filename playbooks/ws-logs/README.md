@@ -6,17 +6,32 @@ rule, and Telegram notification routing. Grafana's database still stores users a
 
 ## Inventory
 
-Always load both inventories:
+Load the shared inventory with `-i ./hosts`. Monitoring groups and host variables
+live in the same private Dropbox file as SSH connection settings, with **one
+monitoring entry per machine**, not both local and remote aliases. Metrics reuse
+`ansible_host` unless `monitoring_address` or an explicit target overrides it.
+`hosts.example.yml` shows the monitoring sections; for a new setup, merge them
+into your existing `hosts` and replace documentation-only scraper CIDRs with
+your actual egress IP or VPN /32. Keep existing membership and source restrictions.
+
+### Migrate an existing overlay once
+
+On the working controller, before switching machines:
 
 ```sh
--i ./hosts -i ./monitoring.inventory.yml
+python3 playbooks/ws-logs/migrate-inventory.py
 ```
 
-`hosts` remains your private Dropbox inventory. `monitoring.inventory.yml` is an
-ignored private overlay with **one entry per machine**, not both local and remote aliases.
-For a new setup, copy `monitoring.inventory.yml.example` to that path and replace
-the documentation-only scraper CIDR with your actual egress IP or VPN /32. Keep
-an existing overlay's private settings and back it up before editing membership.
+This local-only script uses Ansible's PyYAML dependency, appends the old overlay
+without reserializing Vault ciphertext/comments, preserves the Dropbox symlink,
+and saves a mode-0600 `hosts.monitoring-backup~` beside the shared source. It also
+renames the legacy monitoring bootstrap markers, which previously matched SSH
+markers in the other file. Reruns are safe; overlapping top-level groups are
+refused and require a manual merge (never append duplicate YAML keys).
+Optional `--hosts` and `--overlay` paths support non-default layouts. Verify the
+combined inventory, then archive the old `monitoring.inventory.yml`. Do not load
+that overlay again or keep editing it; `hosts` is now the single source of truth.
+Wait for Dropbox sync before switching controllers. No servers are contacted.
 Monitoring follows enabled `monitored_nodes` entries, including `workstation`, `pi`,
 and `nk1`. `nt1` is completely retired; keep it only in `retired_nodes`, alongside
 `kr1`, `sw1`, and `pl1`:
@@ -36,7 +51,7 @@ source allowlist. Prefer a stable VPN /32: allowing a dynamic ISP pool also lets
 other subscribers in that pool read metrics. Loopback and local Docker bridge
 sources are also allowed. Requests from other public sources receive HTTP 403.
 **Future ISP assignments outside the configured sources require updating
-`monitoring_workstation_allowed_sources` in `monitoring.inventory.yml` and
+`monitoring_workstation_allowed_sources` in `hosts` and
 redeploying those clients.** Remote VPS nodes share that list, and bootstrap uses it by
 default for new nodes (saving a per-node copy). Update saved copies too when the
 source changes. Prefer a stable VPN
@@ -51,17 +66,26 @@ strings. The tracked `external_vars.yml.example` lists the required names:
 - `MONITORING_TELEGRAM_BOT_TOKEN`
 - `MONITORING_TELEGRAM_CHAT_ID` (numeric string; group IDs are usually negative)
 - `MONITORING_GRAFANA_ADMIN_USER` / `MONITORING_GRAFANA_ADMIN_PASSWORD`
-  (**current** org-1 administrator credentials, needed only for UI cleanup)
+  (**current** org-1 administrator credentials, also used to initialize new databases)
 
 Reuse your existing Telegram bot/chat. If the token is lost, obtain/reissue it with
 BotFather. Start the bot or add it to the target group before testing notifications.
 Grafana's database backup preserves the old contact point, but a redacted contact
 point export alone cannot recover its bot token.
 
-Copy `.env.example` to `playbooks/ws-logs/.env` and configure it, or pass
-`-e monitoring_env_file=/absolute/path/to/your/existing/.env`. Preserve existing
-settings. `GF_SECURITY_ADMIN_*` initializes a new database; it does not reset an
-existing administrator password.
+`grafana.env.j2` tracks the public Grafana paths, timezone, URL, proxy settings and
+signup/SMTP defaults. Deployment renders it directly to the remote mode-0600
+`.env`, reusing `MONITORING_GRAFANA_ADMIN_USER` / `MONITORING_GRAFANA_ADMIN_PASSWORD`.
+No local `.env`, `monitoring_env_file` override, or duplicated password is needed.
+If an old local `.env` has custom non-secret settings, move those settings into
+the tracked template; never commit its plaintext credentials. `GF_SECURITY_ADMIN_*`
+initializes a new database; it does not reset an existing administrator password.
+Changing a live password still requires Grafana's password-change workflow and
+updating `external_vars.yml` to match.
+
+After the one-time inventory merge above, switching controllers needs only
+`./install.sh`, synced `hosts` / `external_vars.yml`, and the Vault password supplied
+separately. See the [repository setup](../../README.md#setup).
 
 Secret files on the server are mode `0600`; secret tasks suppress Ansible output.
 The rendered contact point still contains the bot token, so treat server files and
@@ -75,17 +99,17 @@ host in the private inventory. No infrastructure is changed until you run these 
 ```sh
 ansible-galaxy collection install -r requirements.yml
 
-ansible-playbook -i ./hosts -i ./monitoring.inventory.yml \
+ansible-playbook -i ./hosts \
   playbooks/ws-logs/deploy.yml --syntax-check
 
-ansible-playbook -i ./hosts -i ./monitoring.inventory.yml \
+ansible-playbook -i ./hosts \
   --vault-password-file=.ansible_pass \
   playbooks/ws-logs/deploy.yml -e monitoring_replace_ui=true
 ```
 
 The migration:
 
-1. Validates inventory, Telegram settings, the local `.env`, and cleanup credentials.
+1. Validates inventory and shared Telegram/Grafana credentials before changing services.
 2. Stops Grafana briefly and takes a consistent, root-readable archive of
    `grafana_data`, `.env`, and the old stack configuration under
    `~/deploy/ws-logs/backups/grafana-<timestamp>.tar.gz`. Grafana is restarted even
@@ -116,7 +140,7 @@ Only use `monitoring_replace_ui=true` for the intentional migration. Ordinary
 runs preserve other UI-created dashboards/alerts:
 
 ```sh
-ansible-playbook -i ./hosts -i ./monitoring.inventory.yml \
+ansible-playbook -i ./hosts \
   --vault-password-file=.ansible_pass playbooks/ws-logs/deploy.yml
 ```
 
@@ -228,18 +252,18 @@ explicit integration; no VPN checker is deployed by this repository.
 
 ## Adding, disabling, and retiring nodes
 
-`nt1` is retired. In an existing private `monitoring.inventory.yml`, remove it from
+`nt1` is retired. In private `hosts`, remove it from
 `monitored_nodes`, add it to `retired_nodes`, and run the ordinary server `deploy.yml`
 command above. This removes its scrape target and availability/disk alerts without
 deleting Prometheus history or contacting the retired host. Keep private SSH and
 backup records only for historical reference; do not redeploy its services.
 
 `dyn1` was destroyed on 2026-11-01. Its shared SSH record and monitoring membership
-were removed, workstation VPN probes were disabled in the overlay, and this stack
+were removed, workstation VPN probes were disabled in inventory, and this stack
 was redeployed. OpenTofu does not reconcile monitoring membership automatically.
 On future VM replacement, update the private connection and verified host pin,
 then redeploy the collector and server. On deletion, remove the node from the
-monitoring overlay and redeploy the server.
+shared `hosts` inventory and redeploy the server.
 
 For a fresh Debian/Ubuntu server, use the [automated node bootstrap](../../node/init.md):
 it installs Docker/security updates/SSHGuard, saves SSH and monitoring inventory,
@@ -247,17 +271,17 @@ deploys Telegraf, updates this stack, and verifies the new scrape target.
 The manual steps below remain useful for existing Docker hosts.
 
 1. Add SSH details to the private `hosts` inventory.
-2. Add the same host to `monitored_nodes` in `monitoring.inventory.yml`.
+2. Add the same host to `monitored_nodes` in that same `hosts` file.
 3. Configure the metrics address, `monitoring_client_telegraf_port` if not 9273,
    and a non-empty `monitoring_telegraf_allowed_sources` list. Set
    `monitoring_availability_alert: true` if it should page you.
 4. For a new Docker host, deploy Telegraf, then redeploy the monitoring server:
 
 ```sh
-ansible-playbook -i ./hosts -i ./monitoring.inventory.yml \
+ansible-playbook -i ./hosts \
   --vault-password-file=.ansible_pass playbooks/ws-logs/deploy-clients.yml -l newnode
 
-ansible-playbook -i ./hosts -i ./monitoring.inventory.yml \
+ansible-playbook -i ./hosts \
   --vault-password-file=.ansible_pass playbooks/ws-logs/deploy.yml
 ```
 
@@ -269,12 +293,12 @@ without Docker metrics. It does not install Docker or change VPN/firewall settin
 Availability and disk alerts apply normally. Do not run `retire-exporters.yml` on
 native hosts: its verification requires Docker metric families.
 
-The client role deploys Telegraf, not the old exporters; always load the monitoring
-overlay for endpoint restrictions. For an existing exporter
+The client role deploys Telegraf, not the old exporters; configure endpoint
+restrictions in `hosts`. For an existing exporter
 host, keep the old containers until server-side checks pass, then retire them:
 
 ```sh
-ansible-playbook -i ./hosts -i ./monitoring.inventory.yml \
+ansible-playbook -i ./hosts \
   --vault-password-file=.ansible_pass playbooks/ws-logs/retire-exporters.yml -l newnode
 ```
 
@@ -335,7 +359,7 @@ Local checks (Python uses Ansible's existing Jinja2/PyYAML dependencies):
 
 ```sh
 python3 -m unittest discover -s playbooks/ws-logs/tests -v
-ansible-playbook -i ./hosts -i ./monitoring.inventory.yml \
+ansible-playbook -i ./hosts \
   playbooks/ws-logs/deploy-clients.yml --syntax-check
 ```
 

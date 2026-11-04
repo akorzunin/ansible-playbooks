@@ -4,7 +4,7 @@
     that:
       - monitoring_telegraf_allowed_sources | default([]) | length > 0
       - monitoring_client_telegraf_port | int > 0
-    fail_msg: Load monitoring.inventory.yml and configure monitoring_telegraf_allowed_sources before publishing metrics.
+    fail_msg: Configure monitoring_telegraf_allowed_sources in ./hosts before publishing metrics.
 
 - name: Deploy native Telegraf on hosts without Docker
   ansible.builtin.import_tasks: native.yaml
