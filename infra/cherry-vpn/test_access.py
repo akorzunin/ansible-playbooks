@@ -14,7 +14,7 @@ PROJECT = Path(__file__).resolve().parent
 class CherryAccessTests(unittest.TestCase):
     def test_replacement_updates_one_managed_block_preserving_vault_and_symlink(self):
         plays = yaml.safe_load((PROJECT / "deploy.yaml").read_text())
-        self.assertIn("vpn-probe/deploy.yaml", plays[0]["ansible.builtin.import_playbook"])
+        self.assertEqual("bootstrap.yaml", plays[0]["ansible.builtin.import_playbook"])
         self.assertEqual(plays[1]["hosts"], "vpn_test_admin")
         task = plays[1]["pre_tasks"][0]
         self.assertEqual(task["delegate_to"], "localhost")

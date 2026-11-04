@@ -3,8 +3,8 @@
 Supervised trial: one disposable hourly VM, native SSH forwarding, and optional
 Dockerized Naïve, VLESS/REALITY and Hysteria 2/Brutal, with Linux as the first client. Existing nt1,
 application servers and active client configuration are kept separate. Full
-deployment now also registers Cherry in the existing monitoring stack and installs
-isolated workstation probes with Grafana/Telegram alerts. No automatic allocation,
+deployment also registers Cherry host/container metrics in the existing monitoring stack.
+VPN protocol monitoring is maintained separately in `github.com/akorzunin/vpn-monitor`. No automatic allocation,
 rotation or profile publication is introduced.
 
 SSH is a cheap **baseline**, not an obfuscation solution. If it is blocked or
@@ -179,11 +179,11 @@ ansible -i infra/cherry-vpn/private/inventory.yaml cherry_vpn_test \
 
 Credentials, certificate state and other VPN services are left intact.
 
-## Monitoring and suspected blocking
+## Host monitoring
 
-Implemented in [`monitoring.yaml`](monitoring.yaml); **not a claim of live deployment**.
-It is included at the end of `deploy.yaml`. For an already bootstrapped node, deploy
-monitoring alone from the repository root:
+[`monitoring.yaml`](monitoring.yaml), included by `deploy.yaml`, installs Telegraf,
+persists Cherry membership in the private monitoring overlay, redeploys the shared
+stack, and verifies host/container metrics. It does not check VPN protocols.
 
 ```sh
 ansible-playbook -i hosts -i monitoring.inventory.yml \
@@ -191,79 +191,16 @@ ansible-playbook -i hosts -i monitoring.inventory.yml \
   --vault-password-file .ansible_pass infra/cherry-vpn/monitoring.yaml
 ```
 
-Restore/generate the applied private inventory and dedicated keys first. The
-controller also needs `private/cherry-outbounds.json`, exported by `deploy.yaml`;
-the playbook rejects a profile for another server IP. Do not reconstruct host pins
-with `ssh-keyscan`. Load all three inventories for full deployment too. Run without
-`--limit` or `--check`: this workflow configures Cherry **and** the workstation.
+Restore the applied private inventory and dedicated keys first. Load all three
+inventories and run without `--limit` or `--check`. Existing Docker/Compose,
+passwordless `vpnadmin` sudo, workstation sudo, and the monitoring stack's private
+environment/Telegram credentials are required. Port 9273 remains restricted to
+`monitoring_workstation_allowed_sources`; verify the scraper's actual source CIDRs.
+Exporter failure alone is not evidence of VPN blocking. Retire monitoring membership
+separately when destroying a VM.
 
-Requirements: existing Docker/Compose on Cherry and the workstation, passwordless
-`vpnadmin` sudo, workstation sudo, the existing monitoring `.env` and Vault-backed
-Telegram credentials. The workstation client uses a pinned Naïve-capable sing-box
-image; the probe image packages Python and curl. Neither needs host-installed binaries. Metrics source CIDRs come
-from `monitoring_workstation_allowed_sources`; verify these match the workstation's
-actual scraper egress. Port 9273 remains source-restricted, not open to everyone.
-
-What is checked:
-
-- **Host/container metrics:** the existing Telegraf role, shared node dashboard,
-  disk alert and two-minute collector-unreachable Telegram alert, with stable
-  `node="cherry"`. Exporter failure alone is **not** evidence of a VPN ban.
-- **Real protocol requests:** a separate Compose project deployed through the
-  existing `deploy_compose` role runs unprivileged `client` and `probe` containers.
-  They share a network namespace: only the probe reaches the client's loopback
-  listeners on ports 22340–22343; no ports are published to the workstation.
-  Every minute the probe uses Cherry's pinned SSH key, Naïve credentials/TLS,
-  VLESS/REALITY credentials and Hysteria 2 password/TLS. Curl requests gstatic and
-  Cloudflare HTTPS through each protocol (eight checks, including remote DNS).
-  Regenerate the four-protocol export before redeploying monitoring; an old
-  three-protocol export is rejected.
-  There is no direct outbound fallback, TUN or modification of the active client.
-- **Direct controls:** HTTPS to `example.com` and `www.wikipedia.org`, without
-  curlrc or inherited proxy variables. Both must pass. Verify these sites are
-  reachable directly from the affected ISP; adjust the probe Compose arguments if
-  necessary. Controls use ordinary Docker egress. Host TUN/routing can still carry
-  these requests: verify a direct bypass
-  before treating them as independent controls.
-- **Grafana alerts:** both destinations failing for a protocol for two minutes
-  while controls pass triggers *Cherry VPN protocol unreachable*. Partial
-  destination failure is visible in metrics but does not assert path failure.
-  Failed controls produce *checks inconclusive* instead. A missing/stalled probe
-  produces *probe unavailable* after three minutes plus a one-minute pending period.
-  Evaluation and existing Telegram grouping add delivery latency.
-
-These observations indicate a **suspected path/server/client failure**, never
-proof of an IP ban. Compare protocols, inspect the server and repeat from another
-network before replacing anything. **Automatic replacement is still not implemented.**
-The workstation runs Grafana and the probes: if it is offline, it cannot notify you.
-Use an external dead-man monitor if workstation-outage notifications are required.
-
-The playbook saves a managed block in the private monitoring overlay (with backup),
-so ordinary `ws-logs/deploy.yml` runs retain Cherry and probe alerts without loading
-its private inventory. Rerun full Cherry deployment after replacement to refresh
-its metrics address, host pin and isolated probe credentials. It verifies Cherry's
-host/container metrics and all eight probe series in Prometheus; this checks collection,
-not that VPN requests passed. Inspect `vpn_probe_success` and test the existing
-**Monitoring Telegram** contact point in Grafana after deployment.
-
-Diagnostics on the workstation:
-
-```sh
-cd /srv/deploy/cherry-vpn-monitor
-docker compose ps
-docker compose logs --since 15m client probe
-curl -sG http://127.0.0.1:9090/api/v1/query --data-urlencode 'query=vpn_probe_success'
-```
-
-No test Telegram message is sent automatically. Credentials live under root-only
-`/etc/vpn-monitor/`, outside the Compose deployment directory. The mode-0600 client
-file belongs to the container's unprivileged UID 65534 and is mounted read-only into
-only the client; the probe has no credential mount. Observations in
-`/var/lib/vpn-monitor/metrics.prom` contain no credentials. To disable probes, run
-`docker compose down` in `/srv/deploy/cherry-vpn-monitor`, set the saved workstation
-`monitoring_vpn_probe_enabled: false`, and redeploy the monitoring stack; it removes
-only the three VPN-specific Grafana rules. Retire Cherry separately through the
-normal monitoring inventory process if destroying the VM.
+The former workstation probe and its standalone diagnostics have been removed;
+VPN protocol monitoring is now a separate Go project, `github.com/akorzunin/vpn-monitor`.
 
 ## Secure automatic bootstrap
 
@@ -481,7 +418,6 @@ repo-local binary when present, otherwise `tofu` on PATH.
 bash infra/cherry-vpn/tofu.sh init -backend=false
 bash infra/cherry-vpn/tofu.sh validate
 bash infra/cherry-vpn/tofu.sh test
-python -m unittest discover -s playbooks/vpn-probe -p 'test_*.py'
 python -m unittest discover -s infra/cherry-vpn -p 'test_*.py'
 ```
 
@@ -673,7 +609,7 @@ Run only against that dedicated inventory, **not** the existing private `hosts`:
 
 ```sh
 ansible-playbook -i infra/cherry-vpn/private/inventory.yaml \
-  playbooks/vpn-probe/deploy.yaml
+  infra/cherry-vpn/bootstrap.yaml
 ```
 
 The playbook waits for cloud-init before gathering facts, installs sudo and
@@ -718,45 +654,9 @@ update Vault, or publish profiles. Remove the Cherry outbound and republish befo
 destroying a trial node. After replacement, update its address and verified host
 key in Vault and republish. This is a supervised workflow, not automatic rotation.
 
-## Observe without changing the active VPN
-
-In a separate terminal, create an explicit loopback SOCKS listener:
-
-```sh
-ssh -i infra/cherry-vpn/private/ssh/probe -o IdentitiesOnly=yes \
-  -o StrictHostKeyChecking=yes \
-  -o UserKnownHostsFile=infra/cherry-vpn/private/known_hosts \
-  -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 \
-  -o ServerAliveCountMax=3 -N -D 127.0.0.1:12345 vpnprobe@PUBLIC_IP
-```
-
-Choose **two HTTPS sites you have verified work directly from the local ISP**.
-The sites below are examples, not guaranteed reachable controls:
-
-```sh
-python playbooks/vpn-probe/probe.py \
-  --proxy cherry=socks5h://127.0.0.1:12345 \
-  --control-url https://ya.ru/ --control-url https://www.ozon.ru/ \
-  --rounds 60 --interval 30 --output infra/cherry-vpn/private/probes.jsonl
-```
-
-You may add an existing loopback HTTP proxy as a second `--proxy NAME=URL` for
-comparison. Requests ignore proxy environment variables and `.curlrc`, use TLS
-verification, and never switch the current client. **A system TUN can still route
-the SSH connection or direct checks through the active VPN.** Verify destination
-bypass routes or run from a machine without that TUN before trusting results.
-
-The helper tests two independent HTTPS destinations through each proxy. Three
-consecutive rounds with both failing, while both direct controls pass, produce
-`suspected_path_failure` — not proof of an IP ban. Missing/failed controls are
-inconclusive and reset the streak. Single-destination failure is degradation,
-not an instruction to buy another IP. Nothing rotates or sends Telegram alerts.
-Streaks are intentionally in-memory for an observation session; persistent
-cross-restart incident tracking is needed before using this for automation.
-
 ## Stop spending
 
-Stop the foreground SSH tunnel with Ctrl-C, then:
+Stop any manually started test clients, then:
 
 ```sh
 bash infra/cherry-vpn/tofu.sh destroy

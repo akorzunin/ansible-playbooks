@@ -7,9 +7,9 @@
     ansible_host_key_checking: true
     ansible_python_interpreter: /usr/bin/python3
     vpn_admin_user: vpnadmin
-    vpn_admin_public_key_path: "{{ playbook_dir }}/../../infra/cherry-vpn/private/ssh/admin.pub"
-    vpn_admin_private_key_path: "{{ playbook_dir }}/../../infra/cherry-vpn/private/ssh/admin"
-    vpn_probe_public_key_path: "{{ playbook_dir }}/../../infra/cherry-vpn/private/ssh/probe.pub"
+    vpn_admin_public_key_path: "{{ playbook_dir }}/private/ssh/admin.pub"
+    vpn_admin_private_key_path: "{{ playbook_dir }}/private/ssh/admin"
+    vpn_probe_public_key_path: "{{ playbook_dir }}/private/ssh/probe.pub"
   tasks:
     - name: Validate separate administrator and tunnel keys before changing the server
       ansible.builtin.assert:
@@ -113,7 +113,7 @@
   become_flags: -n
   vars:
     ansible_host_key_checking: true
-    vpn_node_ssh_public_key_path: "{{ vpn_probe_public_key_path | default(playbook_dir ~ '/../../infra/cherry-vpn/private/ssh/probe.pub') }}"
+    vpn_node_ssh_public_key_path: "{{ vpn_probe_public_key_path | default(playbook_dir ~ '/private/ssh/probe.pub') }}"
   tasks:
     - name: Verify the fresh connection is non-root without sudo
       ansible.builtin.command: id -u

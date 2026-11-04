@@ -1,7 +1,7 @@
 ---
 # Establish and verify key-only sudo access before running the full reusable role.
 - name: Bootstrap the isolated node and verify administrator access
-  ansible.builtin.import_playbook: ../../playbooks/vpn-probe/deploy.yaml
+  ansible.builtin.import_playbook: bootstrap.yaml
 
 - name: Deploy all four VPN protocols on the verified Cherry administrator connection
   hosts: vpn_test_admin

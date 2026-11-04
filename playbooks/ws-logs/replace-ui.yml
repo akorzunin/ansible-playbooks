@@ -77,8 +77,7 @@
       changed_when: true
       loop: "{{ monitoring_old_alerts.json }}"
       when: >-
-        item.uid not in ['monitoring-node-offline', 'monitoring-disk-space-low',
-        'monitoring-vpn-path', 'monitoring-vpn-probe-stale', 'monitoring-vpn-controls']
+        item.uid not in ['monitoring-node-offline', 'monitoring-disk-space-low']
       no_log: true
 
     - name: Delete legacy dashboards

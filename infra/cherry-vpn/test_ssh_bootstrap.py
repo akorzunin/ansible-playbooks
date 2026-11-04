@@ -8,13 +8,13 @@ import unittest
 import yaml
 
 
-PLAYBOOK = pathlib.Path(__file__).with_name("deploy.yaml")
+PLAYBOOK = pathlib.Path(__file__).with_name("bootstrap.yaml")
 
 
 class DeploymentTests(unittest.TestCase):
     def setUp(self):
         self.bootstrap, self.secure = yaml.safe_load(PLAYBOOK.read_text())
-        self.ssh_tasks = yaml.safe_load((PLAYBOOK.parents[1].parent / 'roles/vpn_node/tasks/ssh.yaml').read_text())
+        self.ssh_tasks = yaml.safe_load((PLAYBOOK.parents[2] / 'roles/vpn_node/tasks/ssh.yaml').read_text())
 
     def task(self, name):
         return next(task for task in self.ssh_tasks if task["name"] == name)
