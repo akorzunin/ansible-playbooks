@@ -103,6 +103,7 @@
   ansible.builtin.import_playbook: ../sing-box-configs/deploy.yaml
 
 - name: Verify the published node paths including the restricted workstation hop
+  any_errors_fatal: true
   hosts: localhost
   connection: local
   gather_facts: false
@@ -119,3 +120,36 @@
           - --expected-ip
           - "{{ hostvars[vpn_target].vpn_node_public_address | default(hostvars[vpn_target].ansible_host) }}"
       changed_when: false
+
+- name: Retire disabled Hysteria 2 only after profiles have been published and verified
+  hosts: "{{ vpn_target | default('vpn_nodes') }}"
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Remove the retired service without touching shared certificates or other protocols
+      when: not vpn_node_hysteria2_enabled | default(true) | bool
+      block:
+        - name: Inspect the retired Hysteria 2 Compose project
+          ansible.builtin.stat:
+            path: /srv/deploy/vpn-hysteria2/compose.yaml
+          register: vpn_node_retired_hysteria2
+
+        - name: Remove only the Hysteria 2 containers and project network
+          community.docker.docker_compose_v2:
+            project_src: /srv/deploy/vpn-hysteria2
+            project_name: vpn-hysteria2
+            state: absent
+          when: vpn_node_retired_hysteria2.stat.exists
+
+        - name: Remove retired Hysteria 2 server configuration
+          ansible.builtin.file:
+            path: /srv/deploy/vpn-hysteria2
+            state: absent
+
+        - name: Remove stale controller Hysteria 2 trial exports
+          ansible.builtin.file:
+            path: "{{ playbook_dir }}/private/{{ inventory_hostname }}/{{ inventory_hostname }}-hysteria2-{{ item }}.json"
+            state: absent
+          loop: [test, outbounds]
+          delegate_to: localhost
+          become: false

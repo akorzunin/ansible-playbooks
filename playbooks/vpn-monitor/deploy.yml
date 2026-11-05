@@ -1,0 +1,225 @@
+---
+- name: Deploy VPN monitor on the measured workstation
+  hosts: remote_workstation
+  become: false
+  any_errors_fatal: true
+  vars:
+    vpn_monitor_source_dir: "{{ playbook_dir }}/../../../vpn-monitor"
+    vpn_monitor_install_path: "{{ ansible_facts.env.HOME }}/deploy/vpn-monitor"
+    monitoring_install_path: "{{ ansible_facts.env.HOME }}/deploy/ws-logs"
+    vpn_monitor_config: "{{ lookup('ansible.builtin.file', vpn_monitor_source_dir ~ '/config.yaml') | from_yaml }}"
+
+  pre_tasks:
+    - name: Validate deployment scope and monitoring opt-in
+      ansible.builtin.assert:
+        that:
+          - not ansible_check_mode
+          - groups.get('monitoring_servers', []) == ['remote_workstation']
+          - monitoring_vpn_monitor_enabled | default(false) | bool
+        fail_msg: Enable monitoring_vpn_monitor_enabled on remote_workstation in hosts; run without --check.
+
+    - name: Validate the private configuration paths and API token
+      ansible.builtin.assert:
+        that:
+          - vpn_monitor_config.listen == '127.0.0.1:8081'
+          - vpn_monitor_config.web_dir == 'web/dist'
+          - vpn_monitor_config.history_file == 'data/history.json'
+          - vpn_monitor_config.sing_box == 'sing-box'
+          - vpn_monitor_api_token | length >= 24
+        fail_msg: Use port 8081 and project-relative web/history paths; supply the API token in the private .env.
+      vars:
+        vpn_monitor_api_token: >-
+          {{ lookup('ansible.builtin.ini', vpn_monitor_config.api_token_env,
+          type='properties', file=vpn_monitor_source_dir ~ '/.env') }}
+      no_log: true
+
+    - name: Check the existing monitoring network
+      ansible.builtin.command: docker network inspect ws-logs_default
+      changed_when: false
+
+    - name: Install frontend build dependencies on the controller
+      ansible.builtin.command:
+        argv: [npm, ci, --prefix, web]
+        chdir: "{{ vpn_monitor_source_dir }}"
+      delegate_to: localhost
+      changed_when: false
+
+    - name: Build frontend assets on the controller
+      ansible.builtin.command:
+        argv: [npm, run, build, --prefix, web]
+        chdir: "{{ vpn_monitor_source_dir }}"
+      delegate_to: localhost
+      changed_when: false
+
+    - name: Build a static Linux amd64 binary on the controller
+      ansible.builtin.command:
+        # Exclude worktree metadata so private setup/docs edits do not restart the monitor.
+        argv: [go, build, '-buildvcs=false', -trimpath, -o, bin/vpn-monitor-linux-amd64, ./cmd/vpn-monitor]
+        chdir: "{{ vpn_monitor_source_dir }}"
+      environment:
+        CGO_ENABLED: "0"
+        GOOS: linux
+        GOARCH: amd64
+      delegate_to: localhost
+      changed_when: false
+
+    - name: Validate the target architecture
+      ansible.builtin.assert:
+        that: ansible_facts.architecture == 'x86_64'
+        fail_msg: This deployment builds Linux amd64; add a matching build before using another architecture.
+
+  tasks:
+    - name: Create private application and build directories
+      ansible.builtin.file:
+        path: "{{ vpn_monitor_install_path }}/{{ item }}"
+        state: directory
+        mode: "{{ '0700' if item in ['', 'data'] else '0755' }}"
+      loop: ["", data, build, build/bin, build/web, build/web/dist]
+
+    - name: Copy the static application binary
+      ansible.builtin.copy:
+        src: "{{ vpn_monitor_source_dir }}/bin/vpn-monitor-linux-amd64"
+        dest: "{{ vpn_monitor_install_path }}/build/bin/vpn-monitor"
+        mode: "0755"
+      register: vpn_monitor_binary
+
+    - name: Copy the public frontend build
+      ansible.builtin.copy:
+        src: "{{ vpn_monitor_source_dir }}/web/dist/"
+        dest: "{{ vpn_monitor_install_path }}/build/web/dist/"
+        mode: "0644"
+        directory_mode: "0755"
+      register: vpn_monitor_web
+
+    - name: Copy the runtime Dockerfile
+      ansible.builtin.copy:
+        src: Dockerfile
+        dest: "{{ vpn_monitor_install_path }}/build/Dockerfile"
+        mode: "0644"
+      register: vpn_monitor_dockerfile
+
+    - name: Inspect the application image
+      community.docker.docker_image_info:
+        name: vpn-monitor:local
+      register: vpn_monitor_image
+
+    - name: Build the image without private configuration or credentials
+      ansible.builtin.command:
+        argv: [docker, build, -t, 'vpn-monitor:local', build]
+        chdir: "{{ vpn_monitor_install_path }}"
+      when: >-
+        vpn_monitor_binary.changed or vpn_monitor_web.changed or
+        vpn_monitor_dockerfile.changed or vpn_monitor_image.images | length == 0
+      changed_when: true
+
+    # Listen on the container interface for Prometheus; only loopback is published on the host.
+    - name: Install private configuration for the isolated container
+      ansible.builtin.copy:
+        content: "{{ vpn_monitor_config | combine({'listen': '0.0.0.0:8081'}) | to_nice_yaml }}"
+        dest: "{{ vpn_monitor_install_path }}/config.yaml"
+        mode: "0600"
+        backup: true
+      register: vpn_monitor_private_config
+      no_log: true
+      diff: false
+
+    - name: Install private environment
+      ansible.builtin.copy:
+        src: "{{ vpn_monitor_source_dir }}/.env"
+        dest: "{{ vpn_monitor_install_path }}/.env"
+        mode: "0600"
+        backup: true
+      register: vpn_monitor_environment
+      no_log: true
+      diff: false
+
+    - name: Render the isolated application service
+      ansible.builtin.template:
+        src: compose.yml.j2
+        dest: "{{ vpn_monitor_install_path }}/compose.yml"
+        mode: "0644"
+
+    - name: Validate configuration before starting the monitor
+      ansible.builtin.command:
+        cmd: docker compose run --rm --no-deps vpn-monitor --config config.yaml --check
+        chdir: "{{ vpn_monitor_install_path }}"
+      changed_when: false
+      no_log: true
+
+    - name: Start the monitor with persistent history
+      community.docker.docker_compose_v2:
+        project_src: "{{ vpn_monitor_install_path }}"
+        state: present
+        recreate: "{{ 'always' if vpn_monitor_private_config.changed or vpn_monitor_environment.changed else 'auto' }}"
+        wait: true
+        wait_timeout: 60
+
+    - name: Verify the dashboard is served on workstation loopback
+      ansible.builtin.uri:
+        url: http://127.0.0.1:8081/
+        use_proxy: false
+      register: vpn_monitor_health
+      until: vpn_monitor_health.status == 200
+      retries: 12
+      delay: 5
+
+    - name: Create the private Prometheus credential directory
+      ansible.builtin.file:
+        path: "{{ monitoring_install_path }}/secrets"
+        state: directory
+        mode: "0700"
+
+    - name: Install the scrape token separately from public Prometheus configuration
+      ansible.builtin.copy:
+        content: >-
+          {{ lookup('ansible.builtin.ini', vpn_monitor_config.api_token_env,
+          type='properties', file=vpn_monitor_source_dir ~ '/.env') }}
+        dest: "{{ monitoring_install_path }}/secrets/vpn-monitor-token"
+        mode: "0600"
+      no_log: true
+      diff: false
+
+- name: Provision the existing Prometheus and Grafana stack
+  ansible.builtin.import_playbook: ../ws-logs/deploy.yml
+
+- name: Verify VPN metrics and the provisioned dashboard
+  hosts: remote_workstation
+  become: false
+  any_errors_fatal: true
+  vars_files:
+    - "{{ playbook_dir }}/../../external_vars.yml"
+  tasks:
+    - name: Wait for an authenticated Prometheus scrape
+      ansible.builtin.uri:
+        url: 'http://127.0.0.1:9090/api/v1/query?query=up%7Bjob%3D%22vpn-monitor%22%7D'
+        use_proxy: false
+      register: vpn_monitor_scrape
+      until: >-
+        vpn_monitor_scrape.status == 200 and
+        vpn_monitor_scrape.json.data.result | length == 1 and
+        vpn_monitor_scrape.json.data.result[0].value[1] == '1'
+      retries: 18
+      delay: 5
+
+    - name: Verify route metrics are stored in Prometheus
+      ansible.builtin.uri:
+        url: 'http://127.0.0.1:9090/api/v1/query?query=vpn_monitor_healthy'
+        use_proxy: false
+      register: vpn_monitor_metrics
+      failed_when: vpn_monitor_metrics.json.data.result | length == 0
+
+    - name: Verify Grafana provisioned the managed VPN dashboard
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/api/dashboards/uid/vpn-monitor
+        url_username: "{{ MONITORING_GRAFANA_ADMIN_USER }}"
+        url_password: "{{ MONITORING_GRAFANA_ADMIN_PASSWORD }}"
+        force_basic_auth: true
+        use_proxy: false
+      register: vpn_monitor_dashboard
+      until: >-
+        vpn_monitor_dashboard.status == 200 and
+        vpn_monitor_dashboard.json.meta.provisioned and
+        vpn_monitor_dashboard.json.meta.folderUid == 'monitoring'
+      retries: 12
+      delay: 5
+      no_log: true

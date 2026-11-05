@@ -101,8 +101,9 @@ class Hysteria2Tests(unittest.TestCase):
         self.assertTrue(credential["no_log"])
         # Replacement consumes the shared Vault; it must never mint a new password.
         self.assertFalse(any("ansible.builtin.command" in task for task in full["pre_tasks"]))
-        validate = yaml.safe_load((ROLE / "tasks/validate.yaml").read_text())
-        self.assertIn("vpn_node_hysteria2_password | length >= 32", validate[1]["ansible.builtin.assert"]["that"])
+        self.assertIn("vpn_node_hysteria2_password | length >= 32", self.tasks[0]["ansible.builtin.assert"]["that"])
+        optional = next(t for t in main if t.get('ansible.builtin.import_tasks') == 'hysteria2.yaml')
+        self.assertEqual(optional['when'], 'vpn_node_hysteria2_enabled | bool')
 
     @unittest.skipUnless(shutil.which("sing-box") and shutil.which("openssl"), "sing-box/openssl unavailable")
     def test_rendered_server_and_client_pass_actual_core_check(self):

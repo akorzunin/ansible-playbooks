@@ -20,6 +20,8 @@ all:
       hosts:
         remote_workstation:
           monitoring_node: workstation
+          # Enable after configuring the sibling vpn-monitor project; deploy its playbook first.
+          monitoring_vpn_monitor_enabled: false
           monitoring_telegraf_target: telegraf:9273
           monitoring_gpu_target: nvidia-gpu-exporter:9835
         remote_pi:

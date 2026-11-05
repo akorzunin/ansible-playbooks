@@ -6,11 +6,15 @@ vpn_node_name: "{{ inventory_hostname }}"
 vpn_node_public_address: "{{ ansible_host }}"
 vpn_node_reality_server_name: "{{ vpn_node_domain }}"
 vpn_node_reality_handshake_address: "{{ vpn_node_public_address }}"
+# Port 443 uses shared Caddy SNI passthrough; the VLESS backend stays on 8443.
+vpn_node_vless_port: 8443
+vpn_node_vless_fingerprint: chrome
 # Existing HTTPS routers keep their sites and certificate volumes in shared mode.
 vpn_node_shared_https: false
 vpn_node_manage_dns: true
 vpn_node_caddyfile: ""
 vpn_node_ssh_port: 2222
+vpn_node_hysteria2_enabled: true
 vpn_node_hysteria2_port: 443
 vpn_node_ssh_public_key_path: "{{ vpn_node_client_dir }}/probe.pub"
 vpn_node_ssh_private_key_path: "{{ vpn_node_client_dir }}/probe"

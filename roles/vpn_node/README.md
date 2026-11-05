@@ -9,10 +9,10 @@ not change administrator SSH, host routing, active clients or monitoring.
 | --- | --- | --- |
 | Forwarding-only OpenSSH | TCP 2222 | TCP 2222 |
 | Naïve HTTP/2 CONNECT | TCP 443, HTTP/ACME 80 | TCP 443 through Caddy SNI passthrough |
-| VLESS/REALITY + Vision | TCP 8443 | TCP 8443 |
-| Hysteria 2 / Brutal | UDP 443 | UDP 8443 (Caddy retains HTTP/3 on UDP 443) |
+| VLESS/REALITY + Vision | TCP 8443 | TCP 443 through Caddy SNI passthrough (backend 8443) |
+| Hysteria 2 / Brutal (optional) | UDP 443 | Disabled on ge2 (Caddy retains HTTP/3 on UDP 443) |
 
-All four services run in separate unprivileged, capability-dropped containers
+All enabled services run in separate unprivileged, capability-dropped containers
 with read-only roots and memory/PID/log limits. SSH is TCP-only and cannot open
 shells, commands, PTYs, remote forwards or agent/Unix-socket forwards. Its host key
 is separate from administrator SSH and is pinned through the authenticated admin
@@ -51,7 +51,7 @@ Select one explicit target; do not use `--limit`. The playbook:
    under ignored `playbooks/vpn-node/private/<node>/`.
 2. Runs `vpn_node`, validates server configurations before activation, and exports
    private `<node>-outbounds.json` / `<node>-test.json` files.
-3. Checks SSH, Naïve, VLESS, Hysteria and VLESS-over-Naïve using isolated loopback
+3. Checks SSH, Naïve, VLESS, optional Hysteria and VLESS-over-Naïve using isolated loopback
    clients, two HTTPS destinations and the expected node egress IP. Any failure
    stops registration/publication; already-published profiles remain intact.
 4. Idempotently replaces only this node's entries in the encrypted profile Vault,
@@ -61,6 +61,9 @@ Select one explicit target; do not use `--limit`. The playbook:
    `<node>-vless-via-naive` and `<node>-ssh-via-workstation`; the restricted
    workstation SSH allowlist is updated before publication.
 6. Checks every generated node choice, including the workstation SSH hop.
+7. When Hysteria 2 is disabled, removes its isolated Compose project, server
+   configuration and stale controller trial exports only after publication and
+   verification. Shared certificates and other protocol containers are preserved.
 
 A failure in the final checks is reported after publication; it does not
 transactionally roll back already-refreshed remote clients. Enrolled clients must
@@ -72,6 +75,13 @@ There is no automatic failover or allocation.
 - `vpn_node_domain`: an owned hostname for Naïve/Hysteria certificate verification.
   REALITY SNI defaults to this same owned hostname, not a third-party website; its
   handshake target defaults to the node's public IPv4 on TCP 443.
+- `vpn_node_vless_port`: public port, defaults to 8443. Port 443 requires shared
+  HTTPS, an external handshake target (to avoid a routing loop), and a REALITY SNI
+  distinct from the Naïve hostname and existing sites. Caddy forwards matching
+  ClientHellos unchanged to the TCP 8443 backend.
+- `vpn_node_vless_fingerprint`: defaults to `chrome`; ge2's experiment uses
+  `firefox`, port 443, and `www.cloudflare.com` for both SNI and handshake target.
+  Change the server target and client SNI together; refreshing profiles is required.
 - `vpn_node_manage_dns`: defaults to true for a dedicated, single-label DuckDNS
   node; load `DUCKDNS_TOKEN` from `external_vars.yml`. This mode retains the original
   IPv4-only DNS guard. Set false for existing externally managed DNS, as on ge2;
@@ -81,7 +91,11 @@ There is no automatic failover or allocation.
   validates a combined SNI router, preserving those sites, existing Caddy volumes
   and application containers. Naïve binds only loopback TCP 8089/8444.
 - `vpn_node_ssh_port`: defaults to 2222; must differ from administrator SSH.
-- `vpn_node_hysteria2_port`: defaults to 443; ge2 uses 8443 to preserve HTTP/3.
+- `vpn_node_hysteria2_enabled`: defaults to true for legacy nodes; ge2 sets false
+  because of persistent reported packet loss. Disabled nodes omit it from client
+  exports, profiles and checks; the full deployment retires the running service
+  after publication. The role alone skips provisioning but does not remove it.
+- `vpn_node_hysteria2_port`: defaults to 443 when enabled.
 - `vpn_node_hysteria2_download_mbps` / `vpn_node_hysteria2_upload_mbps`: initial
   Brutal targets 20/5 Mbps, not measured capacity.
 

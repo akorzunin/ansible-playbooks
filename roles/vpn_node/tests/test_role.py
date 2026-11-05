@@ -32,6 +32,9 @@ class RoleTests(unittest.TestCase):
             "vpn_node_credentials": self.credentials,
             "vpn_node_reality_handshake_address": "192.0.2.10",
             "vpn_node_shared_https": False,
+            "vpn_node_hysteria2_enabled": True,
+            "vpn_node_vless_port": 8443,
+            "vpn_node_vless_fingerprint": "chrome",
             "vpn_node_ssh_port": 2222,
             "vpn_node_hysteria2_outbound": {
                 "type": "hysteria2", "tag": "cherry-hysteria2", "server": "192.0.2.10", "server_port": 443,
@@ -80,7 +83,9 @@ class RoleTests(unittest.TestCase):
         connections = next(t["ansible.builtin.set_fact"]["vpn_node_client_outbounds"] for t in tasks
                            if "ansible.builtin.set_fact" in t)
         self.assertEqual([o["type"] for o in connections[:3]], ["ssh", "naive", "vless"])
-        self.assertEqual(connections[3], "{{ vpn_node_hysteria2_outbound }}")
+        self.assertEqual(len(connections), 3)
+        optional = next(t for t in tasks if t['name'] == 'Include Hysteria 2 only while enabled')
+        self.assertEqual(optional['when'], 'vpn_node_hysteria2_enabled | bool')
         self.assertIn("vpn_node_ssh_private_key_path", connections[0]["private_key"])
         self.assertIn("vpn_node_host_key", connections[0]["host_key"][0])
         self.assertEqual(connections[0]["user"], "vpnprobe")
@@ -212,12 +217,24 @@ class RoleTests(unittest.TestCase):
             self.assertEqual(outbounds[0]["host_key"][0], key.with_suffix(".pub").read_text().strip())
             self.assertEqual(outbounds[1]["password"], self.credentials["naive_password"])
             self.assertEqual(outbounds[2]["tls"]["reality"]["public_key"], self.credentials["reality_public_key"])
-            self.assertEqual(outbounds[3], self.variables["vpn_node_hysteria2_outbound"])
+            self.assertEqual(outbounds[2]["server_port"], self.variables["vpn_node_vless_port"])
+            self.assertEqual(outbounds[2]["tls"]["utls"]["fingerprint"], self.variables["vpn_node_vless_fingerprint"])
+            self.assertEqual(outbounds[2]["tls"]["server_name"], self.variables["vpn_node_reality_server_name"])
             client = json.loads((clients / "cherry-test.json").read_text())
-            self.assertEqual(client["outbounds"][3], outbounds[3])
-            self.assertEqual(client["route"]["rules"][3]["outbound"], "cherry-hysteria2")
+            if self.variables['vpn_node_hysteria2_enabled']:
+                self.assertEqual(outbounds[3], self.variables["vpn_node_hysteria2_outbound"])
+                self.assertEqual(client["outbounds"][3], outbounds[3])
+                self.assertEqual(client["route"]["rules"][3]["outbound"], "cherry-hysteria2")
+            else:
+                self.assertEqual(len(outbounds), 3)
+                self.assertNotIn('hysteria2', json.dumps(client))
             self.assertEqual(clients.stat().st_mode & 0o777, 0o700)
             self.assertTrue(all(p.stat().st_mode & 0o777 == 0o600 for p in clients.iterdir()))
+
+    def test_ge2_experiment_client_export_passes_core_check(self):
+        self.variables.update(yaml.safe_load((ROOT / 'node/ge2/vpn.yaml').read_text()))
+        del self.variables['vpn_node_hysteria2_outbound']
+        self.test_actual_ansible_client_export_passes_core_check_and_keeps_credentials_private()
 
     @unittest.skipUnless(shutil.which("docker"), "Docker Compose unavailable")
     def test_compose_configuration_is_accepted_by_docker(self):

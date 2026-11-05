@@ -45,15 +45,20 @@ supplied Windows profile, so VLESS connectivity (and consequently UDP) needs
 separate investigation; hosting/config distribution itself is working. Those
 observations refer to the earlier nt1-only trial, not the new Cherry VLESS endpoint.
 
-**Current publication (2026-11-01):** dyn1 is retired. The existing ge2 node now
-provides `ge2-ssh`, `ge2-naive`, `ge2-vless`, `ge2-hysteria2`,
+**Current publication (2026-11-05):** dyn1 is retired. The existing ge2 node now
+provides `ge2-ssh`, `ge2-naive`, `ge2-vless`,
 `ge2-vless-via-naive` and `ge2-ssh-via-workstation`. Every platform defaults to
-`ge2-vless-via-naive`; `aurora-vless` remains selectable. All six ge2 routes passed
+`ge2-vless-via-naive`; `aurora-vless` remains selectable. All five ge2 routes passed
 two isolated HTTPS checks with ge2's egress IP. URLs/tokens are unchanged; refresh
-enrolled clients. No active local client was switched. REALITY uses the owned
-`akorz-ge2.duckdns.org` SNI, not Google. VLESS and its Naïve chain also passed
-UDP/STUN checks; Hysteria had intermittent HTTPS/STUN failures and remains a
-manual option. These checks do not establish sustained stability. The reusable
+enrolled clients. No active local client was switched. The 2026-11-05 GE2 REALITY
+experiment uses Firefox uTLS, `www.cloudflare.com` SNI/handshake target and public
+TCP 443 through the shared Caddy router (backend remains 8443). Select `ge2-vless`
+to test the direct path; the default remains `ge2-vless-via-naive`. Refresh profiles
+to receive the experiment. VLESS and its Naïve chain also passed
+UDP/STUN checks. Hysteria 2 is retired from GE2 and all published profiles due to
+persistent reported packet loss across ISPs; its server container is removed and
+future GE2 deployments keep it disabled. VLESS still relays UDP with XUDP.
+These checks do not establish sustained stability. The reusable
 [`vpn_node` deployment](../../roles/vpn_node/README.md) registers verified node
 exports idempotently in Vault, so ordinary publishes retain them without a
 controller-local extra-outbounds flag.

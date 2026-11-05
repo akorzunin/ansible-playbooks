@@ -55,16 +55,72 @@ class ReusableTests(unittest.TestCase):
         environment = Environment(loader=FileSystemLoader(ROLE / 'templates'), undefined=StrictUndefined)
         source = 'test-dwman.example.org {\n reverse_proxy localhost:8088\n}'
         config = environment.get_template('shared-Caddyfile.j2').render(
-            vpn_node_domain='vpn.example.org', vpn_node_caddyfile='fixture', lookup=lambda *_: source)
+            vpn_node_domain='vpn.example.org', vpn_node_caddyfile='fixture',
+            vpn_node_vless_port=8443, lookup=lambda *_: source)
         self.assertIn(source, config)
         self.assertIn('tls sni vpn.example.org', config)
         self.assertIn('proxy 127.0.0.1:8444', config)
+        self.assertNotIn('@vpn_vless', config)
         tasks = yaml.safe_load((ROLE / 'tasks/shared-https.yaml').read_text())
         build = next(t for t in tasks if 'community.docker.docker_image' in t)
         self.assertEqual(build['delegate_to'], 'localhost')
         names = [t['name'] for t in tasks]
         self.assertLess(names.index('Validate the combined router before replacing the existing configuration'),
                         names.index('Activate the validated combined HTTPS routing'))
+
+    def test_ge2_cloudflare_sni_routes_to_reality_without_changing_backend(self):
+        environment = Environment(loader=FileSystemLoader(ROLE / 'templates'), undefined=StrictUndefined)
+        environment.filters['to_nice_json'] = json.dumps
+        settings = yaml.safe_load((ROLE.parents[1] / 'node/ge2/vpn.yaml').read_text())
+        source = 'test-dwman.example.org {\n reverse_proxy localhost:8088\n}'
+        config = environment.get_template('shared-Caddyfile.j2').render(**settings, lookup=lambda *_: source)
+        self.assertIn('tls sni www.cloudflare.com', config)
+        self.assertIn('proxy 127.0.0.1:8443', config)
+        self.assertIn('tls sni akorz-ge2.duckdns.org', config)
+        self.assertIn('proxy 127.0.0.1:8444', config)
+        self.assertIn(source, config)
+        server = json.loads(environment.get_template('vless.json.j2').render(
+            **settings, vpn_node_credentials={
+                'vless_uuid': 'fixture', 'reality_private_key': 'fixture', 'reality_short_id': 'fixture',
+            }))['inbounds'][0]
+        self.assertEqual(server['listen_port'], 8443)
+        self.assertEqual(server['tls']['server_name'], 'www.cloudflare.com')
+        self.assertEqual(server['tls']['reality']['handshake'], {'server': 'www.cloudflare.com', 'server_port': 443})
+        self.assertEqual(settings['vpn_node_vless_port'], 443)
+        self.assertEqual(settings['vpn_node_vless_fingerprint'], 'firefox')
+
+    def test_vless_port_443_requires_shared_https_and_distinct_sni(self):
+        environment = Environment()
+        environment.filters['bool'] = bool
+        checks = yaml.safe_load((ROLE / 'tasks/validate.yaml').read_text())[0]['ansible.builtin.assert']['that']
+        checks = [environment.compile_expression(check) for check in checks if 'vpn_node_vless_port' in check]
+        for port, shared, sni, target, expected in [
+            (8443, False, 'vpn.example.org', '192.0.2.10', True),
+            (443, True, 'www.cloudflare.com', 'www.cloudflare.com', True),
+            (443, False, 'www.cloudflare.com', 'www.cloudflare.com', False),
+            (443, True, 'vpn.example.org', 'www.cloudflare.com', False),
+            (443, True, 'www.cloudflare.com', '192.0.2.10', False),
+            (443, True, 'www.cloudflare.com', 'vpn.example.org', False),
+            (1234, True, 'www.cloudflare.com', 'www.cloudflare.com', False),
+        ]:
+            self.assertEqual(all(check(vpn_node_vless_port=port, vpn_node_shared_https=shared,
+                                      vpn_node_reality_server_name=sni, vpn_node_domain='vpn.example.org',
+                                      vpn_node_reality_handshake_address=target, vpn_node_public_address='192.0.2.10')
+                                 for check in checks), expected)
+
+    def test_hysteria_retirement_follows_publication_and_only_removes_its_project(self):
+        playbook = yaml.safe_load((ROLE.parents[1] / 'playbooks/vpn-node/deploy.yaml').read_text())
+        self.assertIn('ansible.builtin.import_playbook', playbook[-3])
+        self.assertTrue(playbook[-2]['any_errors_fatal'])
+        retire = playbook[-1]['tasks'][0]
+        self.assertIn('not vpn_node_hysteria2_enabled', retire['when'])
+        tasks = retire['block']
+        compose = next(t['community.docker.docker_compose_v2'] for t in tasks
+                       if 'community.docker.docker_compose_v2' in t)
+        self.assertEqual(compose['project_src'], '/srv/deploy/vpn-hysteria2')
+        self.assertEqual(compose['project_name'], 'vpn-hysteria2')
+        self.assertEqual(compose['state'], 'absent')
+        self.assertNotIn('/var/lib/vpn-node', json.dumps(tasks))
 
     def test_stun_checks_transaction_and_egress_without_network(self):
         transaction = b'transaction1'

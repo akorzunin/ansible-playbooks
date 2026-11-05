@@ -10,13 +10,22 @@
       - vpn_node_name is match('^[a-z][a-z0-9-]{0,62}$')
       - vpn_node_domain is match('^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$')
       - vpn_node_reality_server_name is match('^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$')
+      - vpn_node_vless_port | int in [443, 8443]
+      - vpn_node_vless_fingerprint in ['chrome', 'firefox']
+      - vpn_node_vless_port | int != 443 or vpn_node_shared_https | bool
+      - vpn_node_vless_port | int != 443 or vpn_node_reality_server_name != vpn_node_domain
+      # A self-target would recurse through the new SNI route back into REALITY.
+      - vpn_node_vless_port | int != 443 or vpn_node_reality_handshake_address not in [vpn_node_public_address, vpn_node_domain]
       - vpn_node_ssh_port | int > 1024
       - vpn_node_ssh_port | int < 65536
       - vpn_node_ssh_port | int != ansible_port | default(22) | int
-      - vpn_node_hysteria2_port | int > 0
-      - vpn_node_hysteria2_port | int < 65536
+      - not vpn_node_hysteria2_enabled | bool or vpn_node_hysteria2_port | int > 0
+      - not vpn_node_hysteria2_enabled | bool or vpn_node_hysteria2_port | int < 65536
       - not vpn_node_shared_https | bool or vpn_node_caddyfile | length > 0
-    fail_msg: Use a bootstrapped Debian x86_64 node with strict host-key checking, a DNS hostname and a separate tunnel SSH port.
+    fail_msg: >-
+      Use a bootstrapped Debian x86_64 node with strict host-key checking, a DNS hostname
+      and a separate tunnel SSH port. VLESS port 443 requires shared HTTPS, a distinct SNI
+      and an external handshake target.
 
 - name: Require persistent Vault credentials before changing the node
   ansible.builtin.assert:
@@ -27,9 +36,6 @@
       - vpn_node_credentials.reality_private_key is match('^[a-zA-Z0-9_-]{43}$')
       - vpn_node_credentials.reality_public_key is match('^[a-zA-Z0-9_-]{43}$')
       - vpn_node_credentials.reality_short_id is match('^[0-9a-f]{16}$')
-      - vpn_node_hysteria2_password | length >= 32
-      - vpn_node_hysteria2_download_mbps | int > 0
-      - vpn_node_hysteria2_upload_mbps | int > 0
       - lookup('ansible.builtin.file', vpn_node_ssh_public_key_path) is match('^ssh-ed25519 ')
     fail_msg: Restore persistent VPN credentials and the dedicated tunnel key before deploying.
   no_log: true

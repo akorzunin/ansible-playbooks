@@ -44,11 +44,11 @@ class MonitoringTests(unittest.TestCase):
         self.environment.filters["to_json"] = json.dumps
         self.environment.filters["bool"] = to_bool
 
-    def prometheus(self):
+    def prometheus(self, **settings):
         template = self.environment.from_string(
             (STACK / "prometheus.yml.j2").read_text()
         )
-        rendered = template.render(groups=self.groups, hostvars=self.hostvars)
+        rendered = template.render(groups=self.groups, hostvars=self.hostvars, **settings)
         return yaml.safe_load(rendered)
 
     def targets(self, job):
@@ -109,6 +109,22 @@ class MonitoringTests(unittest.TestCase):
         self.assertEqual(opted_in, {"nk1", "dyn1"})
         jobs = {job["job_name"] for job in self.prometheus()["scrape_configs"]}
         self.assertEqual(jobs, {"prometheus", "telegraf", "nvidia-gpu-exporter"})
+
+    def test_vpn_monitor_scrape_is_opt_in_and_credentials_are_not_inline(self):
+        for enabled in (False, "false"):
+            jobs = self.prometheus(monitoring_vpn_monitor_enabled=enabled)["scrape_configs"]
+            self.assertNotIn("vpn-monitor", {job["job_name"] for job in jobs})
+        jobs = self.prometheus(monitoring_vpn_monitor_enabled=True)["scrape_configs"]
+        job = next(job for job in jobs if job["job_name"] == "vpn-monitor")
+        self.assertEqual(job["static_configs"][0]["targets"], ["vpn-monitor:8081"])
+        self.assertEqual(job["authorization"], {
+            "credentials_file": "/etc/prometheus/secrets/vpn-monitor-token"})
+        compose = yaml.safe_load((STACK / "compose.yml").read_text())
+        self.assertIn("./secrets:/etc/prometheus/secrets:ro", compose["services"]["prometheus"]["volumes"])
+        dashboard = json.loads((STACK / "grafana/dashboards/vpn-monitor.json").read_text())
+        self.assertEqual(dashboard["uid"], "vpn-monitor")
+        self.assertTrue(all("vpn_monitor_" in target["expr"]
+                            for panel in dashboard["panels"] for target in panel["targets"]))
 
     def test_retired_nodes_are_excluded_even_if_added_to_monitored_group(self):
         self.assertIn("nt1", self.groups["retired_nodes"])
@@ -248,21 +264,22 @@ class MonitoringTests(unittest.TestCase):
 
     def test_dashboards_use_stable_datasource_and_node_selector(self):
         dashboards = list((STACK / "grafana/dashboards").glob("*.json"))
-        self.assertEqual(len(dashboards), 2)
+        self.assertEqual(len(dashboards), 3)
         uids = set()
         for path in dashboards:
             dashboard = json.loads(path.read_text())
             uids.add(dashboard["uid"])
             self.assertFalse(dashboard["editable"])
             self.assertNotIn("__NODE_NAME__", path.read_text())
-            self.assertEqual(dashboard["templating"]["list"][0]["name"], "node")
+            selector = "server" if dashboard["uid"] == "vpn-monitor" else "node"
+            self.assertEqual(dashboard["templating"]["list"][0]["name"], selector)
             for panel in dashboard["panels"]:
                 self.assertEqual(panel["datasource"]["uid"], "monitoring-prometheus")
                 for query in panel["targets"]:
-                    self.assertIn('node=~"$node"', query["expr"])
+                    self.assertIn(f'{selector}=~"${selector}"', query["expr"])
                     self.assertNotIn("nodeexporter-", query["expr"])
                     self.assertNotIn("cadvisor-", query["expr"])
-        self.assertEqual(uids, {"monitoring-nodes", "monitoring-nvidia"})
+        self.assertEqual(uids, {"monitoring-nodes", "monitoring-nvidia", "vpn-monitor"})
         self.assertFalse((STACK / "grafana/dashboards/telegraf.json").exists())
 
     def test_nvidia_dashboard_matches_exporter_metrics_and_units(self):

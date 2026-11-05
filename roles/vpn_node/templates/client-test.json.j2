@@ -3,17 +3,17 @@
     'inbounds': [
         {'type': 'mixed', 'tag': 'test-ssh', 'listen': '127.0.0.1', 'listen_port': 12340},
         {'type': 'mixed', 'tag': 'test-naive', 'listen': '127.0.0.1', 'listen_port': 12341},
-        {'type': 'mixed', 'tag': 'test-vless', 'listen': '127.0.0.1', 'listen_port': 12342},
-        {'type': 'mixed', 'tag': 'test-hysteria2', 'listen': '127.0.0.1', 'listen_port': 12343}
-    ],
+        {'type': 'mixed', 'tag': 'test-vless', 'listen': '127.0.0.1', 'listen_port': 12342}
+    ] + ([{'type': 'mixed', 'tag': 'test-hysteria2', 'listen': '127.0.0.1', 'listen_port': 12343}]
+         if vpn_node_hysteria2_enabled | bool else []),
     'outbounds': vpn_node_client_outbounds,
     'route': {
         'rules': [
             {'inbound': ['test-ssh'], 'action': 'route', 'outbound': vpn_node_name ~ '-ssh'},
             {'inbound': ['test-naive'], 'action': 'route', 'outbound': vpn_node_name ~ '-naive'},
-            {'inbound': ['test-vless'], 'action': 'route', 'outbound': vpn_node_name ~ '-vless'},
-            {'inbound': ['test-hysteria2'], 'action': 'route', 'outbound': vpn_node_name ~ '-hysteria2'}
-        ],
+            {'inbound': ['test-vless'], 'action': 'route', 'outbound': vpn_node_name ~ '-vless'}
+        ] + ([{'inbound': ['test-hysteria2'], 'action': 'route', 'outbound': vpn_node_name ~ '-hysteria2'}]
+             if vpn_node_hysteria2_enabled | bool else []),
         'final': vpn_node_name ~ '-ssh'
     }
 } | to_nice_json }}

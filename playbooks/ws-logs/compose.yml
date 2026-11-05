@@ -15,6 +15,7 @@ services:
     volumes:
       - ./prometheus_data:/prometheus
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./secrets:/etc/prometheus/secrets:ro
     ports:
       - "9090:9090"
     labels:

@@ -1,0 +1,62 @@
+{
+  "uid": "vpn-monitor",
+  "title": "VPN monitor",
+  "editable": false,
+  "tags": ["vpn", "network"],
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      { "name": "server", "type": "query", "datasource": { "type": "prometheus", "uid": "monitoring-prometheus" }, "query": "label_values(vpn_monitor_healthy, server)", "refresh": 1, "multi": true, "includeAll": true, "allValue": ".*" },
+      { "name": "protocol", "type": "query", "datasource": { "type": "prometheus", "uid": "monitoring-prometheus" }, "query": "label_values(vpn_monitor_healthy{server=~\"$server\"}, protocol)", "refresh": 1, "multi": true, "includeAll": true, "allValue": ".*" }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1, "title": "Healthy routes (stale = 0)", "type": "stat", "gridPos": { "x": 0, "y": 0, "w": 12, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "monitoring-prometheus" },
+      "targets": [{ "refId": "A", "expr": "vpn_monitor_healthy{server=~\"$server\",protocol=~\"$protocol\"}", "legendFormat": "{{server}} / {{protocol}}", "instant": true }],
+      "fieldConfig": { "defaults": { "min": 0, "max": 1, "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] } }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 2, "title": "Seconds since last completed test", "type": "stat", "gridPos": { "x": 12, "y": 0, "w": 12, "h": 5 },
+      "datasource": { "type": "prometheus", "uid": "monitoring-prometheus" },
+      "targets": [{ "refId": "A", "expr": "time() - vpn_monitor_last_run_timestamp_seconds{server=~\"$server\",protocol=~\"$protocol\"}", "legendFormat": "{{server}} / {{protocol}}", "instant": true }],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 3, "title": "HTTP response-header latency (successful requests)", "type": "timeseries", "gridPos": { "x": 0, "y": 5, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "monitoring-prometheus" },
+      "targets": [{ "refId": "A", "expr": "vpn_monitor_http_latency_seconds{server=~\"$server\",protocol=~\"$protocol\"}", "legendFormat": "{{server}} / {{protocol}} mean" }, { "refId": "B", "expr": "vpn_monitor_http_p95_seconds{server=~\"$server\",protocol=~\"$protocol\"}", "legendFormat": "{{server}} / {{protocol}} p95" }],
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] }
+    },
+    {
+      "id": 4, "title": "HTTP request failures (not packet loss)", "type": "timeseries", "gridPos": { "x": 12, "y": 5, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "monitoring-prometheus" },
+      "targets": [{ "refId": "A", "expr": "vpn_monitor_http_failure_ratio{server=~\"$server\",protocol=~\"$protocol\"}", "legendFormat": "{{server}} / {{protocol}}" }],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] }
+    },
+    {
+      "id": 5, "title": "UDP echo RTT (supported routes only)", "type": "timeseries", "gridPos": { "x": 0, "y": 13, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "monitoring-prometheus" },
+      "targets": [{ "refId": "A", "expr": "vpn_monitor_udp_rtt_seconds{server=~\"$server\",protocol=~\"$protocol\"}", "legendFormat": "{{server}} / {{protocol}}" }],
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0 }, "overrides": [] }
+    },
+    {
+      "id": 6, "title": "UDP packet loss (no data = unsupported/not tested)", "type": "timeseries", "gridPos": { "x": 12, "y": 13, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "monitoring-prometheus" },
+      "targets": [{ "refId": "A", "expr": "vpn_monitor_udp_loss_ratio{server=~\"$server\",protocol=~\"$protocol\"}", "legendFormat": "{{server}} / {{protocol}}" }],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] }
+    },
+    {
+      "id": 7, "title": "Bounded download throughput (not sustained capacity)", "type": "timeseries", "gridPos": { "x": 0, "y": 21, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "monitoring-prometheus" },
+      "targets": [{ "refId": "A", "expr": "vpn_monitor_speed_bits_per_second{server=~\"$server\",protocol=~\"$protocol\"}", "legendFormat": "{{server}} / {{protocol}}" }],
+      "fieldConfig": { "defaults": { "unit": "bps", "min": 0 }, "overrides": [] }
+    }
+  ]
+}

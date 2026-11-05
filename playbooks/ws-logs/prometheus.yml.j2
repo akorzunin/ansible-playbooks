@@ -9,6 +9,17 @@ scrape_configs:
         labels:
           node: workstation
 
+{% if monitoring_vpn_monitor_enabled | default(false) | bool %}
+  - job_name: vpn-monitor
+    scrape_interval: 30s
+    static_configs:
+      - targets: ["vpn-monitor:8081"]
+        labels:
+          node: workstation
+    authorization:
+      credentials_file: /etc/prometheus/secrets/vpn-monitor-token
+
+{% endif %}
 {% set active = namespace(hosts=[]) %}
 {% for host in groups['monitored_nodes'] | sort %}
 {% set node = hostvars[host] %}

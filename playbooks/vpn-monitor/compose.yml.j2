@@ -1,0 +1,31 @@
+services:
+  vpn-monitor:
+    image: vpn-monitor:local
+    container_name: vpn-monitor
+    restart: unless-stopped
+    init: true
+    user: "{{ ansible_facts.user_uid }}:{{ ansible_facts.user_gid }}"
+    env_file: .env
+    ports:
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./data:/app/data
+    read_only: true
+    tmpfs: ["/tmp:size=64m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: "1.0"
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks: [monitoring]
+
+networks:
+  monitoring:
+    external: true
+    name: ws-logs_default

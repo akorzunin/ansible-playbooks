@@ -2,6 +2,12 @@
     servers :443 {
         listener_wrappers {
             layer4 {
+{% if vpn_node_vless_port | int == 443 %}
+                @vpn_vless tls sni {{ vpn_node_reality_server_name }}
+                route @vpn_vless {
+                    proxy 127.0.0.1:8443
+                }
+{% endif %}
                 @vpn_naive tls sni {{ vpn_node_domain }}
                 route @vpn_naive {
                     proxy 127.0.0.1:8444

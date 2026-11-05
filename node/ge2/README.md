@@ -98,7 +98,7 @@ of notification settings is needed.
 ## VPN services (2026-11-01)
 
 The reusable [`vpn_node` role](../../roles/vpn_node/README.md) now deploys
-Dockerized SSH, Naïve, VLESS/REALITY and Hysteria 2 on this existing node:
+Dockerized SSH, Naïve and VLESS/REALITY on this existing node:
 
 ```sh
 ansible-playbook -i hosts --vault-password-file .ansible_pass \
@@ -111,15 +111,19 @@ in `node/ge2/vpn.vault.yaml`. Do not regenerate that Vault on rerun.
 - Tunnel SSH uses TCP 2222, separately from unchanged administrator SSH on 22.
 - Naïve uses `akorz-ge2.duckdns.org` on TCP 443 via Caddy layer4 SNI passthrough.
   Existing dwman HTTPS routing and the domain's A/AAAA records are preserved.
-- VLESS/REALITY + Vision uses TCP 8443, the same owned hostname as SNI, and XUDP.
-- Hysteria uses UDP 8443; Caddy retains UDP 443 for application HTTP/3.
+- VLESS/REALITY + Vision experiment: public TCP 443, Firefox uTLS fingerprint,
+  `www.cloudflare.com` SNI and handshake target, and XUDP. Caddy passes that SNI
+  unchanged to the existing TCP 8443 backend; application and Naïve routes remain.
+- Hysteria 2 is retired due to reported persistent packet loss across ISPs.
+  `vpn_node_hysteria2_enabled: false` prevents redeployment. Its container and
+  UDP 8443 listener are removed; Caddy retains UDP 443 for application HTTP/3.
 - All platforms default to `ge2-vless-via-naive`, with direct ge2 protocols,
   `ge2-ssh-via-workstation` and Aurora available manually. URLs/tokens are unchanged.
 
-All six published ge2 paths passed two isolated HTTPS checks with ge2's IPv4.
+All five remaining ge2 paths passed two isolated HTTPS checks with ge2's IPv4.
 VLESS and VLESS-over-Naïve passed UDP/STUN checks against Cloudflare and Google.
-Hysteria passed HTTPS and both STUN servers in one repeated run but also had
-intermittent HTTPS/STUN failures; it remains a manual option, not the default.
+Hysteria previously had intermittent HTTPS/STUN failures and is no longer
+published or included in connectivity checks.
 These are short functional checks, not sustained stability or voice verification.
 The dwman container/Telegraf were not recreated; dwman HTTPS health still passes.
 
@@ -127,6 +131,37 @@ Caddy's SNI image is selected by `/srv/deploy/caddy/compose.override.yaml` and
 uses the original certificate/data volumes. Application preparation does not
 replace VPN-managed routing; rerun the VPN playbook after changing the site-only
 `node/ge2/caddy/Caddyfile`. No local VPN client was enrolled or switched.
+
+### VLESS experiment (2026-11-05)
+
+The Firefox/Cloudflare/TCP-443 combination passed two isolated HTTPS targets and
+both Cloudflare/Google UDP STUN checks, directly and through Naïve. The application
+HTTPS health check still passed. The first deployment stopped before publication
+on an unchanged Hysteria HTTPS failure; a complete five-route retry passed before
+publication. Android/Windows/Linux profiles were published with unchanged tokens
+and defaults. Hysteria failed again in the final six-route check; all six routes
+passed on retry. Direct/chained VLESS passed every check in this rollout.
+These are functional checks from the controller's physical Ethernet route, not a
+throughput comparison with Aurora or proof of stability on another ISP.
+
+### Hysteria 2 retirement (2026-11-05)
+
+The deployment exports only SSH/Naïve/VLESS, removes stale `ge2-hysteria2` from the
+profile Vault, and publishes without changing tokens or the default. Only after
+publication and verification does it remove the isolated `vpn-hysteria2` Compose
+project, server configuration, and old controller trial exports. Shared Naïve
+certificates and all other services are preserved. Refresh enrolled profiles to
+remove the old selector choice; VLESS UDP relay remains available.
+
+### VLESS experiment rollback
+
+To restore the previous VLESS settings, set `vpn_node_reality_server_name` back to
+`akorz-ge2.duckdns.org` in `node/ge2/vpn.yaml` and remove the experiment's
+`vpn_node_reality_handshake_address`, `vpn_node_vless_port`, and
+`vpn_node_vless_fingerprint` overrides. Rerun the deployment above to validate and
+republish. Clients must refresh/reconnect after either change. The default route
+remains `ge2-vless-via-naive`; select `ge2-vless` to test the direct 443 path.
+Changing three settings together tests the combination, not which setting helps.
 
 ## Rollback
 

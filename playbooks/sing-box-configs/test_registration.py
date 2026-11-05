@@ -39,8 +39,21 @@ class RegistrationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             registration.merge(self.data, 'ge2', self.outbounds, 'ge2-other-vless')
 
+    def test_retiring_hysteria_removes_stale_entries_and_preserves_other_exits(self):
+        merged = registration.merge(self.data, 'ge2', self.outbounds, 'ge2-vless-via-naive')
+        merged['sing_box_secrets']['extra_outbounds'].append({'tag': 'other-hysteria2', 'type': 'hysteria2'})
+        retired = registration.merge(merged, 'ge2', self.outbounds[:3], 'ge2-vless-via-naive')
+        tags = {o['tag'] for o in retired['sing_box_secrets']['extra_outbounds']}
+        self.assertNotIn('ge2-hysteria2', tags)
+        self.assertIn('other-hysteria2', tags)
+        self.assertEqual(retired['sing_box_secrets']['tokens'], self.data['sing_box_secrets']['tokens'])
+        self.assertEqual(registration.merge(retired, 'ge2', self.outbounds[:3], 'ge2-vless-via-naive'), retired)
+        with self.assertRaises(ValueError):
+            registration.merge(merged, 'ge2', self.outbounds[:3], 'ge2-hysteria2')
+
     def test_rejects_cross_node_tags_incomplete_exports_and_foreign_default(self):
-        for outbounds, default in [(self.outbounds[:-1], 'ge2-ssh'), (self.outbounds, 'aurora-vless'),
+        for outbounds, default in [(self.outbounds[:2], 'ge2-ssh'), (self.outbounds, 'aurora-vless'),
+                                   ([*self.outbounds, self.outbounds[0]], 'ge2-ssh'),
                                    ([*self.outbounds[:3], {'type': 'hysteria2', 'tag': 'other-hysteria2'}], 'ge2-ssh')]:
             with self.subTest(default=default), self.assertRaises(ValueError):
                 registration.merge(self.data, 'ge2', outbounds, default)

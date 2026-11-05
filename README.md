@@ -39,7 +39,7 @@ are retained. Do not apply the provisioning configuration unless creating a new
 VM is explicitly intended.
 VPN services now run on the existing ge2 node through the reusable
 [`vpn_node` role](roles/vpn_node/README.md). All platforms default to
-`ge2-vless-via-naive`; ge2 SSH, Naïve, direct VLESS, Hysteria 2 and
+`ge2-vless-via-naive`; ge2 SSH, Naïve, direct VLESS and
 SSH-via-workstation are also selectable, with Aurora retained. Private URLs/tokens
 are unchanged; refresh enrolled clients. The dyn1 SSH hop to nt1 is no longer
 available. Active local clients and the workstation Docker proxy were not changed.

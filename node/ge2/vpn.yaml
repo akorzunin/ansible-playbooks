@@ -4,8 +4,12 @@ vpn_node_domain: akorz-ge2.duckdns.org
 vpn_node_manage_dns: false
 vpn_node_shared_https: true
 vpn_node_caddyfile: "{{ playbook_dir }}/../../node/ge2/caddy/Caddyfile"
-vpn_node_reality_server_name: akorz-ge2.duckdns.org
+# Experiment: Firefox + Cloudflare REALITY target over shared TCP/443.
+vpn_node_reality_server_name: www.cloudflare.com
+vpn_node_reality_handshake_address: www.cloudflare.com
+vpn_node_vless_port: 443
+vpn_node_vless_fingerprint: firefox
 vpn_node_ssh_port: 2222
-# Caddy already uses UDP/443 for application HTTP/3.
-vpn_node_hysteria2_port: 8443
+# Retired: persistently lossy across tested ISPs; Caddy keeps UDP/443 for HTTP/3.
+vpn_node_hysteria2_enabled: false
 vpn_node_default_outbound: ge2-vless-via-naive

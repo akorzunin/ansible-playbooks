@@ -57,7 +57,7 @@
       ansible.builtin.uri:
         url: "http://127.0.0.1:3000/api/dashboards/uid/{{ item.uid | urlencode }}"
       loop: "{{ monitoring_old_dashboards.json }}"
-      when: item.uid not in ['monitoring-nodes', 'monitoring-containers', 'monitoring-nvidia']
+      when: item.uid not in ['monitoring-nodes', 'monitoring-containers', 'monitoring-nvidia', 'vpn-monitor']
       register: monitoring_old_dashboard_details
       no_log: true
 
@@ -87,5 +87,5 @@
         status_code: 200
       changed_when: true
       loop: "{{ monitoring_old_dashboards.json }}"
-      when: item.uid not in ['monitoring-nodes', 'monitoring-containers', 'monitoring-nvidia']
+      when: item.uid not in ['monitoring-nodes', 'monitoring-containers', 'monitoring-nvidia', 'vpn-monitor']
       no_log: true

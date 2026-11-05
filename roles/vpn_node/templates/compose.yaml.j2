@@ -38,7 +38,7 @@ services:
     command: [run, -c, /etc/vpn/vless.json]
     restart: unless-stopped
     user: "{{ ansible_facts.getent_passwd.vpnproxy[1] }}:{{ ansible_facts.getent_passwd.vpnproxy[2] }}"
-    # TCP/443 belongs to Naive; add an SNI router if REALITY also needs port 443.
+    # Shared Caddy can pass public TCP/443 through to this unchanged backend.
     ports:
       - "8443:8443"
     volumes:

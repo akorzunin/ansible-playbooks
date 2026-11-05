@@ -19,13 +19,14 @@ ROOT = Path(__file__).resolve().parents[2]
 def merge(data, node, outbounds, default):
     if not re.fullmatch(r'[a-z][a-z0-9-]{0,62}', node):
         raise ValueError('Invalid node name')
-    expected = {node + '-' + kind for kind in ('ssh', 'naive', 'vless', 'hysteria2')}
-    if len(outbounds) != 4 or {o['tag'] for o in outbounds} != expected:
-        raise ValueError('Expected exactly the four node-specific connections')
+    expected = {node + '-' + kind for kind in ('ssh', 'naive', 'vless')}
+    tags = {o['tag'] for o in outbounds}
+    if len(outbounds) != len(tags) or tags not in (expected, expected | {node + '-hysteria2'}):
+        raise ValueError('Expected SSH, Naive and VLESS, with optional Hysteria 2')
     if any(o['tag'] != node + '-' + o['type'] for o in outbounds):
         raise ValueError('Connection types and tags disagree')
-    managed = expected | {node + '-vless-via-naive', node + '-ssh-via-workstation'}
-    if default not in managed:
+    managed = expected | {node + '-hysteria2', node + '-vless-via-naive', node + '-ssh-via-workstation'}
+    if default not in tags | {node + '-vless-via-naive', node + '-ssh-via-workstation'}:
         raise ValueError('Default must belong to this node')
     result = copy.deepcopy(data)
     secrets = result['sing_box_secrets']

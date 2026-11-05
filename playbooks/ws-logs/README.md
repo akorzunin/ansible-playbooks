@@ -147,6 +147,18 @@ ansible-playbook -i ./hosts \
 Override `remote_install_path` if the existing stack lives elsewhere. Don't run a
 second Grafana against an empty directory and mistake it for a migration.
 
+## VPN monitor
+
+[Deploy the workstation VPN monitor](../vpn-monitor/README.md) with the sibling
+Go project’s private configuration. Its playbook provisions the loopback-only
+web UI on 8081, a bearer-authenticated `vpn-monitor:8081` scrape on the monitoring
+bridge, and **Monitoring / VPN monitor** (`/d/vpn-monitor`). Enable
+`monitoring_vpn_monitor_enabled: true` on `remote_workstation` in private inventory
+so ordinary monitoring deployments retain the scrape job. The app playbook installs
+`secrets/vpn-monitor-token` before this monitoring playbook validates the opt-in.
+The token directory is mounted read-only into Prometheus; secrets are not in YAML
+or dashboard JSON. Existing dashboards, active VPN clients and metric history remain.
+
 ## Telegraf collectors
 
 All monitored nodes use Telegraf 1.40.2. Workstation and amd64 VPS nodes use the Alpine

@@ -24,6 +24,20 @@
           - monitoring_dashboard_files | length > 0
         fail_msg: Configure monitoring_servers and monitored_nodes in ./hosts; load it with -i ./hosts.
 
+    - name: Check VPN monitor scrape credentials when enabled
+      ansible.builtin.stat:
+        path: "{{ remote_install_path }}/secrets/vpn-monitor-token"
+      register: monitoring_vpn_monitor_token
+      when: monitoring_vpn_monitor_enabled | default(false) | bool
+
+    - name: Require provisioned VPN monitor credentials before changing monitoring
+      ansible.builtin.assert:
+        that:
+          - monitoring_vpn_monitor_token.stat.exists
+          - monitoring_vpn_monitor_token.stat.size >= 24
+        fail_msg: Deploy playbooks/vpn-monitor/deploy.yml first to install the private scrape token.
+      when: monitoring_vpn_monitor_enabled | default(false) | bool
+
     - name: Validate Telegraf addresses and ports
       ansible.builtin.assert:
         that:
@@ -87,6 +101,12 @@
         - grafana/provisioning/datasources
         - grafana/provisioning/dashboards
         - grafana/provisioning/alerting
+
+    - name: Create private Prometheus credential directory
+      ansible.builtin.file:
+        path: "{{ remote_install_path }}/secrets"
+        state: directory
+        mode: "0700"
 
     - name: Copy stack and public provisioning files
       ansible.builtin.copy:
