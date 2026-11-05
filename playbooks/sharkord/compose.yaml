@@ -1,0 +1,41 @@
+services:
+  sharkord:
+    image: sharkord/sharkord:v0.0.29@sha256:e169fd51c8c36b5f34d4184e33ccbe20422f3ab7285e0af5501e9d3ae3579dd9
+    container_name: sharkord
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 128M
+    environment:
+      SHARKORD_AUTOUPDATE: "false"
+      SHARKORD_ALLOWED_ORIGINS: https://chat.akorz.duckdns.org
+      SHARKORD_WEBRTC_ANNOUNCED_ADDRESS: ${SHARKORD_PUBLIC_IP:?Run deploy.yaml to resolve the public IPv4 address}
+      # Caddy runs on the host; Docker bridge traffic arrives from its gateway.
+      SHARKORD_TRUSTED_PROXIES: 192.168.1.132,172.16.0.0/12
+    ports:
+      # Reuse the existing Caddy upstream; do not forward 3333 from the router.
+      - "192.168.1.132:3333:4991/tcp"
+      - "40000:40000/udp"
+      - "40000:40000/tcp"
+    volumes:
+      - ./data:/home/bun/.config/sharkord
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - "const r = await fetch('http://127.0.0.1:4991/healthz'); process.exit(r.ok ? 0 : 1)"
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

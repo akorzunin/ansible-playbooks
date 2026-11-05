@@ -1,0 +1,93 @@
+---
+- name: Deploy Sharkord on the workstation
+  hosts: remote_workstation
+  become: false
+  vars:
+    deploy_compose_dir: /srv/deploy
+    deploy_compose_service_name: sharkord
+    sharkord_dir: "{{ deploy_compose_dir }}/{{ deploy_compose_service_name }}"
+
+  tasks:
+    - name: Require a live deployment for health verification
+      ansible.builtin.assert:
+        that: not ansible_check_mode
+        fail_msg: This playbook requires a live deployment; check mode is not supported.
+
+    - name: Resolve the public media address from DuckDNS
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_python_interpreter | default('/usr/bin/python3') }}"
+          - -c
+          - "import socket; print(socket.gethostbyname('chat.akorz.duckdns.org'))"
+      register: sharkord_public_ip
+      changed_when: false
+
+    - name: Require a public IPv4 media address
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_python_interpreter | default('/usr/bin/python3') }}"
+          - -c
+          - "import ipaddress, sys; assert ipaddress.IPv4Address(sys.argv[1]).is_global"
+          - "{{ sharkord_public_ip.stdout | trim }}"
+      changed_when: false
+
+    - name: Create a private Sharkord deployment directory
+      become: true
+      ansible.builtin.file:
+        path: "{{ sharkord_dir }}"
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        state: directory
+        mode: "0700"
+
+    - name: Copy Sharkord Compose configuration
+      ansible.builtin.copy:
+        src: compose.yaml
+        dest: "{{ sharkord_dir }}/compose.yaml"
+        mode: "0644"
+
+    # ICE candidates need the WAN IPv4, not the container's bridge address.
+    # Resolved at deployment only; rerun this playbook after a WAN IP change.
+    - name: Configure the public media address
+      ansible.builtin.copy:
+        content: "SHARKORD_PUBLIC_IP={{ sharkord_public_ip.stdout | trim }}\n"
+        dest: "{{ sharkord_dir }}/.env"
+        mode: "0600"
+
+    - name: Validate Sharkord Compose configuration
+      ansible.builtin.command:
+        cmd: docker compose config --quiet
+        chdir: "{{ sharkord_dir }}"
+      changed_when: false
+
+    - name: Start Sharkord and wait for health
+      community.docker.docker_compose_v2:
+        project_src: "{{ sharkord_dir }}"
+        state: present
+        wait: true
+        wait_timeout: 120
+
+    - name: Preserve first-start owner token privately before Docker logs rotate
+      ansible.builtin.shell:
+        cmd: umask 077; docker logs sharkord > bootstrap.log 2>&1
+        chdir: "{{ sharkord_dir }}"
+        creates: "{{ sharkord_dir }}/bootstrap.log"
+      no_log: true
+
+    - name: Verify the existing Caddy upstream
+      ansible.builtin.uri:
+        url: http://192.168.1.132:3333/healthz
+        use_proxy: false
+        status_code: 200
+
+    - name: Verify public HTTPS and certificate
+      ansible.builtin.uri:
+        url: https://chat.akorz.duckdns.org/healthz
+        use_proxy: false
+        status_code: 200
+      delegate_to: localhost
+      become: false
+      register: sharkord_https
+      until: sharkord_https.status == 200
+      retries: 6
+      delay: 5
