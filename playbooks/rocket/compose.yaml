@@ -30,7 +30,7 @@ services:
 
   mongodb:
     container_name: mongodb-rocket
-    image: docker.io/bitnami/mongodb:7.0.2
+    image: docker.io/soldevelo/mongodb:7.0.15
     restart: unless-stopped
     user: root
     volumes:
