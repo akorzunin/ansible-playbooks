@@ -1,0 +1,116 @@
+---
+- name: Deploy the authenticated VPN monitor UDP echo endpoint on GE2
+  hosts: ge2
+  become: true
+  any_errors_fatal: true
+  vars:
+    vpn_monitor_source_dir: "{{ playbook_dir }}/../../../vpn-monitor"
+    vpn_monitor_udp_token: >-
+      {{ lookup('ansible.builtin.ini', 'VPN_MONITOR_UDP_TOKEN',
+      type='properties', file=vpn_monitor_source_dir ~ '/.env') }}
+
+  pre_tasks:
+    - name: Validate the endpoint architecture and shared secret
+      ansible.builtin.assert:
+        that:
+          - ansible_facts.architecture == 'x86_64'
+          - vpn_monitor_udp_token | length >= 24
+      no_log: true
+
+    - name: Build the standalone static echo binary on the controller
+      ansible.builtin.command:
+        argv: [go, build, '-buildvcs=false', -trimpath, -o, bin/vpn-monitor-linux-amd64, ./cmd/vpn-monitor]
+        chdir: "{{ vpn_monitor_source_dir }}"
+      environment:
+        CGO_ENABLED: "0"
+        GOOS: linux
+        GOARCH: amd64
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+  tasks:
+    - name: Create the private echo configuration directory
+      ansible.builtin.file:
+        path: /etc/vpn-monitor
+        state: directory
+        mode: "0700"
+
+    - name: Install the echo binary without VPN credentials
+      ansible.builtin.copy:
+        src: "{{ vpn_monitor_source_dir }}/bin/vpn-monitor-linux-amd64"
+        dest: /usr/local/bin/vpn-monitor-echo
+        mode: "0755"
+      notify: Restart VPN monitor echo
+
+    - name: Install the shared echo secret
+      ansible.builtin.copy:
+        content: "VPN_MONITOR_UDP_TOKEN={{ vpn_monitor_udp_token }}\n"
+        dest: /etc/vpn-monitor/echo.env
+        mode: "0600"
+      no_log: true
+      diff: false
+      notify: Restart VPN monitor echo
+
+    - name: Restrict and rate-limit only the echo port without touching other firewall tables
+      ansible.builtin.copy:
+        dest: /etc/vpn-monitor/echo.nft
+        mode: "0600"
+        # The VPN Docker subnet is needed for GE2-to-itself probes. Update it if that network changes.
+        content: |
+          add table inet vpn_monitor_echo
+          flush table inet vpn_monitor_echo
+          add chain inet vpn_monitor_echo input { type filter hook input priority -5; policy accept; }
+          add rule inet vpn_monitor_echo input udp dport 9444 \
+            ip saddr { 94.249.187.177, 94.249.186.199, 172.22.0.0/16 } \
+            limit rate 100/second burst 100 packets counter accept
+          add rule inet vpn_monitor_echo input udp dport 9444 counter drop
+      notify: Restart VPN monitor echo
+
+    - name: Install the sandboxed echo service with startup firewall enforcement
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/vpn-monitor-echo.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Authenticated VPN monitor UDP echo
+          After=network.target
+
+          [Service]
+          Type=simple
+          DynamicUser=yes
+          EnvironmentFile=/etc/vpn-monitor/echo.env
+          ExecStartPre=+/usr/sbin/nft -f /etc/vpn-monitor/echo.nft
+          ExecStart=/usr/local/bin/vpn-monitor-echo --echo --echo-listen 94.249.187.177:9444
+          Restart=on-failure
+          RestartSec=3s
+          NoNewPrivileges=yes
+          ProtectSystem=strict
+          ProtectHome=yes
+          PrivateTmp=yes
+          PrivateDevices=yes
+          RestrictAddressFamilies=AF_INET AF_INET6
+          CapabilityBoundingSet=
+          MemoryMax=64M
+          TasksMax=32
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: Restart VPN monitor echo
+
+    - name: Apply echo changes before checking service state
+      ansible.builtin.meta: flush_handlers
+
+    - name: Enable and start the echo endpoint
+      ansible.builtin.systemd_service:
+        name: vpn-monitor-echo
+        enabled: true
+        state: started
+        daemon_reload: true
+
+  handlers:
+    - name: Restart VPN monitor echo
+      ansible.builtin.systemd_service:
+        name: vpn-monitor-echo
+        state: restarted
+        daemon_reload: true

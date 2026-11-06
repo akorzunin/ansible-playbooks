@@ -73,6 +73,59 @@ The current private config is used as-is apart from the container listen address
 no Telegram bot or UDP endpoint is added implicitly. API credentials and private
 SSH tunnel keys remain on the workstation. Protect its files and backups.
 
+## Optional UDP and bounded downloads
+
+These tests need explicit configuration; empty Grafana panels otherwise mean
+**disabled/unsupported**, not zero loss or zero throughput. SSH and Naïve do not
+support this monitor's UDP test; both direct VLESS routes do.
+
+The separate `echo-ge2.yml` playbook installs the project's static `--echo` binary
+as a sandboxed, reboot-persistent systemd service on existing GE2. It reads
+`VPN_MONITOR_UDP_TOKEN` from the sibling project's private `.env`; generate a
+random secret of at least 24 characters there before deploying:
+
+```sh
+ansible-playbook -i ./hosts --vault-password-file=.ansible_pass \
+  playbooks/vpn-monitor/echo-ge2.yml
+```
+
+Unlike the main workstation playbook, this explicitly adds firewall rules: a
+dedicated nftables table restricts **UDP 9444 only** to GE2, Aurora's exit IP and
+GE2's VPN Docker subnet (`172.22.0.0/16`). It rate-limits accepted traffic and
+requires an HMAC-authenticated payload. Other firewall tables are untouched.
+Update the allowlist if the exits or VPN Docker subnet change. GE2-to-itself
+probes measure the tunnel, **not onward Internet UDP routing**; Aurora probes
+also traverse the Internet from Aurora to GE2.
+
+Add to the private monitor config:
+
+```yaml
+udp:
+  endpoint: 94.249.187.177:9444
+  token_env: VPN_MONITOR_UDP_TOKEN
+  samples: 10
+  timeout: 1s
+speed:
+  url: https://speed.cloudflare.com/__down?bytes=4194304
+  max_bytes: 4194304
+  timeout: 15s
+```
+
+Redeploy/recreate the workstation monitor after changing its config or `.env`.
+Keep its deployed listen address `0.0.0.0:8081` for the private monitoring bridge.
+A 4 MiB download per route every five minutes consumes up to **4.5 GiB/day across
+four routes**, plus ordinary probe traffic. This is a bounded throughput sample,
+not sustained capacity. The public download service can fail independently of
+the VPN; inspect the per-test errors rather than assuming VPN blocking.
+
+Verify `vpn_monitor_udp_loss_ratio`, `vpn_monitor_udp_rtt_seconds` (two VLESS
+routes), and `vpn_monitor_speed_bits_per_second` (four routes) in Prometheus after
+tests finish and the next scrape completes. Old disabled history is retained.
+
+To stop the endpoint, disable/stop `vpn-monitor-echo.service` on GE2. Only after
+stopping it, remove its dedicated table with `nft delete table inet vpn_monitor_echo`;
+remove/disable `udp` in the checker config to avoid failed probes.
+
 ## Stop / rollback
 
 Stop only this app with `docker compose stop vpn-monitor` in its deployment directory.

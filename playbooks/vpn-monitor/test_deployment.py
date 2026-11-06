@@ -55,6 +55,31 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(plays[1]["ansible.builtin.import_playbook"], "../ws-logs/deploy.yml")
         self.assertNotIn("monitoring_replace_ui", plays[1])
 
+    def test_ge2_echo_is_authenticated_sandboxed_and_port_scoped(self):
+        play, = yaml.safe_load((STACK / "echo-ge2.yml").read_text())
+        self.assertEqual(play["hosts"], "ge2")
+        copies = {task["ansible.builtin.copy"]["dest"]: task
+                  for task in play["tasks"] if "ansible.builtin.copy" in task}
+        secret = copies["/etc/vpn-monitor/echo.env"]
+        self.assertEqual(secret["ansible.builtin.copy"]["mode"], "0600")
+        self.assertTrue(secret["no_log"])
+        self.assertFalse(secret["diff"])
+        unit = copies["/etc/systemd/system/vpn-monitor-echo.service"]["ansible.builtin.copy"]["content"]
+        self.assertIn("DynamicUser=yes", unit)
+        self.assertIn("ProtectSystem=strict", unit)
+        self.assertIn("EnvironmentFile=/etc/vpn-monitor/echo.env", unit)
+        self.assertIn("ExecStartPre=+/usr/sbin/nft -f /etc/vpn-monitor/echo.nft", unit)
+        self.assertIn("--echo --echo-listen 94.249.187.177:9444", unit)
+        firewall = copies["/etc/vpn-monitor/echo.nft"]["ansible.builtin.copy"]["content"]
+        self.assertNotIn("flush ruleset", firewall)
+        self.assertIn("flush table inet vpn_monitor_echo", firewall)
+        self.assertIn("limit rate 100/second", firewall)
+        self.assertIn("94.249.186.199", firewall)
+        self.assertIn("172.22.0.0/16", firewall)
+        rules = [line for line in firewall.splitlines() if line.startswith("add rule")]
+        self.assertTrue(all("udp dport 9444" in line for line in rules))
+        self.assertTrue(rules[-1].endswith("drop"))
+
 
 if __name__ == "__main__":
     unittest.main()
