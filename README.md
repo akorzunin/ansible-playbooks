@@ -125,7 +125,19 @@ Check connection to all hosts
 
 ## Create new secret
 
-    ansible-vault encrypt_string --vault-password-file .ansible_pass "amogus"
+    ./encrypt-var.py
+
+Prompts for an Ansible variable key, then opens your editor via `ansible-vault
+create`. Enter the value (multiline supported), save and close the editor; the
+script encrypts it using `.ansible_pass` and inserts or replaces that scalar in
+`external_vars.yml`. Set `EDITOR` to choose the editor, for example
+`EDITOR=nvim ./encrypt-var.py`.
+
+Requires `ansible-vault` and Python's PyYAML (provided with Ansible). Unrelated
+entries/comments and the shared-file symlink are preserved. Vault manages its
+temporary plaintext editor file; the script cleans up the temporary encrypted
+file. Run on one controller at a time. Optional paths: `--vars-file PATH` and
+`--vault-password-file PATH`.
 
     caddy hash-password --algo=argon2 --plaintext=amogus
 
