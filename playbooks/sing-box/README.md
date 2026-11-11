@@ -2,12 +2,13 @@
 
 Replaces V2RayA and its obsolete NT1 SSH tunnel with the pinned sing-box 1.14.4
 container, following the migration in `../aurora-devops/playbooks/sing-box/`.
-All proxy traffic uses **`aurora-vless`**, with no NT1 or direct fallback.
+All proxy traffic uses direct **`ge2-vless`**, with no Aurora, GE1, NT1 or
+unproxied fallback.
 No TUN, host routing changes, panel, host networking or NET_ADMIN are needed.
 
 ## Credentials
 
-The playbook selects exactly one direct VLESS outbound tagged `aurora-vless` from
+The playbook selects exactly one direct VLESS outbound tagged `ge2-vless` from
 `sing_box_secrets.extra_outbounds` in
 `playbooks/sing-box-configs/secrets.vault.yaml`. UUID, server, TLS/Reality and flow
 settings are reused unchanged. No credentials need copying into `external_vars.yml`.
@@ -58,7 +59,17 @@ is not exposed.
 
 This deployment does not modify the controller's native sing-box service, TUN,
 remote-profile subscription or the profile publisher. Published platform defaults
-remain independent of this workstation's fixed `aurora-vless` outbound.
+remain independent of this workstation's fixed `ge2-vless` outbound.
+
+## GE2 cutover (2026-11-11)
+
+Aurora VLESS was reported blocked and GE1 down. Isolated containers using the
+pinned image on the workstation verified both `ge2-vless` and
+`ge2-vless-via-naive` against Google HTTPS (204) and Cloudflare HTTPS (200), with
+GE2 egress `94.249.187.177`. Direct VLESS was selected by preference and deployed;
+both existing HTTP and SOCKS listeners then passed HTTPS with the same GE2 egress.
+The Naïve chain remains a tested alternative, not an automatic fallback. These
+checks do not establish long-term stability or application/UDP behavior.
 
 ## Verify / rollback
 

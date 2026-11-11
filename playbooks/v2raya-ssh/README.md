@@ -1,6 +1,6 @@
 # v2rayA as a VLESS proxy (legacy)
 
-The workstation now uses [sing-box with `aurora-vless`](../sing-box/README.md).
+The workstation now uses [sing-box with `ge2-vless`](../sing-box/README.md).
 This playbook is retained for rollback only. Its NT1 endpoint is blocked;
 do not run it alongside sing-box because their proxy ports conflict.
 

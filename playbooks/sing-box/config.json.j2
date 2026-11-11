@@ -5,6 +5,6 @@
         {'type': 'mixed', 'tag': 'http-socks', 'listen': '0.0.0.0', 'listen_port': 20171},
         {'type': 'socks', 'tag': 'socks', 'listen': '0.0.0.0', 'listen_port': 20170}
     ],
-    'outbounds': aurora_outbounds,
-    'route': {'final': 'aurora-vless', 'default_domain_resolver': 'local'}
+    'outbounds': ge2_outbounds,
+    'route': {'final': 'ge2-vless', 'default_domain_resolver': 'local'}
 } | to_nice_json }}

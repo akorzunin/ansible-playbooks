@@ -1,5 +1,5 @@
 ---
-- name: Migrate the workstation proxy to sing-box
+- name: Deploy the workstation sing-box proxy
   hosts: remote_workstation
   become: false
   any_errors_fatal: true
@@ -7,8 +7,8 @@
     project_dir: /srv/deploy/sing-box
     sing_box_image: "{{ (lookup('file', 'compose.yaml') | from_yaml).services['sing-box'].image }}"
     sing_box_health_url: https://www.gstatic.com/generate_204
-    aurora_outbounds: >-
-      {{ sing_box_secrets.extra_outbounds | selectattr('tag', 'equalto', 'aurora-vless') | list }}
+    ge2_outbounds: >-
+      {{ sing_box_secrets.extra_outbounds | selectattr('tag', 'equalto', 'ge2-vless') | list }}
 
   pre_tasks:
     - name: Refuse check mode because migration needs live proxy verification
@@ -21,12 +21,12 @@
         file: ../sing-box-configs/secrets.vault.yaml
       no_log: true
 
-    - name: Validate the shared Aurora outbound
+    - name: Validate the shared direct GE2 outbound
       ansible.builtin.assert:
         that:
-          - aurora_outbounds | length == 1
-          - aurora_outbounds[0].type == 'vless'
-          - aurora_outbounds[0].detour is not defined
+          - ge2_outbounds | length == 1
+          - ge2_outbounds[0].type == 'vless'
+          - ge2_outbounds[0].detour is not defined
         quiet: true
       no_log: true
 

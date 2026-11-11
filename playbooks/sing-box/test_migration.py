@@ -19,11 +19,11 @@ IMAGE = COMPOSE["services"]["sing-box"]["image"]
 def vless():
     # Synthetic credentials and public test key, never real Vault inputs.
     return {
-        "type": "vless", "tag": "aurora-vless", "server": "example.com",
+        "type": "vless", "tag": "ge2-vless", "server": "example.com",
         "server_port": 443, "uuid": "00000000-0000-4000-8000-000000000001",
         "flow": "xtls-rprx-vision",
         "tls": {"enabled": True, "server_name": "example.com",
-                "utls": {"enabled": True, "fingerprint": "chrome"},
+                "utls": {"enabled": True, "fingerprint": "firefox"},
                 "reality": {"enabled": True, "short_id": "0123456789abcdef",
                             "public_key": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}},
     }
@@ -33,17 +33,17 @@ def render(outbound):
     env = jinja2.Environment(undefined=jinja2.StrictUndefined)
     env.filters["to_nice_json"] = lambda value: json.dumps(value, indent=4)
     return env.from_string((ROOT / "config.json.j2").read_text()).render(
-        aurora_outbounds=[outbound]
+        ge2_outbounds=[outbound]
     )
 
 
 class ConfigurationTests(unittest.TestCase):
-    def test_aurora_outbound_preserved_without_nt1_or_direct_fallback(self):
+    def test_ge2_outbound_preserved_without_aurora_ge1_or_direct_fallback(self):
         outbound = vless()
         config = json.loads(render(outbound))
         self.assertEqual(config["outbounds"], [outbound])
         self.assertEqual(config["route"], {
-            "final": "aurora-vless", "default_domain_resolver": "local"})
+            "final": "ge2-vless", "default_domain_resolver": "local"})
         self.assertNotIn("insecure", config["outbounds"][0]["tls"])
         self.assertNotIn("experimental", config)
 
@@ -74,14 +74,29 @@ class MigrationSafeguardTests(unittest.TestCase):
         self.assertEqual(credentials["ansible.builtin.include_vars"]["file"],
                          "../sing-box-configs/secrets.vault.yaml")
         self.assertTrue(credentials["no_log"])
-        self.assertIn("selectattr('tag', 'equalto', 'aurora-vless')",
-                      PLAY["vars"]["aurora_outbounds"])
+        self.assertIn("selectattr('tag', 'equalto', 'ge2-vless')",
+                      PLAY["vars"]["ge2_outbounds"])
         validation = PLAY["pre_tasks"][2]
         self.assertTrue(validation["no_log"])
-        self.assertIn("aurora_outbounds | length == 1",
+        self.assertIn("ge2_outbounds | length == 1",
                       validation["ansible.builtin.assert"]["that"])
-        self.assertIn("aurora_outbounds[0].detour is not defined",
+        self.assertIn("ge2_outbounds[0].type == 'vless'",
                       validation["ansible.builtin.assert"]["that"])
+        self.assertIn("ge2_outbounds[0].detour is not defined",
+                      validation["ansible.builtin.assert"]["that"])
+
+    def test_shared_vault_excludes_blocked_and_unrelated_routes(self):
+        env = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        select = env.compile_expression(PLAY["vars"]["ge2_outbounds"].strip()[2:-2])
+        outbound = vless()
+        selected = select(sing_box_secrets={"extra_outbounds": [
+            {**outbound, "tag": "aurora-vless"},
+            {**outbound, "tag": "ge1-vless"},
+            {"type": "naive", "tag": "ge2-naive"},
+            outbound,
+        ]})
+        self.assertEqual(selected, [outbound])
+        self.assertEqual(json.loads(render(selected[0]))["outbounds"], [outbound])
 
     def test_candidate_validated_before_activation(self):
         tasks = PLAY["tasks"]
@@ -141,7 +156,7 @@ class PinnedImageTests(unittest.TestCase):
                 capture_output=True, text=True, timeout=30,
             )
 
-    def test_aurora_vless_shape_validates(self):
+    def test_ge2_vless_shape_validates(self):
         result = self.check_config(vless())
         self.assertEqual(result.returncode, 0, result.stderr)
 
