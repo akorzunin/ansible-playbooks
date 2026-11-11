@@ -62,6 +62,32 @@ class ProfileTests(unittest.TestCase):
                 if platform == "linux":
                     self.assertNotIn("auto_detect_interface", result["route"])
 
+    def test_android_uses_proxied_ipv4_dns_before_udp_routing(self):
+        base = json.loads((generate.ROOT / "templates/android.json").read_text())
+        result = generate.make_profile(base, self.connections, generate.ORDERS["android"])
+        self.assertEqual(result["dns"], {
+            "servers": [
+                {"type": "local", "tag": "bootstrap"},
+                {"type": "tcp", "tag": "proxied-dns", "server": "1.1.1.1", "detour": "proxy"},
+            ],
+            "final": "proxied-dns",
+            "strategy": "ipv4_only",
+        })
+        # Resolve carrier hostnames outside their own proxy to avoid a DNS loop.
+        self.assertEqual(result["route"]["default_domain_resolver"], {
+            "server": "bootstrap", "strategy": "ipv4_only",
+        })
+        rules = result["route"]["rules"]
+        hijack = {"port": 53, "action": "hijack-dns"}
+        udp = next(r for r in rules if r.get("network") == "udp")
+        self.assertLess(rules.index(hijack), rules.index(udp))
+        # Keep IPv6 captured rather than leaking it outside Android's VPN.
+        self.assertIn("fdfe:dcba:9876::1/126", result["inbounds"][0]["address"])
+        for platform in ("windows", "linux"):
+            desktop = json.loads((generate.ROOT / "templates" / f"{platform}.json").read_text())
+            self.assertNotIn("dns", desktop)
+            self.assertNotIn("default_domain_resolver", desktop["route"])
+
     def test_retiring_nt1_removes_direct_and_chained_routes_with_stable_enrollment(self):
         for outbound in self.connections.values():
             outbound["server"] = "nt1-blocked.example"

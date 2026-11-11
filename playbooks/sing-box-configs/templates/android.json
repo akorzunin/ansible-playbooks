@@ -3,6 +3,22 @@
     "level": "info",
     "timestamp": true
   },
+  "dns": {
+    "servers": [
+      {
+        "type": "local",
+        "tag": "bootstrap"
+      },
+      {
+        "type": "tcp",
+        "tag": "proxied-dns",
+        "server": "1.1.1.1",
+        "detour": "proxy"
+      }
+    ],
+    "final": "proxied-dns",
+    "strategy": "ipv4_only"
+  },
   "inbounds": [
     {
       "type": "tun",
@@ -17,7 +33,15 @@
   ],
   "route": {
     "auto_detect_interface": true,
+    "default_domain_resolver": {
+      "server": "bootstrap",
+      "strategy": "ipv4_only"
+    },
     "rules": [
+      {
+        "port": 53,
+        "action": "hijack-dns"
+      },
       {
         "network": "udp",
         "action": "route",

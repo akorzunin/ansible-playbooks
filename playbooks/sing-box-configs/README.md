@@ -104,6 +104,14 @@ outbound files are needed, and a fresh controller never generates replacement to
 - Proxied TCP and UDP follow the selected protocol. UDP/443 is no longer rejected.
   Aurora UDP behavior has not been verified. Direct Naïve and SSH do not provide
   UDP relay; TCP fallback depends on the application.
+- Android intercepts TCP/UDP DNS on port 53 before catch-all UDP routing and uses
+  TCP DNS to `1.1.1.1` through the selected `proxy`, so DNS also works over SSH or
+  Naïve without UDP relay. Answers are IPv4-only because GE2 IPv6 TLS checks fail;
+  restore dual-stack only after IPv6 TCP/UDP egress is verified. IPv6 remains
+  captured by the TUN to avoid leaking it outside the VPN. Carrier hostnames use
+  local bootstrap DNS with IPv4-only resolution to avoid a proxy/DNS dependency
+  loop. App-managed DoH/DoT and cached addresses can bypass this DNS policy;
+  reconnect/restart affected apps when testing. Windows/Linux DNS is unchanged.
 - Existing Russian-domain/GeoIP direct routing and platform inbounds are preserved.
 - Linux retains the existing local mixed/system-proxy listener on `127.0.0.1:12334`;
   it does not gain a TUN interface. Linux omits `auto_detect_interface`: it is
