@@ -127,8 +127,9 @@ class MonitoringTests(unittest.TestCase):
                             for panel in dashboard["panels"] for target in panel["targets"]))
 
     def test_retired_nodes_are_excluded_even_if_added_to_monitored_group(self):
-        self.assertIn("nt1", self.groups["retired_nodes"])
-        self.assertNotIn("nt1", self.groups["monitored_nodes"])
+        for host in ("nt1", "GE1"):
+            self.assertIn(host, self.groups["retired_nodes"])
+            self.assertNotIn(host, self.groups["monitored_nodes"])
         for host in self.groups["retired_nodes"]:
             self.groups["monitored_nodes"].append(host)
             self.hostvars[host] = copy.deepcopy(self.hostvars["nk1"])

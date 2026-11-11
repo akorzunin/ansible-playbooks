@@ -44,6 +44,7 @@ all:
     # Retain SSH records in ./hosts, but never scrape or deploy exporters here.
     retired_nodes:
       hosts:
+        GE1:
         nt1:
         kr1:
         sw1:
