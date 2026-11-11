@@ -67,6 +67,8 @@ strings. The tracked `external_vars.yml.example` lists the required names:
 - `MONITORING_TELEGRAM_CHAT_ID` (numeric string; group IDs are usually negative)
 - `MONITORING_GRAFANA_ADMIN_USER` / `MONITORING_GRAFANA_ADMIN_PASSWORD`
   (**current** org-1 administrator credentials, also used to initialize new databases)
+- `GF_SMTP_USER`: full Gmail address, also the sender and fallback recipient
+- `GF_SMTP_PASSWORD`: Google app password (not your normal account password)
 
 Reuse your existing Telegram bot/chat. If the token is lost, obtain/reissue it with
 BotFather. Start the bot or add it to the target group before testing notifications.
@@ -109,7 +111,7 @@ ansible-playbook -i ./hosts \
 
 The migration:
 
-1. Validates inventory and shared Telegram/Grafana credentials before changing services.
+1. Validates inventory and shared Telegram/Grafana/Gmail credentials before changing services.
 2. Stops Grafana briefly and takes a consistent, root-readable archive of
    `grafana_data`, `.env`, and the old stack configuration under
    `~/deploy/ws-logs/backups/grafana-<timestamp>.tar.gz`. Grafana is restarted even
@@ -254,6 +256,44 @@ After deployment, test that contact point in Grafana and check the Prometheus
 targets. No test notification is sent by Ansible. Alerts in
 `grafana/provisioning/alerting/rules.yml` must preserve node labels and cannot use
 dashboard variables.
+
+### Email warning when Telegram delivery fails
+
+Enable Google 2-Step Verification, then create a dedicated **Grafana monitoring**
+password at <https://myaccount.google.com/apppasswords>. Store its 16 characters
+without spaces as Vault-backed `GF_SMTP_PASSWORD` in `external_vars.yml`, alongside
+`GF_SMTP_USER`. Deployment enables Gmail SMTP on `smtp.gmail.com:587` with mandatory
+STARTTLS and certificate verification. SMTP connects directly rather than using
+Grafana's HTTP proxy; host routing/firewall rules must also allow it without VPN.
+
+Prometheus scrapes `grafana:3000/metrics`. The **Telegram alert delivery failed**
+rule observes org-1 `grafana_alerting_notification_requests_failed_total` counters
+for Telegram integrations. Any failed attempt in the last 15 minutes generates an
+email-only warning through **Monitoring Email**, evaluated once per minute.
+The query also handles Grafana omitting zero counters, so the first failed request
+is not missed. Other alerts stay on Telegram; original alerts are not forwarded.
+The warning's NoData/Error alerts also follow its email route.
+
+This is passive failure monitoring, not a periodic Telegram probe: an idle broken
+VPN is only detected when Grafana attempts a notification. An expired failure
+window is not proof of recovery, so resolved emails are disabled. Missing Grafana
+scrapes can hide delivery failures; verify `up{job="grafana"} == 1`. A failed
+workstation, Prometheus, Grafana, internet connection, or SMTP service cannot be
+reported reliably by this same stack; that needs independent external monitoring.
+
+After deployment:
+
+1. In **Alerting → Contact points**, test **Monitoring Email** and check your inbox.
+2. Verify Prometheus's `grafana` target is UP.
+3. During a controlled Telegram proxy outage, trigger a real, temporary Grafana
+   alert routed to Telegram. Contact-point UI tests may bypass pipeline counters,
+   so they are not an end-to-end fallback test.
+4. Confirm **Telegram alert delivery failed** fires and arrives by email, restore
+   the proxy, and remove the temporary alert. The warning clears after the rolling
+   failure window expires; this does not establish Telegram recovery.
+
+No notification is sent automatically by deployment. Never expose `/metrics`
+publicly without appropriate access controls.
 
 ### VPN reachability
 

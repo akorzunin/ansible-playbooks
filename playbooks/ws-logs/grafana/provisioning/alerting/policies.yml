@@ -8,3 +8,10 @@ policies:
     group_wait: 30s
     group_interval: 5m
     repeat_interval: 4h
+    routes:
+      - receiver: Monitoring Email
+        object_matchers:
+          - [notification_channel, '=', email]
+        group_wait: 0s
+        repeat_interval: 1h
+        continue: false

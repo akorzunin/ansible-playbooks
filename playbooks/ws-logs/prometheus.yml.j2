@@ -9,6 +9,12 @@ scrape_configs:
         labels:
           node: workstation
 
+  - job_name: grafana
+    static_configs:
+      - targets: ["grafana:3000"]
+        labels:
+          node: workstation
+
 {% if monitoring_vpn_monitor_enabled | default(false) | bool %}
   - job_name: vpn-monitor
     scrape_interval: 30s

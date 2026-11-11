@@ -59,6 +59,8 @@ class BootstrapTests(unittest.TestCase):
             "MONITORING_TELEGRAM_CHAT_ID": "-100123",
             "MONITORING_GRAFANA_ADMIN_USER": "admin",
             "MONITORING_GRAFANA_ADMIN_PASSWORD": "GRAFANA_SECRET_FIXTURE",
+            "GF_SMTP_USER": "monitoring@example.test",
+            "GF_SMTP_PASSWORD": "SMTP_SECRET_FIXTURE",
             **overrides,
         }
         variables_path = self.directory / "vars.json"
@@ -278,6 +280,8 @@ class BootstrapTests(unittest.TestCase):
             {"node_monitoring_allowed_sources": ["not-a-network"]},
             {"MONITORING_TELEGRAM_BOT_TOKEN": ""},
             {"MONITORING_GRAFANA_ADMIN_PASSWORD": ""},
+            {"GF_SMTP_USER": ""}, {"GF_SMTP_USER": "not-an-email"},
+            {"GF_SMTP_PASSWORD": ""},
         ):
             with self.subTest(overrides=overrides):
                 result = self.run_bootstrap(**overrides)

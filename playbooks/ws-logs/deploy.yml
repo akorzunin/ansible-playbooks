@@ -10,6 +10,9 @@
     monitoring_telegram_chat_id: "{{ MONITORING_TELEGRAM_CHAT_ID | default('') }}"
     monitoring_grafana_admin_user: "{{ MONITORING_GRAFANA_ADMIN_USER | default('') }}"
     monitoring_grafana_admin_password: "{{ MONITORING_GRAFANA_ADMIN_PASSWORD | default('') }}"
+    # Vault strings created from stdin can contain a trailing newline.
+    monitoring_smtp_user: "{{ GF_SMTP_USER | default('') | trim }}"
+    monitoring_smtp_password: "{{ GF_SMTP_PASSWORD | default('') | trim }}"
     monitoring_dashboard_files: "{{ query('fileglob', playbook_dir ~ '/grafana/dashboards/*.json') }}"
   vars_files:
     - "{{ playbook_dir }}/../../external_vars.yml"
@@ -64,6 +67,14 @@
           - monitoring_grafana_admin_user | length > 0
           - monitoring_grafana_admin_password | length > 0
         fail_msg: Set MONITORING_GRAFANA_ADMIN_USER and MONITORING_GRAFANA_ADMIN_PASSWORD in external_vars.yml.
+      no_log: true
+
+    - name: Validate Gmail fallback credentials
+      ansible.builtin.assert:
+        that:
+          - monitoring_smtp_user is match('^[^@\s]+@[^@\s]+$')
+          - monitoring_smtp_password | length > 0
+        fail_msg: Set GF_SMTP_USER and GF_SMTP_PASSWORD (Google app password) in external_vars.yml (Vault).
       no_log: true
 
     - name: Check existing Grafana data
@@ -145,7 +156,7 @@
         mode: "0644"
       register: monitoring_prometheus_config
 
-    - name: Render Telegram contact point
+    - name: Render Telegram and email contact points
       ansible.builtin.template:
         src: grafana/provisioning/alerting/contact-points.yml.j2
         dest: "{{ remote_install_path }}/grafana/provisioning/alerting/contact-points.yml"

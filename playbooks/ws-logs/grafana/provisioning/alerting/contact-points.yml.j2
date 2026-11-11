@@ -11,3 +11,13 @@ contactPoints:
           # Grafana expands $ENV in provisioning files; double $ to keep literals.
           bottoken: {{ monitoring_telegram_bot_token | replace('$', '$$') | to_json }}
           chatid: {{ monitoring_telegram_chat_id | string | to_json }}
+  - orgId: 1
+    name: Monitoring Email
+    receivers:
+      - uid: monitoring-email
+        type: email
+        # The rolling failure window expiring does not prove Telegram recovered.
+        disableResolveMessage: true
+        settings:
+          addresses: {{ monitoring_smtp_user | replace('$', '$$') | to_json }}
+          singleEmail: true

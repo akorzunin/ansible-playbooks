@@ -26,6 +26,10 @@ MONITORING_TELEGRAM_CHAT_ID: "" # Numeric chat ID; groups usually have negative 
 # Reused to render the remote .env; existing databases keep their current password.
 MONITORING_GRAFANA_ADMIN_USER: ""
 MONITORING_GRAFANA_ADMIN_PASSWORD: ""
+# Gmail SMTP: full address and Google app password (not the account password).
+# Telegram delivery-failure warnings are emailed to this same address.
+GF_SMTP_USER: ""
+GF_SMTP_PASSWORD: ""
 RUTRACKER_USER: ""
 RUTRACKER_PASS: ""
 # Disposable Cherry VPN project; restore-keys.yaml loads this into OpenTofu.

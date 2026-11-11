@@ -2,6 +2,79 @@ apiVersion: 1
 
 groups:
   - orgId: 1
+    name: Notification delivery
+    folder: Monitoring
+    interval: 1m
+    rules:
+      - uid: monitoring-telegram-delivery-failed
+        title: Telegram alert delivery failed
+        condition: B
+        for: 0s
+        noDataState: NoData
+        execErrState: Error
+        isPaused: false
+        labels:
+          severity: critical
+          managed_by: ansible
+          notification_channel: email
+        annotations:
+          summary: Telegram alert delivery has failed in the last 15 minutes
+          description: >-
+            Grafana failed to send a Telegram notification. Check the workstation
+            proxy on port 20171, its VPN server, and the Telegram bot credentials.
+            Other alerts may not reach Telegram; inspect Grafana for the original
+            alerts. This email does not forward them. No recent failures does not
+            prove recovery: this check only observes attempted notifications.
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 1200
+              to: 0
+            datasourceUid: monitoring-prometheus
+            model:
+              refId: A
+              datasource:
+                type: prometheus
+                uid: monitoring-prometheus
+              # Grafana suppresses zero counters. The offset branch catches the
+              # first failure, which increase() alone misses on a new series.
+              expr: >-
+                sum(
+                  (increase(grafana_alerting_notification_requests_failed_total{job="grafana",org="1",integration=~"telegram.*"}[15m]) > 0)
+                  or
+                  (grafana_alerting_notification_requests_failed_total{job="grafana",org="1",integration=~"telegram.*"}
+                  unless grafana_alerting_notification_requests_failed_total{job="grafana",org="1",integration=~"telegram.*"} offset 15m)
+                ) or vector(0)
+              instant: true
+              range: false
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: B
+              datasource:
+                type: __expr__
+                uid: __expr__
+              type: threshold
+              expression: A
+              conditions:
+                - type: query
+                  query:
+                    params: [B]
+                  reducer:
+                    type: last
+                    params: []
+                  evaluator:
+                    type: gt
+                    params: [0]
+                  operator:
+                    type: and
+
+  - orgId: 1
     name: Node availability
     folder: Monitoring
     interval: 1m

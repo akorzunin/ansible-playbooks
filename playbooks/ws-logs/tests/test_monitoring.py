@@ -43,6 +43,10 @@ class MonitoringTests(unittest.TestCase):
         )
         self.environment.filters["to_json"] = json.dumps
         self.environment.filters["bool"] = to_bool
+        self.environment.globals.update(
+            monitoring_smtp_user="monitoring@example.test",
+            monitoring_smtp_password="fixture-app-password",
+        )
 
     def prometheus(self, **settings):
         template = self.environment.from_string(
@@ -88,7 +92,8 @@ class MonitoringTests(unittest.TestCase):
             for secret in ("p$a$$s${UNSET}", "quotes'\"\\\\", "пароль", "line\nnext"):
                 with self.subTest(secret=secret):
                     (root / ".env").write_text(template.render(
-                        monitoring_grafana_admin_user="fixture-user", monitoring_grafana_admin_password=secret))
+                        monitoring_grafana_admin_user="fixture-user", monitoring_grafana_admin_password=secret,
+                        monitoring_smtp_password=secret))
                     result = subprocess.run(
                         ["docker", "compose", "--env-file", "/dev/null", "-f", str(compose), "config", "--format", "json"],
                         capture_output=True, text=True, timeout=20)
@@ -96,6 +101,8 @@ class MonitoringTests(unittest.TestCase):
                     value = json.loads(result.stdout)["services"]["fixture"]["environment"]["GF_SECURITY_ADMIN_PASSWORD"]
                     # Compose config escapes literal dollars again for round-trip serialization.
                     self.assertEqual(value.replace("$$", "$"), secret)
+                    smtp = json.loads(result.stdout)["services"]["fixture"]["environment"]["GF_SMTP_PASSWORD"]
+                    self.assertEqual(smtp.replace("$$", "$"), secret)
                     self.assertNotIn("not set", result.stderr)
 
     def test_active_nodes_ports_and_alert_opt_in(self):
@@ -108,7 +115,7 @@ class MonitoringTests(unittest.TestCase):
         opted_in = {node for node, target in targets.items() if target["labels"]["availability_alert"] == "true"}
         self.assertEqual(opted_in, {"nk1", "dyn1"})
         jobs = {job["job_name"] for job in self.prometheus()["scrape_configs"]}
-        self.assertEqual(jobs, {"prometheus", "telegraf", "nvidia-gpu-exporter"})
+        self.assertEqual(jobs, {"prometheus", "grafana", "telegraf", "nvidia-gpu-exporter"})
 
     def test_vpn_monitor_scrape_is_opt_in_and_credentials_are_not_inline(self):
         for enabled in (False, "false"):
@@ -154,12 +161,12 @@ class MonitoringTests(unittest.TestCase):
             "monitoring_client_telegraf_port": 9991,
         }
         self.assertEqual(self.targets("telegraf")["stable-name"]["targets"], ["10.10.10.10:9991"])
-        self.assertEqual(len(self.prometheus()["scrape_configs"]), 3)
+        self.assertEqual(len(self.prometheus()["scrape_configs"]), 4)
 
     def test_no_empty_jobs_when_all_nodes_are_disabled(self):
         for host in self.groups["monitored_nodes"]:
             self.hostvars[host]["monitoring_enabled"] = False
-        self.assertEqual([job["job_name"] for job in self.prometheus()["scrape_configs"]], ["prometheus"])
+        self.assertEqual([job["job_name"] for job in self.prometheus()["scrape_configs"]], ["prometheus", "grafana"])
 
     def test_telegraf_availability_opt_in_is_preserved(self):
         self.hostvars["remote_workstation"]["monitoring_availability_alert"] = True
@@ -457,7 +464,8 @@ class MonitoringTests(unittest.TestCase):
         rules = yaml.safe_load(
             (STACK / "grafana/provisioning/alerting/rules.yml").read_text()
         )
-        rule = rules["groups"][0]["rules"][0]
+        group = next(group for group in rules["groups"] if group["name"] == "Node availability")
+        rule = group["rules"][0]
         query, condition = rule["data"]
         self.assertEqual(rule["for"], "2m")
         self.assertEqual(rule["noDataState"], "NoData")
@@ -522,6 +530,91 @@ class MonitoringTests(unittest.TestCase):
         )
         self.assertEqual(policies["policies"][0]["receiver"], contact["name"])
         self.assertIn("node", policies["policies"][0]["group_by"])
+
+    @unittest.skipUnless(shutil.which("promtool"), "promtool is needed to evaluate failure counters")
+    def test_delivery_failure_query_handles_absent_and_first_failure_counters(self):
+        groups = yaml.safe_load((STACK / "grafana/provisioning/alerting/rules.yml").read_text())["groups"]
+        group = next(group for group in groups if group["name"] == "Notification delivery")
+        expr = group["rules"][0]["data"][0]["model"]["expr"]
+        metric = 'grafana_alerting_notification_requests_failed_total{job="grafana",org="1",integration="%s"}'
+        cases = [
+            ("no attempts yet", None, "", "2m", 0),
+            ("zero failures", "telegram", "0+0x30", "10m", 0),
+            ("first failure is one sample", "telegram", "_ _ 1+0x30", "2m", 1),
+            ("first failure remains visible", "telegram", "_ _ 1+0x30", "10m", 1),
+            ("old failure expires", "telegram", "1+0x30", "20m", 0),
+            ("later failure", "telegram", "1+0x19 2+0x10", "21m", 1),
+            ("counter reset", "telegram", "1+0x19 0 1+0x10", "22m", 1),
+            ("email failures do not loop", "email", "_ _ 1+0x30", "2m", 0),
+        ]
+        tests = []
+        for name, integration, values, time, expected in cases:
+            tests.append({
+                "name": name, "interval": "1m",
+                "input_series": ([{"series": metric % integration, "values": values}] if integration else []),
+                "promql_expr_test": [{
+                    "expr": f"({expr}) > bool 0", "eval_time": time,
+                    "exp_samples": [{"labels": "{}", "value": expected}],
+                }],
+            })
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "tests.yml"
+            path.write_text(yaml.safe_dump({"evaluation_interval": "1m", "tests": tests}))
+            result = subprocess.run(["promtool", "test", "rules", str(path)],
+                                    capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_gmail_uses_verified_starttls_and_shared_private_credentials(self):
+        play = yaml.safe_load((STACK / "deploy.yml").read_text())[0]
+        self.assertIn("GF_SMTP_USER", play["vars"]["monitoring_smtp_user"])
+        self.assertIn("GF_SMTP_PASSWORD", play["vars"]["monitoring_smtp_password"])
+        for variable, source, expected in (
+            ("monitoring_smtp_user", "GF_SMTP_USER", "monitoring@example.test"),
+            ("monitoring_smtp_password", "GF_SMTP_PASSWORD", "fixture-app-password"),
+        ):
+            template = self.environment.from_string(play["vars"][variable])
+            self.assertEqual(template.render(**{source: f"  {expected}\n"}), expected)
+            self.assertEqual(template.render(**{source: " \n "}), "")
+        validate = next(task for task in play["tasks"] if task["name"] == "Validate Gmail fallback credentials")
+        self.assertTrue(validate["no_log"])
+        rendered = self.environment.from_string((STACK / "grafana.env.j2").read_text()).render(
+            monitoring_grafana_admin_user="fixture-user", monitoring_grafana_admin_password="fixture-secret")
+        for setting in (
+            "GF_SMTP_ENABLED=true", "GF_SMTP_HOST=smtp.gmail.com:587",
+            'GF_SMTP_USER="monitoring@example.test"',
+            'GF_SMTP_PASSWORD="fixture-app-password"',
+            'GF_SMTP_FROM_ADDRESS="monitoring@example.test"',
+            "GF_SMTP_STARTTLS_POLICY=MandatoryStartTLS", "GF_SMTP_SKIP_VERIFY=false",
+        ):
+            self.assertIn(setting, rendered)
+
+    def test_only_delivery_failure_warnings_route_to_email(self):
+        template = self.environment.from_string(
+            (STACK / "grafana/provisioning/alerting/contact-points.yml.j2").read_text())
+        contacts = yaml.safe_load(template.render(
+            monitoring_telegram_bot_token="fixture", monitoring_telegram_chat_id="42",
+            monitoring_smtp_user="mail$literal@example.test"))["contactPoints"]
+        email = next(contact for contact in contacts if contact["name"] == "Monitoring Email")
+        receiver, = email["receivers"]
+        self.assertEqual(receiver["type"], "email")
+        self.assertEqual(receiver["settings"]["addresses"], "mail$$literal@example.test")
+        self.assertTrue(receiver["disableResolveMessage"])
+        policy, = yaml.safe_load((STACK / "grafana/provisioning/alerting/policies.yml").read_text())["policies"]
+        self.assertEqual(policy["receiver"], "Monitoring Telegram")
+        route, = policy["routes"]
+        self.assertEqual(route["receiver"], email["name"])
+        self.assertEqual(route["object_matchers"], [["notification_channel", "=", "email"]])
+        self.assertFalse(route["continue"])
+        groups = yaml.safe_load((STACK / "grafana/provisioning/alerting/rules.yml").read_text())["groups"]
+        email_rules = [rule for group in groups for rule in group["rules"]
+                      if rule["labels"].get("notification_channel") == "email"]
+        rule, = email_rules
+        self.assertEqual(rule["uid"], "monitoring-telegram-delivery-failed")
+        self.assertEqual(rule["for"], "0s")
+        self.assertIn('integration=~"telegram.*"', rule["data"][0]["model"]["expr"])
+        self.assertIn("offset 15m", rule["data"][0]["model"]["expr"])
+        jobs = {job["job_name"]: job for job in self.prometheus()["scrape_configs"]}
+        self.assertEqual(jobs["grafana"]["static_configs"][0]["targets"], ["grafana:3000"])
 
     def test_provisioning_paths_and_datasource_uids_match(self):
         compose = yaml.safe_load((STACK / "compose.yml").read_text())

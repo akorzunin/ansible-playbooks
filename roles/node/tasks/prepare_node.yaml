@@ -38,7 +38,9 @@
     that:
       - MONITORING_GRAFANA_ADMIN_USER | default('') | length > 0
       - MONITORING_GRAFANA_ADMIN_PASSWORD | default('') | length > 0
-    fail_msg: Configure monitoring Grafana credentials in external_vars.yml first.
+      - GF_SMTP_USER | default('') | trim is match('^[^@\s]+@[^@\s]+$')
+      - GF_SMTP_PASSWORD | default('') | trim | length > 0
+    fail_msg: Configure monitoring Grafana and Gmail SMTP credentials in external_vars.yml first.
   no_log: true
 
 # Top-level appends preserve existing text; use a round-trip YAML writer if

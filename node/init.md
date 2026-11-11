@@ -43,7 +43,8 @@ Run only one bootstrap at a time against the same inventory files.
 - The existing workstation monitoring stack must be reachable via its inventory
   connection, with Docker permissions. Keep `MONITORING_TELEGRAM_BOT_TOKEN` and
   `MONITORING_TELEGRAM_CHAT_ID`, plus `MONITORING_GRAFANA_ADMIN_USER` and
-  `MONITORING_GRAFANA_ADMIN_PASSWORD`, configured in Vault-backed `external_vars.yml`.
+  `MONITORING_GRAFANA_ADMIN_PASSWORD`, and Gmail fallback credentials `GF_SMTP_USER` /
+  `GF_SMTP_PASSWORD`, configured in Vault-backed `external_vars.yml`.
   The remote Grafana environment is rendered from a tracked template; no local
   `.env` is needed (see the [monitoring guide](../playbooks/ws-logs/README.md)).
 - Permit SSH from your controller and TCP 9273 from the scraper in your provider
