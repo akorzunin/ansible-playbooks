@@ -1,7 +1,7 @@
 services:
   omniroute:
     container_name: omniroute
-    image: diegosouzapw/omniroute:next@sha256:90358c971b44e9f135edac557352658ddbdb5b6d11fc5e42f732688e5dbac981
+    image: diegosouzapw/omniroute:next@sha256:ab51bac739f570e0b3c0f1b191b2df881f18a8b848aa97283fd01510221de95f
     restart: unless-stopped
     extra_hosts:
       - host.docker.internal:host-gateway
@@ -10,8 +10,6 @@ services:
     environment:
       API_KEY_SECRET: ${OMNIROUTE_API_KEY_SECRET:?set in .env}
       HOSTNAME: 0.0.0.0
-      # Temporary GPT-6.1 Codex catalog workaround until upstream PR #15171 ships.
-      CODEX_CLIENT_VERSION: "0.159.2"
       HTTP_PROXY: http://host.docker.internal:20171
       HTTPS_PROXY: http://host.docker.internal:20171
       NO_PROXY: 127.0.0.1,localhost,host.docker.internal,192.168.1.132
