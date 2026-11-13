@@ -1,0 +1,68 @@
+---
+- name: Require a complete supervised lifecycle run and the shared inventory
+  ansible.builtin.assert:
+    that:
+      - not ansible_check_mode
+      - ansible_limit is not defined
+      - ansible_run_tags == ['all']
+      - ansible_skip_tags | length == 0
+      - "'ge2' in hostvars"
+      - groups.get('remote_workstation', []) | length == 1
+      - groups.get('monitoring_servers', []) | length == 1
+      - groups.get('monitored_nodes', []) | length > 0
+      - sing_box_extra_outbounds_file | default('') | length == 0
+    fail_msg: Use -i hosts, without --check, --limit or tags; do not supply extra profile exports.
+
+- name: Require existing recovery inputs instead of silently starting from empty state
+  ansible.builtin.stat:
+    path: "{{ playbook_dir }}/{{ item }}"
+  loop:
+    - terraform.tfstate
+    - terraform.tfvars
+    - secrets.vault.yaml
+    - hysteria2.vault.yaml
+    - ../../.ansible_pass
+  register: dyn1_recovery_inputs
+
+- name: Stop if shared inputs or the latest local state are missing
+  ansible.builtin.assert:
+    that: item.stat.exists
+    fail_msg: Restore shared inputs and the latest encrypted state first; see LIFECYCLE.md.
+  loop: "{{ dyn1_recovery_inputs.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Decrypt existing inputs before any billable action
+  ansible.builtin.include_vars:
+    file: "{{ item }}"
+    name: dyn1_preflight_secrets
+  loop:
+    - "{{ playbook_dir }}/../../external_vars.yml"
+    - "{{ playbook_dir }}/secrets.vault.yaml"
+    - "{{ playbook_dir }}/hysteria2.vault.yaml"
+    - "{{ playbook_dir }}/../../playbooks/sing-box-configs/secrets.vault.yaml"
+  no_log: true
+
+- name: Initialize the pinned provider without upgrading it
+  ansible.builtin.command:
+    argv: [bash, "{{ playbook_dir }}/tofu.sh", init, -input=false, -lockfile=readonly]
+  changed_when: false
+
+- name: Read tracked resources from the encrypted state
+  ansible.builtin.command:
+    argv: [bash, "{{ playbook_dir }}/tofu.sh", state, list]
+  register: dyn1_tracked_resources
+  changed_when: false
+
+- name: Reject a state containing unrelated managed resources
+  ansible.builtin.assert:
+    that: >-
+      dyn1_tracked_resources.stdout_lines |
+      reject('match', '^data\.') |
+      difference(['cherryservers_server.vpn', 'cherryservers_ssh_key.admin']) | length == 0
+    fail_msg: This entry point manages only the dedicated Cherry VM and its SSH registration.
+
+- name: Verify encrypted recovery storage is writable before any apply
+  ansible.builtin.command:
+    argv: [bash, "{{ playbook_dir }}/tofu.sh", backup-state]
+  changed_when: true

@@ -1,6 +1,7 @@
 ---
 - name: Restrict the workstation SSH hop to published SSH exits
   hosts: remote_workstation
+  any_errors_fatal: true
   become: true
   vars:
     hop_user: sing-box-hop

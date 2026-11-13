@@ -45,7 +45,10 @@ are unchanged; refresh enrolled clients. The dyn1 SSH hop to nt1 is no longer
 available. Active local clients and the workstation Docker proxy were not changed.
 See the [current status](infra/cherry-vpn/README.md#current-status)
 and [controller handoff instructions](infra/cherry-vpn/README.md#dropbox-inputs-and-switching-controllers).
-Further provisioning requires a fresh reviewed plan and explicit approval.
+To create or retire a new `dyn1`, use the **[Ansible lifecycle instructions](infra/cherry-vpn/LIFECYCLE.md)**:
+`infra/cherry-vpn/provision.yaml` and `infra/cherry-vpn/destroy.yaml` handle
+OpenTofu plan approval, configuration, checks, profiles, monitoring and state
+backups. GE2's server is untouched; deployment preserves the current profile default.
 
 ## Setup
 

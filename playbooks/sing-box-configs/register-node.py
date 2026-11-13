@@ -16,23 +16,41 @@ import generate
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def merge(data, node, outbounds, default):
+def managed_tags(node):
     if not re.fullmatch(r'[a-z][a-z0-9-]{0,62}', node):
         raise ValueError('Invalid node name')
+    return {node + '-' + kind for kind in
+            ('ssh', 'naive', 'vless', 'hysteria2', 'vless-via-naive', 'ssh-via-workstation')}
+
+
+def merge(data, node, outbounds, default=None):
+    managed = managed_tags(node)
     expected = {node + '-' + kind for kind in ('ssh', 'naive', 'vless')}
     tags = {o['tag'] for o in outbounds}
     if len(outbounds) != len(tags) or tags not in (expected, expected | {node + '-hysteria2'}):
         raise ValueError('Expected SSH, Naive and VLESS, with optional Hysteria 2')
     if any(o['tag'] != node + '-' + o['type'] for o in outbounds):
         raise ValueError('Connection types and tags disagree')
-    managed = expected | {node + '-hysteria2', node + '-vless-via-naive', node + '-ssh-via-workstation'}
-    if default not in tags | {node + '-vless-via-naive', node + '-ssh-via-workstation'}:
+    if default is not None and default not in tags | {node + '-vless-via-naive', node + '-ssh-via-workstation'}:
         raise ValueError('Default must belong to this node')
     result = copy.deepcopy(data)
     secrets = result['sing_box_secrets']
     secrets['extra_outbounds'] = [o for o in secrets.get('extra_outbounds', [])
                                 if o['tag'] not in managed] + copy.deepcopy(outbounds)
-    secrets['default_outbound'] = default
+    if default is not None:
+        secrets['default_outbound'] = default
+    return result
+
+
+def remove(data, node, fallback=None):
+    managed = managed_tags(node)
+    result = copy.deepcopy(data)
+    secrets = result['sing_box_secrets']
+    secrets['extra_outbounds'] = [o for o in secrets.get('extra_outbounds', []) if o['tag'] not in managed]
+    if secrets.get('default_outbound') in managed:
+        if not fallback or fallback in managed:
+            raise ValueError('A surviving default is required before removing this node')
+        secrets['default_outbound'] = fallback
     return result
 
 
@@ -42,7 +60,7 @@ def register(vault, password, node, outbounds, default):
     data = yaml.safe_load(subprocess.run([
         'ansible-vault', 'view', '--vault-password-file', str(password), str(vault),
     ], check=True, capture_output=True).stdout)
-    updated = merge(data, node, outbounds, default)
+    updated = remove(data, node, default) if outbounds is None else merge(data, node, outbounds, default)
     secrets = updated['sing_box_secrets']
     # Validate every platform and derived selector before committing encrypted inputs.
     with tempfile.TemporaryDirectory(prefix='vpn-node-register-') as work:
@@ -68,14 +86,16 @@ def register(vault, password, node, outbounds, default):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--node', required=True)
-    parser.add_argument('--outbounds-file', type=Path, required=True)
-    parser.add_argument('--default', required=True)
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument('--outbounds-file', type=Path)
+    action.add_argument('--remove', action='store_true')
+    parser.add_argument('--default', help='New node default, or removal fallback; omitted registration preserves the default')
     parser.add_argument('--vault-file', type=Path, default=Path(__file__).with_name('secrets.vault.yaml'))
     parser.add_argument('--vault-password-file', type=Path, default=ROOT / '.ansible_pass')
     args = parser.parse_args()
     os.umask(0o077)
     changed = register(args.vault_file, args.vault_password_file, args.node,
-                       json.loads(args.outbounds_file.read_text()), args.default)
+                       None if args.remove else json.loads(args.outbounds_file.read_text()), args.default)
     print('Node profile source updated.' if changed else 'Node profile source unchanged.')
 
 

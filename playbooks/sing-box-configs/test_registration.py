@@ -51,6 +51,38 @@ class RegistrationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             registration.merge(merged, 'ge2', self.outbounds[:3], 'ge2-hysteria2')
 
+    def test_registration_without_default_preserves_current_selection(self):
+        merged = registration.merge(self.data, 'ge2', self.outbounds)
+        self.assertEqual(merged['sing_box_secrets']['default_outbound'], 'aurora-vless')
+        self.assertEqual(merged['sing_box_secrets']['tokens'], self.data['sing_box_secrets']['tokens'])
+
+    def test_remove_is_idempotent_and_only_removes_exact_node_tags(self):
+        merged = registration.merge(self.data, 'ge2', self.outbounds)
+        merged['sing_box_secrets']['extra_outbounds'].extend([
+            {'type': 'vless', 'tag': 'ge2-other-vless'},
+            {'type': 'vless', 'tag': 'ge2-vless-via-naive'},
+            {'type': 'ssh', 'tag': 'ge2-ssh-via-workstation'},
+        ])
+        before = copy.deepcopy(merged)
+        removed = registration.remove(merged, 'ge2')
+        self.assertEqual(merged, before)
+        self.assertEqual(removed['sing_box_secrets']['tokens'], self.data['sing_box_secrets']['tokens'])
+        self.assertEqual(removed['sing_box_secrets']['extra_outbounds'],
+                         self.data['sing_box_secrets']['extra_outbounds'] + [{'type': 'vless', 'tag': 'ge2-other-vless'}])
+        self.assertEqual(removed['sing_box_secrets']['default_outbound'], 'aurora-vless')
+        self.assertEqual(registration.remove(removed, 'ge2'), removed)
+
+    def test_remove_requires_a_surviving_default_only_when_retiring_the_current_default(self):
+        merged = registration.merge(self.data, 'ge2', self.outbounds, 'ge2-vless-via-naive')
+        for fallback in (None, 'ge2-vless', 'ge2-vless-via-naive'):
+            with self.subTest(fallback=fallback), self.assertRaises(ValueError):
+                registration.remove(merged, 'ge2', fallback)
+        removed = registration.remove(merged, 'ge2', 'aurora-vless')
+        self.assertEqual(removed['sing_box_secrets']['default_outbound'], 'aurora-vless')
+        # An explicit fallback does not override a surviving user selection.
+        self.assertEqual(registration.remove(self.data, 'ge2', 'unused')['sing_box_secrets']['default_outbound'],
+                         'aurora-vless')
+
     def test_rejects_cross_node_tags_incomplete_exports_and_foreign_default(self):
         for outbounds, default in [(self.outbounds[:2], 'ge2-ssh'), (self.outbounds, 'aurora-vless'),
                                    ([*self.outbounds, self.outbounds[0]], 'ge2-ssh'),

@@ -5,6 +5,7 @@
 
 - name: Deploy all four VPN protocols on the verified Cherry administrator connection
   hosts: vpn_test_admin
+  any_errors_fatal: true
   become: true
   become_flags: -n
   vars:

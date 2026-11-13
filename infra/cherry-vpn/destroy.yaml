@@ -1,0 +1,136 @@
+---
+- name: Validate recovery inputs before retiring dyn1
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  tasks:
+    - name: Check the controller and existing encrypted state
+      ansible.builtin.import_tasks: tasks/lifecycle-preflight.yaml
+
+- name: Restore the existing keys needed to evaluate the infrastructure configuration
+  ansible.builtin.import_playbook: restore-keys.yaml
+
+- name: Review deletion before changing profiles or monitoring
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  vars:
+    dyn1_operation: destroy
+  tasks:
+    - name: Plan and approve deletion of only the dedicated Cherry resources
+      ansible.builtin.import_tasks: tasks/lifecycle-plan.yaml
+
+    - name: Remove only Cherry profile entries and fall back to GE2 if Cherry was the default
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../../playbooks/sing-box-configs/register-node.py"
+          - --node
+          - cherry
+          - --remove
+          - --default
+          - ge2-vless-via-naive
+      register: dyn1_removal
+      changed_when: "'source updated' in dyn1_removal.stdout"
+      no_log: true
+
+- name: Publish surviving exits before deleting the VM
+  ansible.builtin.import_playbook: ../../playbooks/sing-box-configs/deploy.yaml
+
+- name: Verify GE2 and retire only dyn1 monitoring and manual access
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  tasks:
+    - name: Verify the surviving GE2 exits without reconfiguring GE2
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../../roles/vpn_node/files/check.py"
+          - --input
+          - "{{ playbook_dir }}/../../playbooks/sing-box-configs/private/linux.json"
+          - --node
+          - ge2
+          - --expected-ip
+          - "{{ hostvars['ge2'].ansible_host }}"
+      changed_when: false
+
+    - name: Remove only lifecycle-managed Cherry blocks from the shared inventory
+      ansible.builtin.blockinfile:
+        path: "{{ playbook_dir }}/../../hosts"
+        marker: "{{ item }}"
+        state: absent
+        backup: true
+        mode: "0600"
+      loop:
+        - "# {mark} ANSIBLE CHERRY MONITORING"
+        - "# {mark} ANSIBLE BOOTSTRAP dyn1"
+
+    - name: Reload the inventory so this run drops the retired monitoring target too
+      ansible.builtin.meta: refresh_inventory
+
+    - name: Refuse deletion while unmanaged Cherry monitoring memberships remain
+      ansible.builtin.assert:
+        that: >-
+          groups.get('monitored_nodes', []) |
+          intersect(['dyn1', 'cherry_vpn_test', 'cherry_vpn_test_admin']) | length == 0
+        fail_msg: Remove unmanaged dyn1/Cherry monitoring records from hosts, then rerun destroy.yaml.
+
+- name: Redeploy monitoring without the retired node
+  ansible.builtin.import_playbook: ../../playbooks/ws-logs/deploy.yml
+
+- name: Destroy the approved resources and clear only dyn1 DNS and connection files
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  tasks:
+    - name: Apply and back up the approved destroy state
+      ansible.builtin.import_tasks: tasks/lifecycle-apply.yaml
+
+    - name: Verify that no managed Cherry resources remain tracked
+      ansible.builtin.command:
+        argv: [bash, "{{ playbook_dir }}/tofu.sh", state, list]
+      register: dyn1_remaining_resources
+      changed_when: false
+      failed_when: >-
+        dyn1_remaining_resources.rc != 0 or
+        dyn1_remaining_resources.stdout_lines | reject('match', '^data\.') | list | length > 0
+
+    - name: Load the shared DuckDNS token
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../../external_vars.yml"
+      no_log: true
+
+    - name: Clear only akorz-dyn1 DuckDNS records
+      ansible.builtin.uri:
+        url: "https://www.duckdns.org/update?domains=akorz-dyn1&token={{ DUCKDNS_TOKEN | trim | urlencode }}&clear=true"
+        return_content: true
+        use_proxy: false
+        follow_redirects: none
+        validate_certs: true
+        timeout: 30
+      register: dyn1_dns_clear
+      failed_when: dyn1_dns_clear.status != 200 or dyn1_dns_clear.content | trim != 'OK'
+      changed_when: true
+      no_log: true
+
+    - name: Remove stale connection files but retain keys, Vaults, plans and state backups
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/private/{{ item }}"
+        state: absent
+      loop: [inventory.yaml, known_hosts]
+
+    - name: Explain provider-side and client checks that still require supervision
+      ansible.builtin.debug:
+        msg: >-
+          dyn1 resources are absent from state; DNS, published profiles and monitoring were cleaned up.
+          Check the Cherry portal for orphan servers, billable IPs and storage, especially after API timeouts.
+          Refresh enrolled clients; offline clients and static configs cannot be updated by this playbook.

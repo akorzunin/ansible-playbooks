@@ -78,6 +78,7 @@
 
 - name: Verify Cherry monitoring end to end
   hosts: monitoring_servers
+  any_errors_fatal: true
   gather_facts: false
   tasks:
     - name: Wait for host and container metrics in Prometheus

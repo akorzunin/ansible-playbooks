@@ -235,6 +235,35 @@ def inventory(executable, env, data, proxy_command=None):
     return 0
 
 
+def review_plan(plan, operation):
+    """Fail closed on replacements/unrelated resources; return only non-secret review fields."""
+    if (operation not in {"deploy", "destroy"} or plan.get("errored")
+            or plan.get("complete") is False or plan.get("deferred_changes")):
+        raise ValueError("Invalid lifecycle plan")
+    allowed = {"cherryservers_server.vpn", "cherryservers_ssh_key.admin"}
+    resources = []
+    for resource in plan.get("resource_changes", []):
+        if resource.get("mode") == "data":
+            continue
+        change = resource["change"]
+        actions = change["actions"]
+        expected = "create" if operation == "deploy" else "delete"
+        if resource["address"] not in allowed or actions not in (["no-op"], [expected]) or change.get("importing"):
+            raise ValueError("Lifecycle refuses replacements, updates, imports and unrelated resources")
+        values = change.get("after") if operation == "deploy" else change.get("before")
+        values = values or {}
+        resources.append({
+            "address": resource["address"], "actions": actions,
+            **{key: values[key] for key in ("id", "project_id", "plan", "region", "image", "cycle") if key in values},
+        })
+    if operation == "deploy" and not any(r["address"] == "cherryservers_server.vpn" for r in resources):
+        raise ValueError("Deployment must contain the dedicated server")
+    quote = plan.get("output_changes", {}).get("hourly_quote", {}).get("after") or {}
+    return {"resources": resources, "catalogue_quote": {
+        key: quote[key] for key in ("price", "currency", "unit") if key in quote
+    }}
+
+
 def main(args):
     if not args:
         raise ValueError("An OpenTofu command is required")
@@ -260,6 +289,19 @@ def main(args):
     executable = str(ROOT / ".tools/tofu") if (ROOT / ".tools/tofu").is_file() else shutil.which("tofu")
     if not executable:
         raise ValueError("Install OpenTofu first")
+    if command == "review-plan":
+        if len(args) != 3:
+            raise ValueError("Usage: review-plan deploy|destroy saved-plan")
+        plan = json.loads(subprocess.run(
+            [executable, "show", "-json", args[2]], env=env, check=True, capture_output=True,
+        ).stdout)
+        try:
+            summary = review_plan(plan, args[1])
+        except ValueError as error:
+            print(f"Lifecycle plan refused: {error}", file=sys.stderr)
+            return 1
+        print(json.dumps(summary, indent=2))
+        return 0
     if command == "migrate-state" and len(args) == 1:
         return migrate(executable, env)
     if command == "inventory":

@@ -1,6 +1,7 @@
 ---
 - name: Restore dedicated Cherry SSH keys on this controller
   hosts: localhost
+  any_errors_fatal: true
   connection: local
   gather_facts: false
   become: false

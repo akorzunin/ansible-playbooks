@@ -1,5 +1,6 @@
 ---
 - name: Generate and validate remote profiles on the controller
+  any_errors_fatal: true
   hosts: localhost
   connection: local
   gather_facts: false
@@ -26,6 +27,7 @@
   ansible.builtin.import_playbook: workstation-hop.yaml
 
 - name: Host private profiles on the workstation
+  any_errors_fatal: true
   hosts: remote_workstation
   become: true
   vars:
@@ -107,6 +109,7 @@
       delay: 2
 
 - name: Add HTTPS routing on the workstation
+  any_errors_fatal: true
   hosts: remote_workstation
   become: false
   vars:
@@ -220,6 +223,7 @@
             msg: Profile route reload failed; previous router was restored.
 
 - name: Verify public enrollment endpoints directly
+  any_errors_fatal: true
   hosts: localhost
   connection: local
   gather_facts: false

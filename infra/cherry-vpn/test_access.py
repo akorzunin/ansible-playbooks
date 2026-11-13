@@ -12,6 +12,33 @@ PROJECT = Path(__file__).resolve().parent
 
 
 class CherryAccessTests(unittest.TestCase):
+    def test_verified_bootstrap_persists_the_administrator_for_retry(self):
+        task = yaml.safe_load((PROJECT / 'bootstrap.yaml').read_text())[1]['post_tasks'][0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'private').mkdir()
+            inventory = root / 'private/inventory.yaml'
+            original = {'all': {'children': {'vpn_test': {'hosts': {'cherry_vpn_test': {
+                'ansible_user': 'root', 'cherry_server_id': '123', 'ansible_host': '192.0.2.1',
+            }}}}}}
+            inventory.write_text(json.dumps(original, indent=2))
+            config = root / 'ansible.cfg'
+            config.write_text('[defaults]\n')
+            playbook = root / 'persist.yaml'
+            playbook.write_text(yaml.safe_dump([{
+                'name': 'Offline retry persistence', 'hosts': 'localhost', 'connection': 'local',
+                'gather_facts': False, 'vars': {'ansible_user': 'vpnadmin'}, 'tasks': [task],
+            }]))
+            for _ in range(2):
+                result = subprocess.run(
+                    ['ansible-playbook', '-i', 'localhost,', str(playbook)],
+                    env={**os.environ, 'ANSIBLE_CONFIG': str(config)},
+                    capture_output=True, text=True, timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            original['all']['children']['vpn_test']['hosts']['cherry_vpn_test']['ansible_user'] = 'vpnadmin'
+            self.assertEqual(json.loads(inventory.read_text()), original)
+
     def test_replacement_updates_one_managed_block_preserving_vault_and_symlink(self):
         plays = yaml.safe_load((PROJECT / "deploy.yaml").read_text())
         self.assertEqual("bootstrap.yaml", plays[0]["ansible.builtin.import_playbook"])

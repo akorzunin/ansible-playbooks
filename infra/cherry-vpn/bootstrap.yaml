@@ -1,6 +1,7 @@
 ---
 - name: Prepare key-only administration on the disposable test node
   hosts: vpn_test
+  any_errors_fatal: true
   gather_facts: false
   become: true
   vars:
@@ -10,6 +11,10 @@
     vpn_admin_public_key_path: "{{ playbook_dir }}/private/ssh/admin.pub"
     vpn_admin_private_key_path: "{{ playbook_dir }}/private/ssh/admin"
     vpn_probe_public_key_path: "{{ playbook_dir }}/private/ssh/probe.pub"
+  pre_tasks:
+    - name: Wait for pinned SSH access while the new VM boots
+      ansible.builtin.wait_for_connection:
+        timeout: 300
   tasks:
     - name: Validate separate administrator and tunnel keys before changing the server
       ansible.builtin.assert:
@@ -108,6 +113,7 @@
 
 - name: Verify non-root administration before restricting SSH
   hosts: vpn_test_admin
+  any_errors_fatal: true
   gather_facts: false
   become: true
   become_flags: -n
@@ -141,3 +147,11 @@
       ansible.builtin.import_role:
         name: vpn_node
         tasks_from: ssh
+  post_tasks:
+    - name: Preserve the verified administrator user in the generated JSON inventory for retries
+      ansible.builtin.replace:
+        path: "{{ playbook_dir }}/private/inventory.yaml"
+        regexp: '("ansible_user":\s*)"root"'
+        replace: '\1{{ ansible_user | to_json }}'
+      delegate_to: localhost
+      become: false

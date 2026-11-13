@@ -5,7 +5,26 @@ Dockerized Naïve, VLESS/REALITY and Hysteria 2/Brutal, with Linux as the first 
 application servers and active client configuration are kept separate. Full
 deployment also registers Cherry host/container metrics in the existing monitoring stack.
 VPN protocol monitoring is maintained separately in `github.com/akorzunin/vpn-monitor`. No automatic allocation,
-rotation or profile publication is introduced.
+rotation is introduced. Supervised profile publication is available through the
+lifecycle entry points below.
+
+## Deploy / destroy dyn1 (supported entry points)
+
+See **[LIFECYCLE.md](LIFECYCLE.md)** for prerequisites, approval prompts, client
+refresh and failure recovery. From the repository root:
+
+```sh
+# Provision, bootstrap, configure, monitor, test and publish dyn1:
+ansible-playbook -i hosts --vault-password-file .ansible_pass infra/cherry-vpn/provision.yaml
+
+# Retire its profiles/monitoring, destroy it, clear DNS and back up state:
+ansible-playbook -i hosts --vault-password-file .ansible_pass infra/cherry-vpn/destroy.yaml
+```
+
+Each command requires typed approval of a fresh OpenTofu plan. GE2's server is
+untouched; deployment preserves the current profile default. dyn1 remains named
+`cherry-*` in clients. The trial history and lower-level recovery commands below
+are not the complete lifecycle workflow.
 
 SSH is a cheap **baseline**, not an obfuscation solution. If it is blocked or
 unstable, test Naïve on the same VM next; do not buy a larger VM to solve filtering.
@@ -25,8 +44,10 @@ profiles, defaulting to `aurora-vless`, with the existing URLs/tokens unchanged.
 Two isolated Aurora HTTPS checks passed. Enrolled clients must refresh; the dyn1
 SSH hop to nt1 and any static Cherry/Discord configurations no longer work.
 Native controller and workstation Docker proxy configurations were not changed.
-**Do not run apply/deploy to restore access:** the configuration below can create
-a new billable VM and requires fresh review and approval.
+This is a historical retirement snapshot, not live account status. Current
+profiles use GE2; see its [node guide](../../node/ge2/README.md).
+Recreating dyn1 is billable: use the supervised lifecycle entry points above,
+not an unreviewed apply/deploy of the historical examples.
 
 ### Historical deployment status (before retirement)
 
@@ -656,6 +677,8 @@ key in Vault and republish. This is a supervised workflow, not automatic rotatio
 
 ## Stop spending
 
+**Prefer [destroy.yaml](LIFECYCLE.md#destroy)**: it also retires profiles,
+monitoring and DNS. The lower-level command below deletes infrastructure only.
 Stop any manually started test clients, then:
 
 ```sh
@@ -668,7 +691,6 @@ have allocated a resource before the client received its response. Do not blindl
 retry. Reconcile/import any orphan into this state before further allocation.
 Do not delete local state until billing cleanup is verified.
 
-Next milestone: run the full role on one VM, test all three protocols from Linux,
-publish the verified outbounds alongside nt1, and confirm an existing remote
-profile refresh receives them. Then perform a supervised replacement drill.
-Automatic rotation and an external controller remain disabled.
+The initial trial milestones above are historical. Use the supervised lifecycle
+guide for new deployments. Automatic rotation and an external controller remain
+disabled.

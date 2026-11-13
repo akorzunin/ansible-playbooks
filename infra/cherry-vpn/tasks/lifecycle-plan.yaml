@@ -1,0 +1,38 @@
+---
+- name: Save an encrypted lifecycle plan without interactive variable prompts
+  ansible.builtin.command:
+    argv: >-
+      {{ ['bash', playbook_dir ~ '/tofu.sh', 'plan', '-input=false', '-no-color',
+          '-out=private/lifecycle.tfplan'] +
+         (['-destroy'] if dyn1_operation == 'destroy' else []) }}
+  changed_when: false
+  no_log: true
+
+- name: Reject unsafe actions and extract a non-secret plan summary
+  ansible.builtin.command:
+    argv:
+      - bash
+      - "{{ playbook_dir }}/tofu.sh"
+      - review-plan
+      - "{{ dyn1_operation }}"
+      - private/lifecycle.tfplan
+  register: dyn1_plan_review
+  changed_when: false
+
+- name: Show the exact resource actions and catalogue compute quote
+  ansible.builtin.debug:
+    msg: "{{ dyn1_plan_review.stdout | from_json }}"
+
+- name: Wait for explicit approval of the saved plan
+  ansible.builtin.pause:
+    prompt: >-
+      Check the project, region, plan and account price above.
+      {{ 'Billing starts at apply; configuration failures do not stop billing.' if dyn1_operation == 'deploy'
+         else 'Profiles and monitoring will be retired before deletion; clients must refresh.' }}
+      Type '{{ dyn1_operation }} dyn1' to continue, anything else to abort
+  register: dyn1_approval
+
+- name: Require a typed approval even on noninteractive runs
+  ansible.builtin.assert:
+    that: dyn1_approval.user_input | default('') == dyn1_operation ~ ' dyn1'
+    fail_msg: Not approved; no apply or profile changes were performed.
