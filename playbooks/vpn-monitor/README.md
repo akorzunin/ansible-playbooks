@@ -9,11 +9,17 @@ active clients, DNS records or firewall rules are changed.
 - Existing `remote_workstation` must be the single `monitoring_servers` host,
   with the monitoring stack/network `ws-logs_default` already installed.
 - Add `monitoring_vpn_monitor_enabled: true` to that host in private `hosts`.
-- Keep the sibling project's **private** `config.yaml` and `.env` in place.
-  Configuration uses `listen: 127.0.0.1:8081`, `sing_box: sing-box`,
-  `web_dir: web/dist`, and `history_file: data/history.json`.
-  The API token named by `api_token_env` must be a plain `KEY=value` entry in
-  `.env`. Secrets are copied with mode 0600 and suppressed in Ansible output.
+- This repo owns the workstation configuration:
+  - [`config.yaml`](config.yaml): tracked probe settings and explicit server/protocol
+    allowlist. Each `outbound_tag` references the shared encrypted profile Vault.
+  - [`../sing-box-configs/secrets.vault.yaml`](../sing-box-configs/secrets.vault.yaml):
+    `sing_box_secrets.connections` / `extra_outbounds` supply native sing-box outbounds;
+    `vpn_monitor_secrets` supplies `VPN_MONITOR_API_TOKEN` and `VPN_MONITOR_UDP_TOKEN`.
+    Edit with `ansible-vault edit --vault-password-file=.ansible_pass
+    playbooks/sing-box-configs/secrets.vault.yaml` from the repo root.
+  No sibling private `config.yaml` or `.env`, generated profile JSON, or prior publish
+  is needed. The sibling checkout supplies application source only.
+  Existing monitor tokens were migrated unchanged into Vault; no rotation is required.
 - Controller: Go 1.25+, Node 22.12+, npm and the existing Ansible collections.
   This deployment builds a static Linux **amd64** binary. Override
   `vpn_monitor_source_dir` with an absolute checkout path if it is not adjacent.
@@ -27,7 +33,13 @@ ansible-playbook -i ./hosts --vault-password-file=.ansible_pass \
   playbooks/vpn-monitor/deploy.yml
 ```
 
-The playbook builds on the controller, transfers only the binary/public web assets
+The playbook resolves allowlisted tags directly from Vault using `generate.py`.
+Missing/duplicate tags and chained outbounds fail deployment rather than silently
+omitting probes. The monitor supports standalone routes only; do not strip `detour`
+from a chain to pretend it is a direct route. Aurora and newly published outbounds
+are not monitored unless explicitly added to this repo's allowlist.
+
+It builds on the controller, transfers only the binary/public web assets
 into a Docker build context, and uses the pinned workstation sing-box image with
 Naïve/QUIC support. Credentials never enter image layers. It validates application
 configuration before starting, then applies the ordinary monitoring deployment
@@ -69,20 +81,23 @@ docker compose ps
 docker compose logs --tail=50 vpn-monitor
 ```
 
-The current private config is used as-is apart from the container listen address;
-no Telegram bot or UDP endpoint is added implicitly. API credentials and private
-SSH tunnel keys remain on the workstation. Protect its files and backups.
+The tracked allowlist monitors only GE2 (SSH, Naïve and VLESS); the workstation's
+active Aurora VPN connection is independent. Generated credentials exist only in
+Ansible memory and mode-0600 runtime `~/deploy/vpn-monitor/config.yaml` / `.env`
+(and private backups) on the workstation. The runtime config changes the tracked
+loopback listen address to `0.0.0.0:8081` for the private Docker bridge. Protect
+runtime files and backups; edit tracked settings/Vault, not deployed files.
 
 ## Optional UDP and bounded downloads
 
 These tests need explicit configuration; empty Grafana panels otherwise mean
 **disabled/unsupported**, not zero loss or zero throughput. SSH and Naïve do not
-support this monitor's UDP test; both direct VLESS routes do.
+support this monitor's UDP test; the direct GE2 VLESS route does.
 
 The separate `echo-ge2.yml` playbook installs the project's static `--echo` binary
-as a sandboxed, reboot-persistent systemd service on existing GE2. It reads
-`VPN_MONITOR_UDP_TOKEN` from the sibling project's private `.env`; generate a
-random secret of at least 24 characters there before deploying:
+as a sandboxed, reboot-persistent systemd service on existing GE2. It reads the same
+`vpn_monitor_secrets.VPN_MONITOR_UDP_TOKEN` from the shared Vault as the checker.
+For a new setup, store random API/UDP tokens of at least 24 characters there before deploying:
 
 ```sh
 ansible-playbook -i ./hosts --vault-password-file=.ansible_pass \
@@ -94,10 +109,10 @@ dedicated nftables table restricts **UDP 9444 only** to GE2, Aurora's exit IP an
 GE2's VPN Docker subnet (`172.22.0.0/16`). It rate-limits accepted traffic and
 requires an HMAC-authenticated payload. Other firewall tables are untouched.
 Update the allowlist if the exits or VPN Docker subnet change. GE2-to-itself
-probes measure the tunnel, **not onward Internet UDP routing**; Aurora probes
-also traverse the Internet from Aurora to GE2.
+probes measure the tunnel, **not onward Internet UDP routing**. The allowlist
+still permits Aurora, but the workstation monitor no longer probes it.
 
-Add to the private monitor config:
+The tracked `config.yaml` enables these bounded tests with:
 
 ```yaml
 udp:
@@ -111,15 +126,15 @@ speed:
   timeout: 15s
 ```
 
-Redeploy/recreate the workstation monitor after changing its config or `.env`.
-Keep its deployed listen address `0.0.0.0:8081` for the private monitoring bridge.
-A 4 MiB download per route every five minutes consumes up to **4.5 GiB/day across
-four routes**, plus ordinary probe traffic. This is a bounded throughput sample,
+Rerun `deploy.yml` after changing tracked settings, outbounds or monitor tokens in
+Vault. After rotating the UDP token, also rerun `echo-ge2.yml` to keep both ends in sync.
+A 4 MiB download per route every five minutes consumes up to **3.4 GiB/day across
+three routes**, plus ordinary probe traffic. This is a bounded throughput sample,
 not sustained capacity. The public download service can fail independently of
 the VPN; inspect the per-test errors rather than assuming VPN blocking.
 
-Verify `vpn_monitor_udp_loss_ratio`, `vpn_monitor_udp_rtt_seconds` (two VLESS
-routes), and `vpn_monitor_speed_bits_per_second` (four routes) in Prometheus after
+Verify `vpn_monitor_udp_loss_ratio`, `vpn_monitor_udp_rtt_seconds` (GE2 VLESS),
+and `vpn_monitor_speed_bits_per_second` (three routes) in Prometheus after
 tests finish and the next scrape completes. Old disabled history is retained.
 
 To stop the endpoint, disable/stop `vpn-monitor-echo.service` on GE2. Only after

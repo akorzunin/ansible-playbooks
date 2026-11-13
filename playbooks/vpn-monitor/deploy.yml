@@ -7,7 +7,7 @@
     vpn_monitor_source_dir: "{{ playbook_dir }}/../../../vpn-monitor"
     vpn_monitor_install_path: "{{ ansible_facts.env.HOME }}/deploy/vpn-monitor"
     monitoring_install_path: "{{ ansible_facts.env.HOME }}/deploy/ws-logs"
-    vpn_monitor_config: "{{ lookup('ansible.builtin.file', vpn_monitor_source_dir ~ '/config.yaml') | from_yaml }}"
+    vpn_monitor_settings: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/config.yaml') | from_yaml }}"
 
   pre_tasks:
     - name: Validate deployment scope and monitoring opt-in
@@ -18,6 +18,25 @@
           - monitoring_vpn_monitor_enabled | default(false) | bool
         fail_msg: Enable monitoring_vpn_monitor_enabled on remote_workstation in hosts; run without --check.
 
+    - name: Load shared profile credentials and monitor tokens
+      ansible.builtin.include_vars:
+        file: ../sing-box-configs/secrets.vault.yaml
+      no_log: true
+
+    - name: Generate monitor configuration from the tracked settings and shared Vault
+      ansible.builtin.command:
+        argv: [python3, "{{ playbook_dir }}/generate.py"]
+        stdin: "{{ {'settings': vpn_monitor_settings, 'sing_box_secrets': sing_box_secrets} | to_json }}"
+      delegate_to: localhost
+      changed_when: false
+      register: vpn_monitor_generated
+      no_log: true
+
+    - name: Read the generated private configuration
+      ansible.builtin.set_fact:
+        vpn_monitor_config: "{{ vpn_monitor_generated.stdout | from_json }}"
+      no_log: true
+
     - name: Validate the private configuration paths and API token
       ansible.builtin.assert:
         that:
@@ -25,12 +44,11 @@
           - vpn_monitor_config.web_dir == 'web/dist'
           - vpn_monitor_config.history_file == 'data/history.json'
           - vpn_monitor_config.sing_box == 'sing-box'
-          - vpn_monitor_api_token | length >= 24
-        fail_msg: Use port 8081 and project-relative web/history paths; supply the API token in the private .env.
-      vars:
-        vpn_monitor_api_token: >-
-          {{ lookup('ansible.builtin.ini', vpn_monitor_config.api_token_env,
-          type='properties', file=vpn_monitor_source_dir ~ '/.env') }}
+          - vpn_monitor_secrets[vpn_monitor_config.api_token_env] | length >= 24
+          - >-
+            not vpn_monitor_config.get('udp', {}).get('endpoint') or
+            vpn_monitor_secrets[vpn_monitor_config.udp.token_env] | length >= 24
+        fail_msg: Use port 8081 and project-relative paths; supply API/UDP tokens in the shared Vault.
       no_log: true
 
     - name: Check the existing monitoring network
@@ -125,7 +143,10 @@
 
     - name: Install private environment
       ansible.builtin.copy:
-        src: "{{ vpn_monitor_source_dir }}/.env"
+        content: |
+          {% for key, value in vpn_monitor_secrets | dictsort %}
+          {{ key }}={{ value | to_json | replace('$', '$$') }}
+          {% endfor %}
         dest: "{{ vpn_monitor_install_path }}/.env"
         mode: "0600"
         backup: true
@@ -171,9 +192,7 @@
 
     - name: Install the scrape token separately from public Prometheus configuration
       ansible.builtin.copy:
-        content: >-
-          {{ lookup('ansible.builtin.ini', vpn_monitor_config.api_token_env,
-          type='properties', file=vpn_monitor_source_dir ~ '/.env') }}
+        content: "{{ vpn_monitor_secrets[vpn_monitor_config.api_token_env] }}"
         dest: "{{ monitoring_install_path }}/secrets/vpn-monitor-token"
         mode: "0600"
       no_log: true

@@ -55,6 +55,29 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(plays[1]["ansible.builtin.import_playbook"], "../ws-logs/deploy.yml")
         self.assertNotIn("monitoring_replace_ui", plays[1])
 
+    def test_configuration_and_tokens_do_not_depend_on_sibling_private_files(self):
+        play = yaml.safe_load((STACK / "deploy.yml").read_text())[0]
+        self.assertIn("playbook_dir ~ '/config.yaml'", play["vars"]["vpn_monitor_settings"])
+        tasks = [*play["pre_tasks"], *play["tasks"]]
+        vault = next(t for t in tasks if "ansible.builtin.include_vars" in t)
+        self.assertEqual(vault["ansible.builtin.include_vars"]["file"],
+                         "../sing-box-configs/secrets.vault.yaml")
+        self.assertTrue(vault["no_log"])
+        generate = next(t for t in tasks if t.get("register") == "vpn_monitor_generated")
+        self.assertEqual(generate["delegate_to"], "localhost")
+        self.assertTrue(generate["no_log"])
+        self.assertFalse(generate["changed_when"])
+        self.assertIn("sing_box_secrets", generate["ansible.builtin.command"]["stdin"])
+        self.assertNotIn("ansible.builtin.ini", (STACK / "deploy.yml").read_text())
+        for task in tasks:
+            copy = task.get("ansible.builtin.copy", {})
+            if copy.get("dest", "").endswith("/.env"):
+                self.assertNotIn("src", copy)
+                self.assertIn("vpn_monitor_secrets", copy["content"])
+        echo = yaml.safe_load((STACK / "echo-ge2.yml").read_text())[0]
+        self.assertIn("vpn_monitor_secrets", echo["vars"]["vpn_monitor_udp_token"])
+        self.assertNotIn("ansible.builtin.ini", (STACK / "echo-ge2.yml").read_text())
+
     def test_ge2_echo_is_authenticated_sandboxed_and_port_scoped(self):
         play, = yaml.safe_load((STACK / "echo-ge2.yml").read_text())
         self.assertEqual(play["hosts"], "ge2")

@@ -151,8 +151,9 @@ second Grafana against an empty directory and mistake it for a migration.
 
 ## VPN monitor
 
-[Deploy the workstation VPN monitor](../vpn-monitor/README.md) with the sibling
-Go project’s private configuration. Its playbook provisions the loopback-only
+[Deploy the workstation VPN monitor](../vpn-monitor/README.md) using this repo's
+tracked probe settings and shared encrypted sing-box outbounds/monitor tokens.
+The sibling Go project supplies application source only. Its playbook provisions the loopback-only
 web UI on 8081, a bearer-authenticated `vpn-monitor:8081` scrape on the monitoring
 bridge, and **Monitoring / VPN monitor** (`/d/vpn-monitor`). Enable
 `monitoring_vpn_monitor_enabled: true` on `remote_workstation` in private inventory

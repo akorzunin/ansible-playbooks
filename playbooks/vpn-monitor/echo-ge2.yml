@@ -5,11 +5,14 @@
   any_errors_fatal: true
   vars:
     vpn_monitor_source_dir: "{{ playbook_dir }}/../../../vpn-monitor"
-    vpn_monitor_udp_token: >-
-      {{ lookup('ansible.builtin.ini', 'VPN_MONITOR_UDP_TOKEN',
-      type='properties', file=vpn_monitor_source_dir ~ '/.env') }}
+    vpn_monitor_udp_token: "{{ vpn_monitor_secrets.VPN_MONITOR_UDP_TOKEN }}"
 
   pre_tasks:
+    - name: Load the shared monitor tokens
+      ansible.builtin.include_vars:
+        file: ../sing-box-configs/secrets.vault.yaml
+      no_log: true
+
     - name: Validate the endpoint architecture and shared secret
       ansible.builtin.assert:
         that:
