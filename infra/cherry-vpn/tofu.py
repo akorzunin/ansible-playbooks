@@ -312,6 +312,13 @@ def main(args):
         raise ValueError("Usage: inventory [--proxy-command command]")
     if command == "migrate-state":
         raise ValueError("migrate-state takes no arguments")
+    vendor = ROOT / ".tools/providers"
+    if command == "init" and vendor.is_dir() and not any(
+        arg == "-plugin-dir" or arg.startswith("-plugin-dir=") for arg in args[1:]
+    ):
+        # Install the pinned provider from the vendored mirror so a blocked or
+        # offline registry cannot stop init; lock-file checksums still apply.
+        args = [*args, f"-plugin-dir={vendor}"]
     os.execve(executable, [executable, *args], env)
 
 

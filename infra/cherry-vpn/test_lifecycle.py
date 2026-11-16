@@ -139,3 +139,52 @@ class LifecycleOrderingTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse((root / 'published').exists(), result.stdout + result.stderr)
+
+
+class PreflightGuardTests(unittest.TestCase):
+    """Run the real first preflight task so version and inventory drift is caught."""
+
+    def inventory(self, monitoring_server='remote_workstation', monitored=('remote_workstation', 'nk1')):
+        return yaml.safe_dump({'all': {
+            'hosts': {'ge2': None},
+            'children': {
+                'monitoring_servers': {'hosts': {monitoring_server: None}},
+                'monitored_nodes': {'hosts': {name: None for name in monitored}},
+            },
+        }})
+
+    def run_guard(self, *args, inventory=None):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'ansible.cfg').write_text('[defaults]\n')
+            inventory_path = root / 'hosts'
+            inventory_path.write_text(inventory or self.inventory())
+            tasks = yaml.safe_load((PROJECT / 'tasks/lifecycle-preflight.yaml').read_text())
+            play = [{'name': 'Offline preflight guard', 'hosts': 'localhost', 'connection': 'local',
+                     'gather_facts': False, 'tasks': tasks[:1]}]
+            path = root / 'guard.yaml'
+            path.write_text(yaml.safe_dump(play))
+            return subprocess.run(
+                ['ansible-playbook', '-i', str(inventory_path), *args, str(path)],
+                stdin=subprocess.DEVNULL,
+                env={**os.environ, 'ANSIBLE_CONFIG': str(root / 'ansible.cfg')},
+                capture_output=True, text=True, timeout=30,
+            )
+
+    @unittest.skipUnless(shutil.which('ansible-playbook'), 'Ansible required')
+    def test_only_a_plain_supervised_run_passes_the_guard(self):
+        accepted = self.run_guard()
+        self.assertEqual(accepted.returncode, 0, accepted.stdout + accepted.stderr)
+        rejected = [('--check',), ('--limit', 'localhost'),
+                    ('--tags', 'all,extra'), ('--skip-tags', 'extra')]
+        for args in rejected:
+            with self.subTest(args=args):
+                result = self.run_guard(*args)
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    @unittest.skipUnless(shutil.which('ansible-playbook'), 'Ansible required')
+    def test_the_shared_inventory_shape_is_enforced(self):
+        wrong_server = self.run_guard(inventory=self.inventory(monitoring_server='other_host'))
+        self.assertNotEqual(wrong_server.returncode, 0, wrong_server.stdout + wrong_server.stderr)
+        no_monitored = self.run_guard(inventory=self.inventory(monitored=()))
+        self.assertNotEqual(no_monitored.returncode, 0, no_monitored.stdout + no_monitored.stderr)

@@ -12,6 +12,12 @@ The shared profile host/SSH allowlist and monitoring stack are updated.
   (or the existing ignored `infra/cherry-vpn/.tools/tofu` binary), Python with
   PyYAML, Docker, and the Naïve-enabled sing-box core used by the existing VPN
   checks. See the [VPN node guide](../../roles/vpn_node/README.md).
+- Keep the pinned provider available offline under `.tools/providers` (the
+  unpacked `.terraform/providers` layout; ignored by Git). When that directory
+  exists, `init` installs from it as a local plugin directory and still enforces
+  the checksums in `.terraform.lock.hcl`, so a blocked or offline provider
+  registry cannot stop a run. Copy it from a controller that already initialized
+  successfully; without it, `init` contacts `registry.opentofu.org`.
 - Restore `hosts`, `external_vars.yml`, `.ansible_pass`, and existing encrypted
   Cherry/profile Vault files. The wrapper **also** reads `.ansible_pass` from the
   repository root; supplying only `--ask-vault-pass` is insufficient.

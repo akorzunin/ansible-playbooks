@@ -442,6 +442,10 @@ python -m unittest discover -s infra/cherry-vpn -p 'test_*.py'
 
 The infrastructure tests use a mocked provider and cannot order resources.
 
+If the provider registry is unreachable or geo-blocked, keep the unpacked
+provider under `.tools/providers` as described in [LIFECYCLE.md](LIFECYCLE.md);
+the wrapper then installs from that local copy instead of the network.
+
 Two dedicated Ed25519 key pairs were generated once and stored in
 `external_vars.yml` as `CHERRY_VPN_SSH_KEYS`, a Vault-encrypted JSON value containing
 `admin_private`, `admin_public`, `probe_private`, and `probe_public`. That file also

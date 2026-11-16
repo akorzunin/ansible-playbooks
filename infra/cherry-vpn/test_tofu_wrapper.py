@@ -172,6 +172,22 @@ class VaultWrapperTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(known.read_bytes(), before)
 
+    def test_vendored_providers_keep_init_offline_and_explicit_dirs_win(self):
+        result = self.invoke(args=["init", "-backend=false"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["args"], ["init", "-backend=false"])
+        providers = self.project / ".tools/providers"
+        providers.mkdir()
+        result = self.invoke(args=["init", "-backend=false"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["args"],
+                         ["init", "-backend=false", f"-plugin-dir={providers}"])
+        explicit = self.root / "explicit-providers"
+        result = self.invoke(args=["init", "-backend=false", f"-plugin-dir={explicit}"])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["args"],
+                         ["init", "-backend=false", f"-plugin-dir={explicit}"])
+
     def test_no_vault_allows_offline_commands_without_a_token(self):
         result = self.invoke()
         self.assertEqual(result.returncode, 0, result.stderr)

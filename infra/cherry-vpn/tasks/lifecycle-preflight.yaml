@@ -4,11 +4,10 @@
     that:
       - not ansible_check_mode
       - ansible_limit is not defined
-      - ansible_run_tags == ['all']
+      - ansible_run_tags | list == ['all']
       - ansible_skip_tags | length == 0
       - "'ge2' in hostvars"
-      - groups.get('remote_workstation', []) | length == 1
-      - groups.get('monitoring_servers', []) | length == 1
+      - groups.get('monitoring_servers', []) == ['remote_workstation']
       - groups.get('monitored_nodes', []) | length > 0
       - sing_box_extra_outbounds_file | default('') | length == 0
     fail_msg: Use -i hosts, without --check, --limit or tags; do not supply extra profile exports.
