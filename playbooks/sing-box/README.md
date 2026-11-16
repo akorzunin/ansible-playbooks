@@ -1,19 +1,21 @@
-# Workstation sing-box proxy
+# Reusable sing-box proxy
 
 Replaces V2RayA and its obsolete NT1 SSH tunnel with the pinned sing-box 1.14.4
 container, following the migration in `../aurora-devops/playbooks/sing-box/`.
-All proxy traffic uses direct **`ge2-vless`**, with no Aurora, GE1, NT1 or
-unproxied fallback.
+All proxy traffic uses the selected direct VLESS outbound, defaulting to
+**`cherry-vless`**, with no other proxy or unproxied fallback.
 No TUN, host routing changes, panel, host networking or NET_ADMIN are needed.
 
 ## Credentials
 
-The playbook selects exactly one direct VLESS outbound tagged `ge2-vless` from
+The playbook selects exactly one direct VLESS outbound tagged `cherry-vless` from
 `sing_box_secrets.extra_outbounds` in
 `playbooks/sing-box-configs/secrets.vault.yaml`. UUID, server, TLS/Reality and flow
 settings are reused unchanged. No credentials need copying into `external_vars.yml`.
-To rotate them, edit that Vault and redeploy; republish the remote profiles separately
-if those clients should receive the new credentials too.
+Override the tag with `-e sing_box_outbound_tag=ge2-vless` to switch connections.
+Missing, duplicate, non-VLESS or chained (`detour`) outbounds are rejected before
+cutover. To rotate credentials, edit that Vault and redeploy; republish the remote
+profiles separately if those clients should receive the new credentials too.
 
 ## Deploy
 
@@ -24,8 +26,23 @@ ansible-playbook -i hosts --vault-password-file .ansible_pass \
   playbooks/sing-box/deploy.yaml
 ```
 
-Only `remote_workstation` is targeted. `--check` is deliberately refused because
-cutover requires live verification. The playbook:
+By default only `remote_workstation` is targeted. To deploy to another inventory
+host (or group), explicitly override `sing_box_hosts`:
+
+```sh
+ansible-playbook -i hosts --vault-password-file .ansible_pass \
+  playbooks/sing-box/deploy.yaml -e sing_box_hosts=other_host \
+  -e sing_box_outbound_tag=cherry-vless
+```
+
+Other hosts need Docker with Compose, Docker access for `ansible_user`, sudo to
+create the deployment directory, and ports 20170/20171 available (or held by the
+legacy containers this playbook migrates). They receive the same listeners,
+network and container names; use only one deployment per host. `--limit` can
+narrow the selected hosts but cannot expand the default workstation target.
+
+`--check` is deliberately refused because cutover requires live verification.
+The playbook:
 
 1. Pulls the pinned image, stages a private config, runs `sing-box check` with
    that image and validates Compose **before** stopping anything.
@@ -59,9 +76,17 @@ is not exposed.
 
 This deployment does not modify the controller's native sing-box service, TUN,
 remote-profile subscription or the profile publisher. Published platform defaults
-remain independent of this workstation's fixed `ge2-vless` outbound.
+remain independent of this deployment's selected outbound.
 
-## GE2 cutover (2026-11-11)
+## Cherry cutover (2026-11-16)
+
+Deployed `cherry-vless` to `remote_workstation`, replacing its live `ge2-vless`
+configuration. The deployment HTTPS gate passed; subsequent certificate-validated
+HTTPS requests passed through both HTTP port 20171 (Cloudflare 200) and SOCKS
+port 20170 (Google 204). Existing app endpoints are unchanged. These checks do
+not establish long-term stability or application/UDP behavior.
+
+## Historical GE2 cutover (2026-11-11)
 
 Aurora VLESS was reported blocked and GE1 down. Isolated containers using the
 pinned image on the workstation verified both `ge2-vless` and

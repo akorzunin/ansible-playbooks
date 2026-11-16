@@ -19,7 +19,7 @@ IMAGE = COMPOSE["services"]["sing-box"]["image"]
 def vless():
     # Synthetic credentials and public test key, never real Vault inputs.
     return {
-        "type": "vless", "tag": "ge2-vless", "server": "example.com",
+        "type": "vless", "tag": "cherry-vless", "server": "example.com",
         "server_port": 443, "uuid": "00000000-0000-4000-8000-000000000001",
         "flow": "xtls-rprx-vision",
         "tls": {"enabled": True, "server_name": "example.com",
@@ -33,19 +33,25 @@ def render(outbound):
     env = jinja2.Environment(undefined=jinja2.StrictUndefined)
     env.filters["to_nice_json"] = lambda value: json.dumps(value, indent=4)
     return env.from_string((ROOT / "config.json.j2").read_text()).render(
-        ge2_outbounds=[outbound]
+        sing_box_outbounds=[outbound], sing_box_outbound_tag=outbound["tag"]
     )
 
 
 class ConfigurationTests(unittest.TestCase):
-    def test_ge2_outbound_preserved_without_aurora_ge1_or_direct_fallback(self):
+    def test_selected_outbound_preserved_without_unrelated_or_direct_fallback(self):
         outbound = vless()
         config = json.loads(render(outbound))
         self.assertEqual(config["outbounds"], [outbound])
         self.assertEqual(config["route"], {
-            "final": "ge2-vless", "default_domain_resolver": "local"})
+            "final": "cherry-vless", "default_domain_resolver": "local"})
         self.assertNotIn("insecure", config["outbounds"][0]["tls"])
         self.assertNotIn("experimental", config)
+
+    def test_alternative_direct_outbound_controls_final_route(self):
+        outbound = {**vless(), "tag": "ge2-vless"}
+        config = json.loads(render(outbound))
+        self.assertEqual(config["outbounds"], [outbound])
+        self.assertEqual(config["route"]["final"], "ge2-vless")
 
     def test_legacy_listener_ports(self):
         config = json.loads(render(vless()))
@@ -68,35 +74,53 @@ class ConfigurationTests(unittest.TestCase):
 
 
 class MigrationSafeguardTests(unittest.TestCase):
-    def test_shared_vault_selection_and_workstation_scope(self):
-        self.assertEqual(PLAY["hosts"], "remote_workstation")
+    def test_shared_vault_selection_and_configurable_scope(self):
+        env = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        hosts = env.from_string(PLAY["hosts"])
+        self.assertEqual(hosts.render(), "remote_workstation")
+        self.assertEqual(hosts.render(sing_box_hosts="other_host"), "other_host")
+        self.assertEqual(PLAY["vars"]["sing_box_outbound_tag"], "cherry-vless")
         credentials = PLAY["pre_tasks"][1]
         self.assertEqual(credentials["ansible.builtin.include_vars"]["file"],
                          "../sing-box-configs/secrets.vault.yaml")
         self.assertTrue(credentials["no_log"])
-        self.assertIn("selectattr('tag', 'equalto', 'ge2-vless')",
-                      PLAY["vars"]["ge2_outbounds"])
+        self.assertIn("selectattr('tag', 'equalto', sing_box_outbound_tag)",
+                      PLAY["vars"]["sing_box_outbounds"])
         validation = PLAY["pre_tasks"][2]
         self.assertTrue(validation["no_log"])
-        self.assertIn("ge2_outbounds | length == 1",
+        self.assertIn("sing_box_outbounds | length == 1",
                       validation["ansible.builtin.assert"]["that"])
-        self.assertIn("ge2_outbounds[0].type == 'vless'",
+        self.assertIn("sing_box_outbounds[0].type == 'vless'",
                       validation["ansible.builtin.assert"]["that"])
-        self.assertIn("ge2_outbounds[0].detour is not defined",
+        self.assertIn("sing_box_outbounds[0].detour is not defined",
                       validation["ansible.builtin.assert"]["that"])
 
     def test_shared_vault_excludes_blocked_and_unrelated_routes(self):
         env = jinja2.Environment(undefined=jinja2.StrictUndefined)
-        select = env.compile_expression(PLAY["vars"]["ge2_outbounds"].strip()[2:-2])
+        select = env.compile_expression(PLAY["vars"]["sing_box_outbounds"].strip()[2:-2])
         outbound = vless()
-        selected = select(sing_box_secrets={"extra_outbounds": [
+        selected = select(sing_box_outbound_tag="cherry-vless", sing_box_secrets={"extra_outbounds": [
             {**outbound, "tag": "aurora-vless"},
-            {**outbound, "tag": "ge1-vless"},
-            {"type": "naive", "tag": "ge2-naive"},
+            {**outbound, "tag": "ge2-vless"},
+            {"type": "naive", "tag": "cherry-naive"},
             outbound,
         ]})
         self.assertEqual(selected, [outbound])
         self.assertEqual(json.loads(render(selected[0]))["outbounds"], [outbound])
+
+    def test_missing_duplicate_and_chained_outbounds_fail_validation(self):
+        env = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        select = env.compile_expression(PLAY["vars"]["sing_box_outbounds"].strip()[2:-2])
+        checks = [env.compile_expression(check) for check in
+                  PLAY["pre_tasks"][2]["ansible.builtin.assert"]["that"]]
+        outbound = vless()
+        for candidates in ([], [outbound, outbound],
+                           [{**outbound, "detour": "cherry-naive"}],
+                           [{**outbound, "type": "naive"}]):
+            with self.subTest(candidates=candidates):
+                selected = select(sing_box_outbound_tag="cherry-vless",
+                                  sing_box_secrets={"extra_outbounds": candidates})
+                self.assertFalse(all(check(sing_box_outbounds=selected) for check in checks))
 
     def test_candidate_validated_before_activation(self):
         tasks = PLAY["tasks"]
@@ -156,7 +180,7 @@ class PinnedImageTests(unittest.TestCase):
                 capture_output=True, text=True, timeout=30,
             )
 
-    def test_ge2_vless_shape_validates(self):
+    def test_selected_vless_shape_validates(self):
         result = self.check_config(vless())
         self.assertEqual(result.returncode, 0, result.stderr)
 
