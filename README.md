@@ -43,12 +43,14 @@ VPN services now run on the existing ge2 node through the reusable
 SSH-via-workstation are also selectable, with Aurora retained. Private URLs/tokens
 are unchanged; refresh enrolled clients. The dyn1 SSH hop to nt1 is no longer
 available. Active local clients and the workstation Docker proxy were not changed.
-See the [current status](infra/cherry-vpn/README.md#current-status)
-and [controller handoff instructions](infra/cherry-vpn/README.md#dropbox-inputs-and-switching-controllers).
-To create or retire a new `dyn1`, use the **[Ansible lifecycle instructions](infra/cherry-vpn/LIFECYCLE.md)**:
-`infra/cherry-vpn/provision.yaml` and `infra/cherry-vpn/destroy.yaml` handle
-OpenTofu plan approval, configuration, checks, profiles, monitoring and state
-backups. GE2's server is untouched; deployment preserves the current profile default.
+See the [dynamic-node guide](infra/cherry-vpn/README.md) and
+[controller handoff instructions](infra/cherry-vpn/README.md#encrypted-state-and-controller-handoff).
+The updated **[Ansible lifecycle](infra/cherry-vpn/LIFECYCLE.md)** supports
+`-e dyn_node=dyn1` / `dyn2` / etc., isolated state and optional region selection.
+It publishes provider-independent `dynN-*` choices without Hysteria or
+VLESS-over-Naïve, and checks direct VLESS UDP/STUN. Existing live `cherry-*`
+configurations are not changed by this repository update; migrate dyn1 in a
+supervised window. Destruction requires an explicit surviving exit, not GE2.
 
 ## Setup
 

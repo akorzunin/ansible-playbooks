@@ -1,13 +1,13 @@
 ---
-# Existing, bootstrapped Cherry only. No allocation or active-client changes.
-- name: Validate Cherry monitoring inputs before changing either host
+# Existing, bootstrapped dynamic node only. No allocation or active-client changes.
+- name: Validate dynamic monitoring inputs before changing either host
   hosts: localhost
   connection: local
   gather_facts: false
   become: false
   any_errors_fatal: true
   tasks:
-    - name: Require the shared inventory and the applied Cherry inventory
+    - name: Require the shared inventory and the applied dynamic inventory
       ansible.builtin.assert:
         that:
           - not ansible_check_mode
@@ -17,16 +17,17 @@
           - groups.get('monitored_nodes', []) | length > 0
           - monitoring_workstation_allowed_sources | default([]) | length > 0
           - (groups['monitoring_servers'] | first) in groups['monitored_nodes']
-        fail_msg: Load hosts (including monitoring groups) and private/inventory.yaml; run without --limit or --check.
+        fail_msg: Load hosts and the selected node inventory; run without --limit or --check.
 
-- name: Install Cherry host and container metrics
+- name: Install dynamic host and container metrics
   hosts: vpn_test
   become: true
   any_errors_fatal: true
+  vars_files: [vars.yaml]
   vars:
     ansible_user: vpnadmin
     ansible_host_key_checking: true
-    monitoring_node: cherry
+    monitoring_node: "{{ dyn_name }}"
     monitoring_telegraf_allowed_sources: "{{ monitoring_workstation_allowed_sources }}"
   roles:
     - monitoring_client
@@ -34,25 +35,24 @@
     - name: Flush collector changes before verification
       ansible.builtin.meta: flush_handlers
 
-    - name: Register Cherry for this monitoring deployment
+    - name: Register the dynamic node for this monitoring deployment
       ansible.builtin.add_host:
         name: "{{ inventory_hostname }}"
         groups: monitored_nodes
         ansible_user: vpnadmin
         ansible_host_key_checking: true
-        monitoring_node: cherry
+        monitoring_node: "{{ dyn_name }}"
         monitoring_enabled: true
         monitoring_availability_alert: true
         monitoring_client_telegraf_port: 9273
         monitoring_telegraf_allowed_sources: "{{ monitoring_workstation_allowed_sources }}"
 
-    # A top-level group extends monitored_nodes without rewriting private YAML.
-    - name: Persist Cherry host monitoring membership
+    - name: Persist dynamic host monitoring membership
       ansible.builtin.blockinfile:
         path: "{{ playbook_dir }}/../../hosts"
-        marker: "# {mark} ANSIBLE CHERRY MONITORING"
+        marker: "# {mark} ANSIBLE MONITORING {{ dyn_name }}"
         block: |
-          cherry_monitoring:
+          {{ dyn_name }}_monitoring:
             children:
               monitored_nodes:
                 hosts:
@@ -63,7 +63,7 @@
                     ansible_host_key_checking: true
                     ansible_ssh_private_key_file: {{ ansible_ssh_private_key_file | to_json }}
                     ansible_ssh_common_args: {{ ansible_ssh_common_args | to_json }}
-                    monitoring_node: cherry
+                    monitoring_node: {{ dyn_name | to_json }}
                     monitoring_enabled: true
                     monitoring_availability_alert: true
                     monitoring_client_telegraf_port: 9273
@@ -73,27 +73,42 @@
       delegate_to: localhost
       become: false
 
+    - name: Remove the old provider-named dyn1 monitoring block
+      ansible.builtin.blockinfile:
+        path: "{{ playbook_dir }}/../../hosts"
+        marker: "# {mark} ANSIBLE CHERRY MONITORING"
+        state: absent
+        backup: true
+        mode: "0600"
+      when: dyn_name == 'dyn1'
+      delegate_to: localhost
+      become: false
+
+    - name: Reload persisted targets to drop the legacy monitoring alias
+      ansible.builtin.meta: refresh_inventory
+
 - name: Update shared monitoring targets and Grafana alerts
   ansible.builtin.import_playbook: ../../playbooks/ws-logs/deploy.yml
 
-- name: Verify Cherry monitoring end to end
+- name: Verify dynamic monitoring end to end
   hosts: monitoring_servers
   any_errors_fatal: true
   gather_facts: false
+  vars_files: [vars.yaml]
   tasks:
     - name: Wait for host and container metrics in Prometheus
       vars:
-        cherry_monitor_query: >-
-          (up{job="telegraf",node="cherry"} == 1)
+        dyn_monitor_query: >-
+          (up{job="telegraf",node="{{ dyn_name }}"} == 1)
           and on (node) mem_total{job="telegraf"}
           and on (node) docker_container_mem_usage{job="telegraf"}
       ansible.builtin.uri:
-        url: "http://127.0.0.1:9090/api/v1/query?query={{ cherry_monitor_query | urlencode }}"
+        url: "http://127.0.0.1:9090/api/v1/query?query={{ dyn_monitor_query | urlencode }}"
         use_proxy: false
-      register: cherry_monitor_result
+      register: dyn_monitor_result
       until: >-
-        cherry_monitor_result.status == 200 and
-        cherry_monitor_result.json.status == 'success' and
-        cherry_monitor_result.json.data.result | length > 0
+        dyn_monitor_result.status == 200 and
+        dyn_monitor_result.json.status == 'success' and
+        dyn_monitor_result.json.data.result | length > 0
       retries: 18
       delay: 10

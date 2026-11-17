@@ -27,7 +27,8 @@ class CherryAccessTests(unittest.TestCase):
             playbook = root / 'persist.yaml'
             playbook.write_text(yaml.safe_dump([{
                 'name': 'Offline retry persistence', 'hosts': 'localhost', 'connection': 'local',
-                'gather_facts': False, 'vars': {'ansible_user': 'vpnadmin'}, 'tasks': [task],
+                'gather_facts': False,
+                'vars': {'ansible_user': 'vpnadmin', 'dyn_private': str(root / 'private')}, 'tasks': [task],
             }]))
             for _ in range(2):
                 result = subprocess.run(
@@ -59,7 +60,8 @@ class CherryAccessTests(unittest.TestCase):
             playbook = project / "persist.yaml"
             playbook.write_text(yaml.safe_dump([{
                 "name": "Offline access persistence", "hosts": "localhost",
-                "connection": "local", "gather_facts": False, "tasks": [task],
+                "connection": "local", "gather_facts": False,
+                "vars": {"dyn_name": "dyn1"}, "tasks": [task],
             }]))
             variables = {
                 "ansible_host": "192.0.2.1", "ansible_user": "vpnadmin",

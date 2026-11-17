@@ -1,4 +1,4 @@
-"""Offline checks for the opt-in dyn1 Hysteria 2 trial."""
+"""Offline checks for reusable Hysteria support; dynamic nodes do not enable it."""
 import json
 from pathlib import Path
 import shutil
@@ -11,16 +11,16 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
 ROLE = ROOT / "roles/vpn_node"
-PLAYBOOK = ROOT / "infra/cherry-vpn/hysteria2.yaml"
 
 
 class Hysteria2Tests(unittest.TestCase):
     def setUp(self):
-        self.play = yaml.safe_load(PLAYBOOK.read_text())[0]
         self.tasks = yaml.safe_load((ROLE / "tasks/hysteria2.yaml").read_text())
         self.variables = {
             **yaml.safe_load((ROLE / "defaults/main.yaml").read_text()),
-            **self.play["vars"],
+            "vpn_node_name": "fixture",
+            "vpn_node_domain": "vpn.example.org",
+            "vpn_node_client_dir": "/fixture/clients",
             "vpn_node_public_address": "192.0.2.10",
             "vpn_node_hysteria2_password": "fixture-password-" * 4,
             "vpn_node_hysteria2_certificate_dir": "/fixture/domain-certificates",
@@ -71,8 +71,6 @@ class Hysteria2Tests(unittest.TestCase):
         self.assertRegex(service["image"], r"@sha256:[0-9a-f]{64}$")
 
     def test_trial_never_changes_active_client_or_existing_compose_project(self):
-        self.assertEqual(self.play["hosts"], "cherry_vpn_test")
-        self.assertTrue(self.play["vars"]["ansible_host_key_checking"])
         client = json.loads(self.render("hysteria2-client.json.j2"))
         self.assertEqual(client["inbounds"], [{
             "type": "mixed", "tag": "trial", "listen": "127.0.0.1", "listen_port": 12343,
@@ -86,9 +84,6 @@ class Hysteria2Tests(unittest.TestCase):
         names = [t["name"] for t in self.tasks]
         self.assertLess(names.index("Validate the server candidate and certificate access before activation"),
                         names.index("Activate the validated Hysteria 2 server configuration"))
-        credential = self.play["pre_tasks"][1]
-        self.assertTrue(credential["no_log"])
-        self.assertTrue(credential["ansible.builtin.include_vars"]["file"].endswith("/hysteria2.vault.yaml"))
 
     def test_full_flow_reuses_the_compose_deployment_after_certificate_issuance(self):
         main = yaml.safe_load((ROLE / "tasks/main.yaml").read_text())
@@ -96,11 +91,11 @@ class Hysteria2Tests(unittest.TestCase):
         self.assertLess(imports.index("proxies.yaml"), imports.index("hysteria2.yaml"))
         self.assertLess(imports.index("hysteria2.yaml"), imports.index("clients.yaml"))
         full = yaml.safe_load((ROOT / "infra/cherry-vpn/deploy.yaml").read_text())[1]
-        credential = next(task for task in full["pre_tasks"]
-                          if task.get("ansible.builtin.include_vars", {}).get("file", "").endswith("/hysteria2.vault.yaml"))
-        self.assertTrue(credential["no_log"])
-        # Replacement consumes the shared Vault; it must never mint a new password.
-        self.assertFalse(any("ansible.builtin.command" in task for task in full["pre_tasks"]))
+        self.assertFalse(full['vars']['vpn_node_hysteria2_enabled'])
+        self.assertFalse(any(task.get('ansible.builtin.include_vars', {}).get('file', '').endswith('/hysteria2.vault.yaml')
+                             for task in full['pre_tasks']))
+        cleanup = next(task for task in full['pre_tasks'] if 'community.docker.docker_compose_v2' in task)
+        self.assertEqual(cleanup['community.docker.docker_compose_v2']['state'], 'absent')
         self.assertIn("vpn_node_hysteria2_password | length >= 32", self.tasks[0]["ansible.builtin.assert"]["that"])
         optional = next(t for t in main if t.get('ansible.builtin.import_tasks') == 'hysteria2.yaml')
         self.assertEqual(optional['when'], 'vpn_node_hysteria2_enabled | bool')

@@ -26,6 +26,18 @@ variable "ssh_host_key" {
   }
 }
 
+# Null preserves the applied dyn1 hostname/SSH registration without an update.
+variable "node_name" {
+  description = "Provider-independent identity for newly initialized dynamic nodes."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.node_name == null ? true : can(regex("^dyn[1-9][0-9]*$", var.node_name))
+    error_message = "Use dyn1, dyn2, etc."
+  }
+}
+
 variable "project_id" {
   description = "Existing dedicated, disposable Cherry Servers project; never the applications project."
   type        = number
@@ -45,6 +57,12 @@ variable "plan" {
     condition     = contains(["B1-1-1gb-20s-shared", "B2-1-1gb-20s-shared"], var.plan)
     error_message = "Budget test permits only 1 vCPU / 1 GB RAM / 20 GB shared VPS plans."
   }
+}
+
+variable "allocation_checks" {
+  description = "Check live price/stock for VM creation. Lifecycle skips these for existing nodes and rejects unchecked creation."
+  type        = bool
+  default     = true
 }
 
 variable "region" {

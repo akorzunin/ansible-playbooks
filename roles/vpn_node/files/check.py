@@ -17,7 +17,8 @@ import time
 def connections(data, node):
     outbounds = copy.deepcopy(data if isinstance(data, list) else data['outbounds'])
     tags = {o['tag'] for o in outbounds}
-    if node + '-vless-via-naive' not in tags and {node + '-vless', node + '-naive'} <= tags:
+    if (not re.fullmatch(r'dyn[1-9][0-9]*', node)
+            and node + '-vless-via-naive' not in tags and {node + '-vless', node + '-naive'} <= tags):
         vless = next(o for o in outbounds if o['tag'] == node + '-vless')
         outbounds.append({**copy.deepcopy(vless), 'tag': node + '-vless-via-naive', 'detour': node + '-naive'})
     return [o for o in outbounds if o['type'] not in ('selector', 'direct', 'urltest')]
@@ -143,6 +144,8 @@ def main():
     ipaddress.ip_address(args.expected_ip)
     if not re.fullmatch(r'[a-z][a-z0-9-]{0,62}', args.node):
         parser.error('Invalid node name')
+    if not args.input.is_file():
+        parser.error(f'Client export not found: {args.input}; complete VPN deployment before running checks')
     outbounds = connections(json.loads(args.input.read_text()), args.node)
     managed = {args.node + '-' + kind for kind in
                ('ssh', 'naive', 'vless', 'hysteria2', 'vless-via-naive', 'ssh-via-workstation')}

@@ -1,11 +1,12 @@
 ---
-- name: Restore dedicated Cherry SSH keys on this controller
+- name: Restore dynamic node SSH keys on this controller
   hosts: localhost
   any_errors_fatal: true
   connection: local
   gather_facts: false
   become: false
   vars_files:
+    - vars.yaml
     - "{{ playbook_dir }}/../../external_vars.yml"
   vars:
     cherry_vpn_keys: "{{ CHERRY_VPN_SSH_KEYS | from_json }}"
@@ -22,14 +23,14 @@
 
     - name: Create a private local SSH directory
       ansible.builtin.file:
-        path: "{{ playbook_dir }}/private/ssh"
+        path: "{{ dyn_private }}/ssh"
         state: directory
         mode: "0700"
 
     - name: Restore the dedicated keys without plaintext Ansible output or diffs
       ansible.builtin.copy:
         content: "{{ cherry_vpn_keys[item.key] }}"
-        dest: "{{ playbook_dir }}/private/ssh/{{ item.name }}"
+        dest: "{{ dyn_private }}/ssh/{{ item.name }}"
         mode: "0600"
       loop:
         - {name: admin, key: admin_private}
@@ -45,7 +46,7 @@
           - ssh-keygen
           - -y
           - -f
-          - "{{ playbook_dir }}/private/ssh/{{ item }}"
+          - "{{ dyn_private }}/ssh/{{ item }}"
       loop: [admin, probe]
       register: cherry_vpn_derived_keys
       changed_when: false
@@ -63,5 +64,5 @@
     - name: Load the shared project ID into local OpenTofu inputs
       ansible.builtin.copy:
         content: "{{ {'project_id': CHERRY_PROJECT_ID | int} | to_nice_json }}\n"
-        dest: "{{ playbook_dir }}/project.auto.tfvars.json"
+        dest: "{{ dyn_root }}/project.auto.tfvars.json"
         mode: "0600"

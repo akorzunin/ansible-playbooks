@@ -123,3 +123,28 @@ run "refuse_larger_vm" {
 
   expect_failures = [var.plan]
 }
+
+run "existing_node_fixture" {
+  command = apply
+}
+
+run "existing_node_without_available_stock" {
+  command = plan
+
+  variables {
+    allocation_checks = false
+  }
+
+  override_data {
+    target = data.cherryservers_plan.vpn
+    values = {
+      pricing           = [{ currency = "EUR", price = 0.016, unit = "Hourly" }]
+      available_regions = []
+    }
+  }
+
+  assert {
+    condition     = cherryservers_server.vpn.id != null && cherryservers_server.vpn.id != ""
+    error_message = "An existing VM must remain manageable when new allocations are unavailable."
+  }
+}

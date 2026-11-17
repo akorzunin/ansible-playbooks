@@ -5,6 +5,7 @@ import copy
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -94,11 +95,16 @@ def generate(private_dir, connections, tokens, extra_outbounds=(), default_outbo
     ):
         raise ValueError("Extra outbounds must be a list of sing-box outbound objects")
     extra_outbounds = list(extra_outbounds)
-    # VLESS relays UDP inside a TCP stream even when its Naïve carrier cannot
-    # relay UDP itself. Derive trial-node chains so credentials cannot drift.
+    # Dynamic nodes publish only direct VLESS; do not recreate the retired
+    # VLESS-over-Naive trial. Static nodes retain their existing chains.
+    if any(isinstance(o.get('tag'), str)
+           and re.fullmatch(r'dyn[1-9][0-9]*-(hysteria2|vless-via-naive)', o['tag'])
+           for o in extra_outbounds):
+        raise ValueError('Retired dynamic protocol; register the node again')
     for outbound in list(extra_outbounds):
         tag = outbound.get("tag")
-        if outbound["type"] == "vless" and isinstance(tag, str) and tag.endswith("-vless"):
+        if (outbound["type"] == "vless" and isinstance(tag, str) and tag.endswith("-vless")
+                and not re.fullmatch(r'dyn[1-9][0-9]*-vless', tag)):
             carrier = tag.removesuffix("-vless") + "-naive"
             if not outbound.get("detour") and any(
                 o["type"] == "naive" and o.get("tag") == carrier for o in extra_outbounds

@@ -44,7 +44,7 @@ locals {
 }
 
 resource "cherryservers_ssh_key" "admin" {
-  name       = "vpn-test-admin"
+  name       = "${coalesce(var.node_name, "vpn-test")}-admin"
   public_key = trimspace(file(pathexpand(var.ssh_public_key_path)))
 }
 
@@ -53,7 +53,7 @@ resource "cherryservers_server" "vpn" {
   project_id      = var.project_id
   plan            = var.plan
   region          = var.region
-  hostname        = "vpn-test"
+  hostname        = coalesce(var.node_name, "vpn-test")
   image           = "debian_13_64bit"
   cycle           = "hourly"
   spot_instance   = false
@@ -83,7 +83,7 @@ resource "cherryservers_server" "vpn" {
     create_before_destroy = false
 
     precondition {
-      condition = try(
+      condition = !var.allocation_checks || try(
         local.hourly_price.currency == "EUR" &&
         local.hourly_price.price > 0 && local.hourly_price.price <= 0.015,
         false
@@ -92,7 +92,7 @@ resource "cherryservers_server" "vpn" {
     }
 
     precondition {
-      condition = anytrue([
+      condition = !var.allocation_checks || anytrue([
         for region in data.cherryservers_plan.vpn.available_regions :
         region.slug == var.region && region.stock_qty > 0
       ])

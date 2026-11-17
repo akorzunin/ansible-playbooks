@@ -13,7 +13,7 @@ PLAYBOOK = pathlib.Path(__file__).with_name("bootstrap.yaml")
 
 class DeploymentTests(unittest.TestCase):
     def setUp(self):
-        self.bootstrap, self.secure = yaml.safe_load(PLAYBOOK.read_text())
+        self.bootstrap, self.secure, self.gate = yaml.safe_load(PLAYBOOK.read_text())
         self.ssh_tasks = yaml.safe_load((PLAYBOOK.parents[2] / 'roles/vpn_node/tasks/ssh.yaml').read_text())
 
     def task(self, name):
@@ -23,7 +23,15 @@ class DeploymentTests(unittest.TestCase):
         connection = self.bootstrap["tasks"][-1]["ansible.builtin.add_host"]
         self.assertEqual(connection["groups"], "vpn_test_admin")
         self.assertTrue(connection["ansible_host_key_checking"])
-        self.assertIn("ControlPath=none", connection["ansible_ssh_args"])
+        self.assertIn("ControlPath={{ vpn_admin_socket.path }}/%C", connection["ansible_ssh_args"])
+        self.assertIn('ControlMaster=auto', connection['ansible_ssh_args'])
+        self.assertFalse(connection['dyn_admin_verified'])
+        self.assertFalse(connection['dyn_vpn_deployed'])
+        socket = self.bootstrap['tasks'][-2]
+        self.assertEqual(socket['ansible.builtin.tempfile']['state'], 'directory')
+        self.assertEqual(socket['delegate_to'], 'localhost')
+        self.assertFalse(socket['become'])
+        self.assertEqual(self.secure['pre_tasks'][0]['ansible.builtin.wait_for_connection']['timeout'], 120)
         self.assertIn("PreferredAuthentications=publickey", connection["ansible_ssh_args"])
         self.assertIn("BatchMode=yes", connection["ansible_ssh_args"])
         self.assertEqual(self.secure["hosts"], "vpn_test_admin")
@@ -37,8 +45,13 @@ class DeploymentTests(unittest.TestCase):
         self.assertTrue(self.secure["become"])
         self.assertEqual(self.secure["become_flags"], "-n")
         self.assertEqual(tasks[-1]["ansible.builtin.import_role"], {"name": "vpn_node", "tasks_from": "ssh"})
-        self.assertEqual(self.ssh_tasks[-2]["ansible.builtin.meta"], "reset_connection")
+        self.assertEqual(self.ssh_tasks[-3]["ansible.builtin.meta"], "reset_connection")
+        self.assertEqual(self.ssh_tasks[-2]['ansible.builtin.wait_for_connection']['timeout'], 120)
+        self.assertFalse(self.ssh_tasks[-2]['become'])
         self.assertEqual(self.ssh_tasks[-1]["ansible.builtin.command"], "id -u")
+        self.assertTrue(self.secure['post_tasks'][-1]['ansible.builtin.set_fact']['dyn_admin_verified'])
+        self.assertEqual(self.gate['hosts'], 'localhost')
+        self.assertTrue(self.gate['any_errors_fatal'])
 
     def test_disabled_cloud_init_requires_both_provider_marker_and_python(self):
         task = next(t for t in self.bootstrap["tasks"] if "ansible.builtin.raw" in t)

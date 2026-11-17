@@ -79,7 +79,7 @@ class MigrationSafeguardTests(unittest.TestCase):
         hosts = env.from_string(PLAY["hosts"])
         self.assertEqual(hosts.render(), "remote_workstation")
         self.assertEqual(hosts.render(sing_box_hosts="other_host"), "other_host")
-        self.assertEqual(PLAY["vars"]["sing_box_outbound_tag"], "cherry-vless")
+        self.assertEqual(PLAY["vars"]["sing_box_outbound_tag"], "dyn1-vless")
         credentials = PLAY["pre_tasks"][1]
         self.assertEqual(credentials["ansible.builtin.include_vars"]["file"],
                          "../sing-box-configs/secrets.vault.yaml")

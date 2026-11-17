@@ -232,10 +232,10 @@ is replaced. Keep private keys/passwords in Vault, not templates or command-line
 arguments. SSH outbounds must pin the independently verified server `host_key`;
 only distribute an unprivileged tunnel key, never an administrator key.
 
-For each extra `<node>-vless` with a matching `<node>-naive` carrier, generation
-also derives `<node>-vless-via-naive` with identical VLESS credentials and a Naïve
-`detour`. Removing either connection removes the derived choice; update
-`default_outbound` too if it names that chain. Generated tags must be unique. The
+For static nodes, each extra `<node>-vless` with a matching `<node>-naive` carrier
+also derives `<node>-vless-via-naive` with identical credentials and a Naïve
+`detour`. Dynamic `dynN` nodes do **not** derive this retired trial chain.
+Removing either connection removes the derived choice; update `default_outbound` too if it names that chain. Generated tags must be unique. The
 carrier only needs TCP CONNECT, not native UDP support.
 
 The Vault also contains a pinned `workstation-hop` SSH outbound in `extra_outbounds`.
@@ -271,9 +271,12 @@ old outbounds. Clients still need to refresh. There is no nt1 fallback, and
 publishing without selectable exits fails without replacing existing profiles.
 OpenTofu does not change this Vault file or publish on its own. See the [Cherry trial guide](../../infra/cherry-vpn/README.md).
 
-The dynamic-node flow also exports `cherry-hysteria2` (UDP/443, Brutal) alongside
-SSH, Naïve and VLESS. It remains an additional manual choice, with existing defaults
-unchanged; no automatic failover or publication is introduced.
+The updated [dynamic-node lifecycle](../../infra/cherry-vpn/LIFECYCLE.md) exports
+only `dynN-ssh`, `dynN-naive` and `dynN-vless` (with XUDP). Hysteria and
+VLESS-over-Naïve are removed from dynamic publication. A supervised dyn1
+registration migrates legacy `cherry-*` names/defaults atomically while preserving
+enrollment tokens. Repository changes do not alter existing live publication;
+static workstation/Discord configs require a separate supervised update.
 
 The [`vpn_node` role](../../roles/vpn_node/README.md) can export a private JSON
 list with SSH, Naïve and VLESS connections. Publish that list without modifying
@@ -282,7 +285,7 @@ the shared profile Vault:
 ```sh
 ansible-playbook -i hosts --vault-password-file .ansible_pass \
   playbooks/sing-box-configs/deploy.yaml \
-  -e sing_box_extra_outbounds_file=infra/cherry-vpn/private/cherry-outbounds.json
+  -e sing_box_extra_outbounds_file=infra/cherry-vpn/private/dyn1-outbounds.json
 ```
 
 The file entries are appended to any Vault `extra_outbounds`; duplicate tags are

@@ -19,21 +19,21 @@ class CherryMonitoringTests(unittest.TestCase):
         env = jinja2.Environment(undefined=jinja2.StrictUndefined)
         env.filters["to_json"] = json.dumps
         rendered = env.from_string(block).render(
-            inventory_hostname="cherry_vpn_test", ansible_host="192.0.2.10",
+            dyn_name="dyn2", inventory_hostname="dyn2", ansible_host="192.0.2.10",
             ansible_ssh_private_key_file="/private/admin", ansible_ssh_common_args="-o StrictHostKeyChecking=yes",
             monitoring_workstation_allowed_sources=["198.51.100.5/32"],
         )
         overlay = yaml.safe_load((ROOT / "hosts.example.yml").read_text() + "\n" + rendered)
-        cherry = overlay["cherry_monitoring"]["children"]["monitored_nodes"]["hosts"]["cherry_vpn_test"]
-        self.assertEqual(cherry["monitoring_node"], "cherry")
+        cherry = overlay["dyn2_monitoring"]["children"]["monitored_nodes"]["hosts"]["dyn2"]
+        self.assertEqual(cherry["monitoring_node"], "dyn2")
         self.assertTrue(cherry["monitoring_availability_alert"])
         self.assertEqual(cherry["ansible_user"], "vpnadmin")
         self.assertNotIn("cherry_probe", overlay)
 
     def test_verification_requires_host_and_container_metrics(self):
         plays = yaml.safe_load((PROJECT / "monitoring.yaml").read_text())
-        query = plays[-1]["tasks"][0]["vars"]["cherry_monitor_query"]
-        self.assertIn('up{job="telegraf",node="cherry"}', query)
+        query = plays[-1]["tasks"][0]["vars"]["dyn_monitor_query"]
+        self.assertIn('up{job="telegraf",node="{{ dyn_name }}"}', query)
         self.assertIn('mem_total{job="telegraf"}', query)
         self.assertIn('docker_container_mem_usage{job="telegraf"}', query)
         self.assertNotIn("vpn_probe", query)

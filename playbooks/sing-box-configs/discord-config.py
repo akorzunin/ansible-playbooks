@@ -7,9 +7,9 @@ import sys
 
 def make_config(profile):
     outbounds = {o["tag"]: o for o in profile["outbounds"]}
-    outbound = copy.deepcopy(outbounds["cherry-vless"])
+    outbound = copy.deepcopy(outbounds["dyn1-vless"])
     if outbound["type"] != "vless" or outbound.get("detour"):
-        raise ValueError("Expected the direct Cherry VLESS outbound")
+        raise ValueError("Expected the direct dyn1 VLESS outbound")
     # 0x2024 is the main host sing-box TUN's bypass mark; keep it in sync
     # if that service's routing mark changes. No carrier or wired fallback.
     # Vision requires XUDP for UDP; plain UDP streams fail with flow mismatch.
@@ -45,4 +45,4 @@ if __name__ == "__main__":
     try:
         print(json.dumps(make_config(json.load(sys.stdin)), indent=2))
     except (KeyError, ValueError, TypeError):
-        sys.exit("Cannot build Discord config; generate the Cherry profiles first.")
+        sys.exit("Cannot build Discord config; generate the dyn1 profiles first.")

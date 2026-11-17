@@ -7,7 +7,7 @@
     project_dir: /srv/deploy/sing-box
     sing_box_image: "{{ (lookup('file', 'compose.yaml') | from_yaml).services['sing-box'].image }}"
     sing_box_health_url: https://www.gstatic.com/generate_204
-    sing_box_outbound_tag: cherry-vless
+    sing_box_outbound_tag: dyn1-vless
     sing_box_outbounds: >-
       {{ sing_box_secrets.extra_outbounds | selectattr('tag', 'equalto', sing_box_outbound_tag) | list }}
 

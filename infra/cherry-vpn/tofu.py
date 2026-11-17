@@ -7,14 +7,19 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import re
+import secrets
 import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 
-ROOT = Path(__file__).resolve().parent
-PASSWORD = ROOT.parent.parent / ".ansible_pass"
+PROJECT = Path(__file__).resolve().parent
+ROOT = PROJECT
+NODE = "dyn1"
+PASSWORD = PROJECT.parent.parent / ".ansible_pass"
 spec = importlib.util.spec_from_file_location("bootstrap", ROOT / "prepare-bootstrap.py")
 bootstrap = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bootstrap)
@@ -29,7 +34,7 @@ def vault_bytes(path):
 
 def environment(command, args):
     env = dict(os.environ)
-    token_path = ROOT / "cherry-token.vault"
+    token_path = PROJECT / "cherry-token.vault"
     if not env.get("CHERRY_API_KEY") and token_path.is_file():
         token = vault_bytes(token_path).decode().strip()
         if not token or any(character.isspace() for character in token):
@@ -106,20 +111,27 @@ def transfer_state(command, env):
     candidates = [Path(override)] if override else [
         Path.home() / "Dropbox/ssh", Path.home() / "storage/shared/Dropbox/ssh",
     ]
-    shared = next((path / "cherry-vpn" for path in candidates if path.is_dir()), None)
+    shared = next((path / "cherry-vpn" for path in candidates if (path / "cherry-vpn").is_dir()), None)
+    if shared is not None and NODE != "dyn1":
+        shared = shared / "nodes" / NODE
     if shared is None or not shared.is_dir():
         raise ValueError("Dropbox cherry-vpn directory not found; run install.sh or set DROPBOX_SSH_DIR")
     source_dir, target_dir = (ROOT, shared) if command == "backup-state" else (shared, ROOT)
     pending = []
-    for name in ("terraform.tfstate.backup", "terraform.tfstate"):
+    names = ("terraform.tfstate.backup", "terraform.tfstate")
+    if NODE != "dyn1":
+        names = ("secrets.vault.yaml", "terraform.tfvars", "node.auto.tfvars.json", *names)
+    for name in names:
         source, target = source_dir / name, target_dir / name
         if source.is_symlink() or target.is_symlink():
             raise ValueError("State snapshots must be regular files, not symlinks")
         if name.endswith(".backup") and not source.exists():
             continue
         content = source.read_text()
-        if not encrypted_content(content):
+        if name.startswith("terraform.tfstate") and not encrypted_content(content):
             raise ValueError("Only encrypted OpenTofu state can be transferred")
+        if name == "secrets.vault.yaml" and not content.startswith("$ANSIBLE_VAULT;"):
+            raise ValueError("Only Vault-encrypted bootstrap inputs can be transferred")
         if command == "restore-state" and target.exists() and target.read_text() != content:
             raise ValueError("Different local state exists; archive it outside the state paths before restoring")
         pending.append((target, content))
@@ -211,8 +223,9 @@ def inventory(executable, env, data, proxy_command=None):
     user = "root"
     inventory_path = directory / "inventory.yaml"
     try:
-        old = json.loads(inventory_path.read_text())["all"]["children"]["vpn_test"]["hosts"]["cherry_vpn_test"]
-        if old.get("cherry_server_id") == str(server["id"]):
+        old = json.loads(inventory_path.read_text())["all"]["children"]["vpn_test"]["hosts"]
+        old = old.get(NODE, old.get("cherry_vpn_test", {}))
+        if old.get("provider_server_id", old.get("cherry_server_id")) == str(server["id"]):
             if old.get("ansible_user") == "vpnadmin":
                 user = "vpnadmin"
             if proxy_command is None:
@@ -221,15 +234,15 @@ def inventory(executable, env, data, proxy_command=None):
     except (OSError, ValueError, KeyError, TypeError):
         pass
     host = {
-        "ansible_host": address, "ansible_user": user, "cherry_server_id": str(server["id"]),
+        "ansible_host": address, "ansible_user": user, "provider_server_id": str(server["id"]),
         "ansible_python_interpreter": "/usr/bin/python3",
         "ansible_ssh_private_key_file": str(directory / "ssh/admin"),
         "ansible_ssh_common_args": "-o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o UserKnownHostsFile=" + str(directory / "known_hosts"),
     }
     if proxy_command:
         host["ansible_ssh_common_args"] += " -o " + shlex.quote("ProxyCommand=" + proxy_command)
-    private_write(directory / "known_hosts", f"{address},akorz-dyn1.duckdns.org {public}\n")
-    private_write(inventory_path, json.dumps({"all": {"children": {"vpn_test": {"hosts": {"cherry_vpn_test": host}}}}}, indent=2) + "\n")
+    private_write(directory / "known_hosts", f"{address},akorz-{NODE}.duckdns.org {public}\n")
+    private_write(inventory_path, json.dumps({"all": {"children": {"vpn_test": {"hosts": {NODE: host}}}}}, indent=2) + "\n")
     print(f"Pinned applied server {server['id']} at {address}: {bootstrap.fingerprint(public)}")
     print("Private inventory and strict known_hosts written; no network scan was trusted.")
     return 0
@@ -252,9 +265,15 @@ def review_plan(plan, operation):
             raise ValueError("Lifecycle refuses replacements, updates, imports and unrelated resources")
         values = change.get("after") if operation == "deploy" else change.get("before")
         values = values or {}
+        if resource['address'] == 'cherryservers_server.vpn':
+            if actions == ['create'] and plan.get('variables', {}).get('allocation_checks', {}).get('value') is not True:
+                raise ValueError('VM creation requires allocation checks; reconcile missing/deleted state before retrying')
+            expected_names = {'dyn1', 'vpn-test'} if NODE == 'dyn1' else {NODE}
+            if values.get('hostname') not in expected_names:
+                raise ValueError('Planned server identity does not match the selected dynamic node')
         resources.append({
             "address": resource["address"], "actions": actions,
-            **{key: values[key] for key in ("id", "project_id", "plan", "region", "image", "cycle") if key in values},
+            **{key: values[key] for key in ("id", "hostname", "project_id", "plan", "region", "image", "cycle") if key in values},
         })
     if operation == "deploy" and not any(r["address"] == "cherryservers_server.vpn" for r in resources):
         raise ValueError("Deployment must contain the dedicated server")
@@ -264,10 +283,79 @@ def review_plan(plan, operation):
     }}
 
 
+def select_node(node):
+    global ROOT, NODE
+    if not re.fullmatch(r'dyn[1-9][0-9]*', node):
+        raise ValueError("Expected dyn1, dyn2, etc.")
+    NODE = node
+    # Preserve the original dyn1 backend verbatim; never move or recreate its state.
+    ROOT = PROJECT if node == "dyn1" else PROJECT / "nodes" / node
+
+
+def link_configuration():
+    for source in [*PROJECT.glob('*.tf'), PROJECT / '.terraform.lock.hcl']:
+        target = ROOT / source.name
+        if not target.exists():
+            target.symlink_to(source)
+
+
+def initialize_node(executable, env, region=None):
+    """Prepare an explicitly new, empty encrypted backend; never allocate a VM."""
+    if NODE == 'dyn1' or ROOT.exists():
+        raise ValueError("Refusing initialization of an existing node; restore its state instead")
+    override = env.get('DROPBOX_SSH_DIR')
+    candidates = [Path(override)] if override else [
+        Path.home() / 'Dropbox/ssh', Path.home() / 'storage/shared/Dropbox/ssh',
+    ]
+    shared = next((path / 'cherry-vpn' for path in candidates if (path / 'cherry-vpn').is_dir()), None)
+    if shared is None or (shared / 'nodes' / NODE).exists():
+        raise ValueError("Shared recovery directory missing or node already exists; restore instead")
+    require_local_state(env)
+    if any(env.get(key) for key in ('TF_ENCRYPTION', 'TF_LOG', 'TF_LOG_CORE', 'TF_LOG_PROVIDER')):
+        raise ValueError('Encryption overrides/debug logging are not permitted')
+    ROOT.mkdir(mode=0o700, parents=True)
+    (ROOT / 'private').mkdir(mode=0o700)
+    link_configuration()
+    private_write(ROOT / 'terraform.tfvars', (PROJECT / 'terraform.tfvars').read_text())
+    inputs = {'node_name': NODE, 'ssh_public_key_path': 'private/ssh/admin.pub'}
+    if region:
+        inputs['region'] = region
+    private_write(ROOT / 'node.auto.tfvars.json', json.dumps(inputs))
+    data = {'state_passphrase': secrets.token_urlsafe(48), 'ssh_host_key': bootstrap.host_key()}
+    bootstrap.write_vault(ROOT / 'secrets.vault.yaml', PASSWORD, {'vpn_bootstrap': data})
+    env['TF_VAR_state_encryption_passphrase'] = data['state_passphrase']
+    env['TF_VAR_ssh_host_key'] = json.dumps(data['ssh_host_key'])
+    os.chdir(ROOT)
+    init_args = [executable, 'init', '-input=false', '-lockfile=readonly']
+    if (PROJECT / '.tools/providers').is_dir():
+        init_args.append(f'-plugin-dir={PROJECT / ".tools/providers"}')
+    subprocess.run(init_args, env=env, check=True)
+    empty = {'version': 4, 'terraform_version': '1.9.0', 'serial': 0,
+             'lineage': str(uuid.uuid4()), 'outputs': {}, 'resources': []}
+    subprocess.run([executable, 'state', 'push', '-'], input=json.dumps(empty).encode(), env=env, check=True)
+    (shared / 'nodes' / NODE).mkdir(mode=0o700, parents=True)
+    transfer_state('backup-state', env)
+    print(f'{NODE} initialized without allocating infrastructure. Wait for Dropbox sync before provisioning.')
+    return 0
+
+
 def main(args):
+    if args[:1] == ['--node'] and len(args) >= 3:
+        select_node(args[1])
+        args = args[2:]
     if not args:
         raise ValueError("An OpenTofu command is required")
     command = args[0]
+    executable = str(PROJECT / ".tools/tofu") if (PROJECT / ".tools/tofu").is_file() else shutil.which("tofu")
+    if command == 'initialize-node':
+        if not executable or len(args) not in (1, 3) or (len(args) == 3 and args[1] != '--region'):
+            raise ValueError('Usage: --node dynN initialize-node [--region region]')
+        return initialize_node(executable, dict(os.environ), args[2] if len(args) == 3 else None)
+    if not ROOT.is_dir():
+        raise ValueError('Initialize a new node explicitly, or restore its recovery files first')
+    os.chdir(ROOT)
+    if NODE != 'dyn1':
+        link_configuration()
     transfer = command in {"backup-state", "restore-state"}
     env, data = (dict(os.environ), None) if transfer else environment(command, args)
     if data is not None or transfer:
@@ -286,7 +374,6 @@ def main(args):
             # These path/validation messages contain no state contents or credentials.
             print(f"State transfer refused: {error}", file=sys.stderr)
             return 1
-    executable = str(ROOT / ".tools/tofu") if (ROOT / ".tools/tofu").is_file() else shutil.which("tofu")
     if not executable:
         raise ValueError("Install OpenTofu first")
     if command == "review-plan":
@@ -312,7 +399,7 @@ def main(args):
         raise ValueError("Usage: inventory [--proxy-command command]")
     if command == "migrate-state":
         raise ValueError("migrate-state takes no arguments")
-    vendor = ROOT / ".tools/providers"
+    vendor = PROJECT / ".tools/providers"
     if command == "init" and vendor.is_dir() and not any(
         arg == "-plugin-dir" or arg.startswith("-plugin-dir=") for arg in args[1:]
     ):

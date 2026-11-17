@@ -4,8 +4,9 @@
   connection: local
   gather_facts: false
   become: false
+  vars_files: [vars.yaml]
   vars:
-    vpn_node_domain: akorz-dyn1.duckdns.org
+    vpn_node_domain: "{{ dyn_domain }}"
   tasks:
     - name: Load shared DuckDNS credentials
       ansible.builtin.include_vars:

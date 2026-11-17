@@ -19,10 +19,10 @@ spec.loader.exec_module(wrapper)
 
 class PlanReviewTests(unittest.TestCase):
     def plan(self, actions):
-        return {'resource_changes': [{
+        return {'variables': {'allocation_checks': {'value': True}}, 'resource_changes': [{
             'address': 'cherryservers_server.vpn', 'mode': 'managed',
-            'change': {'actions': actions, 'before': {'id': '123'}, 'after': {
-                'project_id': 123, 'region': 'NL-Amsterdam', 'plan': 'smallest',
+            'change': {'actions': actions, 'before': {'id': '123', 'hostname': 'vpn-test'}, 'after': {
+                'hostname': 'vpn-test', 'project_id': 123, 'region': 'NL-Amsterdam', 'plan': 'smallest',
                 'user_data': 'private-host-key-must-not-be-printed',
             }},
         }], 'output_changes': {'hourly_quote': {'after': {'price': 0.015, 'currency': 'EUR', 'unit': 'Hourly'}}}}
@@ -35,6 +35,21 @@ class PlanReviewTests(unittest.TestCase):
                 self.assertNotIn('private-host-key', json.dumps(summary))
                 self.assertEqual(summary['catalogue_quote']['currency'], 'EUR')
         self.assertEqual(wrapper.review_plan({}, 'destroy')['resources'], [])
+
+    def test_creation_requires_allocation_checks_but_noop_and_destroy_do_not(self):
+        for value in (False, None, 'true'):
+            plan = self.plan(['create'])
+            plan['variables']['allocation_checks']['value'] = value
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                wrapper.review_plan(plan, 'deploy')
+        plan = self.plan(['create'])
+        del plan['variables']
+        with self.assertRaises(ValueError):
+            wrapper.review_plan(plan, 'deploy')
+        for operation, actions in [('deploy', ['no-op']), ('destroy', ['delete'])]:
+            plan = self.plan(actions)
+            plan['variables']['allocation_checks']['value'] = False
+            self.assertEqual(wrapper.review_plan(plan, operation)['resources'][0]['actions'], actions)
 
     def test_refuses_wrong_direction_updates_replacements_and_unrelated_resources(self):
         for operation, actions in [('deploy', ['delete']), ('destroy', ['create']),
@@ -72,7 +87,7 @@ class LifecycleOrderingTests(unittest.TestCase):
         plays = yaml.safe_load((PROJECT / 'provision.yaml').read_text())
         self.assert_fatal_phases(PROJECT / 'provision.yaml')
         provision = plays[2]['tasks']
-        self.assertIn('not in dyn1_tracked_resources.stdout_lines', provision[0]['when'])
+        self.assertIn('not in dyn_tracked_resources.stdout_lines', provision[0]['when'])
         self.assertEqual(provision[1]['ansible.builtin.import_tasks'], 'tasks/lifecycle-plan.yaml')
         self.assertEqual(provision[2]['ansible.builtin.import_tasks'], 'tasks/lifecycle-apply.yaml')
         checks = plays[4]['tasks']
@@ -91,6 +106,30 @@ class LifecycleOrderingTests(unittest.TestCase):
         self.assertIn('backup-state', apply['always'][0]['ansible.builtin.command']['argv'])
 
     @unittest.skipUnless(shutil.which('ansible-playbook'), 'Ansible required')
+    def test_plan_checks_allocation_only_when_creating_a_new_vm(self):
+        task = yaml.safe_load((PROJECT / 'tasks/lifecycle-plan.yaml').read_text())[0]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'ansible.cfg').write_text('[defaults]\n')
+            (root / 'tofu.sh').write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$(dirname "$0")/args"\n')
+            for operation, tracked, expected in [('deploy', [], 'true'),
+                                                  ('deploy', ['cherryservers_server.vpn'], 'false'),
+                                                  ('destroy', [], 'false')]:
+                play = [{'name': 'Offline plan arguments', 'hosts': 'localhost', 'connection': 'local',
+                         'gather_facts': False, 'vars': {'dyn_operation': operation, 'dyn_name': 'dyn1',
+                                                       'dyn_tracked_resources': {'stdout_lines': tracked}},
+                         'tasks': [task]}]
+                path = root / 'plan.yaml'
+                path.write_text(yaml.safe_dump(play))
+                result = subprocess.run(
+                    ['ansible-playbook', '-i', 'localhost,', str(path)], stdin=subprocess.DEVNULL,
+                    env={**os.environ, 'ANSIBLE_CONFIG': str(root / 'ansible.cfg')},
+                    capture_output=True, text=True, timeout=30,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn('-var=allocation_checks=' + expected, (root / 'args').read_text().splitlines())
+
+    @unittest.skipUnless(shutil.which('ansible-playbook'), 'Ansible required')
     def test_plan_gate_aborts_noninteractive_runs_before_any_apply(self):
         # Exercise the real approval tasks against a harmless fake wrapper.
         with tempfile.TemporaryDirectory() as directory:
@@ -100,7 +139,8 @@ class LifecycleOrderingTests(unittest.TestCase):
             script.write_text('#!/bin/sh\nprintf \'{}\\n\'\n')
             tasks = yaml.safe_load((PROJECT / 'tasks/lifecycle-plan.yaml').read_text())
             play = [{'name': 'Offline approval gate', 'hosts': 'localhost', 'connection': 'local',
-                     'gather_facts': False, 'vars': {'dyn1_operation': 'deploy'}, 'tasks': tasks}]
+                     'gather_facts': False, 'vars': {'dyn_operation': 'deploy', 'dyn_name': 'dyn2',
+                                                     'dyn_tracked_resources': {'stdout_lines': []}}, 'tasks': tasks}]
             path = root / 'gate.yaml'
             path.write_text(yaml.safe_dump(play))
             result = subprocess.run(
@@ -139,6 +179,49 @@ class LifecycleOrderingTests(unittest.TestCase):
             )
             self.assertNotEqual(result.returncode, 0)
             self.assertFalse((root / 'published').exists(), result.stdout + result.stderr)
+
+    @unittest.skipUnless(shutil.which('ansible-playbook'), 'Ansible required')
+    def test_incomplete_or_unreachable_node_cannot_reach_monitoring_or_publication(self):
+        bootstrap_gate = yaml.safe_load((PROJECT / 'bootstrap.yaml').read_text())[-1]
+        deployment_gate = yaml.safe_load((PROJECT / 'deploy.yaml').read_text())[-2]
+        for gate, verified in [(bootstrap_gate, False), (deployment_gate, True)]:
+            for unreachable in (False, True):
+                with self.subTest(gate=gate['name'], unreachable=unreachable), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    (root / 'ansible.cfg').write_text('[defaults]\n')
+                    inventory = {'all': {'hosts': {'dyn1_admin': {
+                        'ansible_host': '127.0.0.1', 'ansible_port': 1, 'ansible_connection': 'ssh',
+                        'ansible_ssh_args': '-o ConnectTimeout=1 -o ConnectionAttempts=1 -o BatchMode=yes',
+                        'dyn_admin_verified': verified, 'dyn_vpn_deployed': False,
+                    }}}}
+                    (root / 'hosts').write_text(yaml.safe_dump(inventory))
+                    checkpoint = copy.deepcopy(gate)
+                    checkpoint.pop('vars_files')
+                    checkpoint['vars'] = {'dyn_name': 'dyn1'}
+                    plays = [{'name': 'Controller remains active', 'hosts': 'localhost', 'gather_facts': False,
+                              'tasks': [{'name': 'Seed controller', 'ansible.builtin.debug': {'msg': 'offline'}}]}]
+                    if unreachable:
+                        plays.append({'name': 'Unreachable node phase', 'hosts': 'dyn1_admin', 'gather_facts': False,
+                                      'any_errors_fatal': True,
+                                      'tasks': [{'name': 'Closed local SSH port', 'ansible.builtin.command': 'id -u',
+                                                 'changed_when': False}]})
+                    plays.extend([checkpoint, {
+                        'name': 'Monitoring or publication must not run', 'hosts': 'localhost', 'gather_facts': False,
+                        'tasks': [{'name': 'Unexpected side effect', 'ansible.builtin.file': {
+                            'path': str(root / 'side-effect'), 'state': 'touch', 'mode': '0600',
+                        }}],
+                    }])
+                    path = root / 'gate.yaml'
+                    path.write_text(yaml.safe_dump(plays))
+                    result = subprocess.run(
+                        ['ansible-playbook', '-i', str(root / 'hosts'), str(path)],
+                        env={**os.environ, 'ANSIBLE_CONFIG': str(root / 'ansible.cfg')},
+                        capture_output=True, text=True, timeout=30,
+                    )
+                    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                    self.assertFalse((root / 'side-effect').exists(), result.stdout + result.stderr)
+                    if not unreachable:
+                        self.assertIn('did not finish', result.stdout + result.stderr)
 
 
 class PreflightGuardTests(unittest.TestCase):

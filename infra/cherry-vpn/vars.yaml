@@ -1,0 +1,7 @@
+---
+# Role identity is independent of the provider adapter in this directory.
+dyn_name: "{{ dyn_node | default('dyn1') }}"
+# Keep the original dyn1 state, credentials and pins at their existing paths.
+dyn_root: "{{ playbook_dir if dyn_name == 'dyn1' else playbook_dir ~ '/nodes/' ~ dyn_name }}"
+dyn_private: "{{ dyn_root }}/private"
+dyn_domain: "akorz-{{ dyn_name }}.duckdns.org"

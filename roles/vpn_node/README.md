@@ -18,8 +18,9 @@ shells, commands, PTYs, remote forwards or agent/Unix-socket forwards. Its host 
 is separate from administrator SSH and is pinned through the authenticated admin
 connection, never by trusting a network scan. Private keys persist on the node.
 
-Naïve is TCP-only. VLESS relays UDP with XUDP, including through its Naïve carrier.
-Hysteria uses native outer QUIC/UDP. Protocol availability varies by network; a
+Naïve is TCP-only. VLESS relays UDP with XUDP; static-node profiles may also
+retain a Naïve carrier. Dynamic `dynN` nodes publish direct VLESS only, with
+Hysteria disabled. Hysteria uses native outer QUIC/UDP when enabled elsewhere. Protocol availability varies by network; a
 short successful check does not establish sustained reliability or DPI resistance.
 
 ## Deploy and publish
@@ -58,7 +59,7 @@ Select one explicit target; do not use `--limit`. The playbook:
    preserving other nodes and existing enrollment tokens. The configured
    `vpn_node_default_outbound` must name a selectable node choice.
 5. Publishes through the existing `sing-box-configs` workflow. Generation derives
-   `<node>-vless-via-naive` and `<node>-ssh-via-workstation`; the restricted
+   `<node>-vless-via-naive` (static nodes only) and `<node>-ssh-via-workstation`; the restricted
    workstation SSH allowlist is updated before publication.
 6. Checks every generated node choice, including the workstation SSH hop.
 7. When Hysteria 2 is disabled, removes its isolated Compose project, server
@@ -108,8 +109,8 @@ rerun this VPN deployment to incorporate changes to its site-only source.
 For a dynamic node, first provision and verify its administrator identity, then
 use the same playbook with its inventory alias and settings. Override
 `vpn_node_config_file` and `vpn_node_secrets_file` for infrastructure-specific
-locations. No cloud API/token/state is required by this role or playbook. The
-legacy Cherry entry point remains for its separate provisioning/bootstrap flow.
+locations. No cloud API/token/state is required by this role or playbook. For the supported supervised dynamic provisioning/bootstrap workflow, use the
+[dynamic-node lifecycle](../../infra/cherry-vpn/LIFECYCLE.md).
 
 ## Isolated checks and maintenance
 

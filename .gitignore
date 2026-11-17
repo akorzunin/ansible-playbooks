@@ -35,4 +35,5 @@ __pycache__/
 /infra/cherry-vpn/.tools/
 /infra/cherry-vpn/crash*.log
 /infra/cherry-vpn/private/
+/infra/cherry-vpn/nodes/
 /infra/cherry-vpn/cherry-token.vault

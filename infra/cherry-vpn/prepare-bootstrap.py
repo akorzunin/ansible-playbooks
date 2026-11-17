@@ -45,7 +45,7 @@ def host_key():
     with tempfile.TemporaryDirectory(prefix="vpn-host-key-") as directory:
         path = Path(directory) / "host"
         subprocess.run(
-            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "vpn-dyn1-host", "-f", str(path)],
+            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "vpn-dynamic-host", "-f", str(path)],
             check=True, capture_output=True,
         )
         return {"private": path.read_text(), "public": path.with_suffix(".pub").read_text().strip()}

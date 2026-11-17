@@ -155,15 +155,15 @@ class VaultWrapperTests(unittest.TestCase):
         self.assertIn(data["ssh_host_key"]["public"], before.decode())
         self.assertEqual(known.stat().st_mode & 0o777, 0o600)
         inventory = json.loads((self.project / "private/inventory.yaml").read_text())
-        host = inventory["all"]["children"]["vpn_test"]["hosts"]["cherry_vpn_test"]
-        self.assertEqual(host["cherry_server_id"], "123")
+        host = inventory["all"]["children"]["vpn_test"]["hosts"]["dyn1"]
+        self.assertEqual(host["provider_server_id"], "123")
         self.assertIn("StrictHostKeyChecking=yes", host["ansible_ssh_common_args"])
         self.assertIn("ProxyCommand=nc", host["ansible_ssh_common_args"])
         self.assertIn("ServerAliveInterval=15", host["ansible_ssh_common_args"])
         result = self.invoke(args=["inventory"])
         self.assertEqual(result.returncode, 0, result.stderr)
         retained = json.loads((self.project / "private/inventory.yaml").read_text())
-        self.assertIn("ProxyCommand=nc", retained["all"]["children"]["vpn_test"]["hosts"]["cherry_vpn_test"]["ansible_ssh_common_args"])
+        self.assertIn("ProxyCommand=nc", retained["all"]["children"]["vpn_test"]["hosts"]["dyn1"]["ansible_ssh_common_args"])
         self.assertNotIn(data["ssh_host_key"]["private"], result.stdout + result.stderr)
         cloud["ssh_keys"]["ed25519_public"] = "ssh-ed25519 AAAA-different-pending-host"
         server["user_data"] = base64.b64encode(("#cloud-config\n" + json.dumps(cloud)).encode()).decode()

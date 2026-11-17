@@ -10,7 +10,7 @@ spec.loader.exec_module(discord_config)
 
 class DiscordTests(unittest.TestCase):
     def test_only_namespace_tun_and_wifi_bound_vless_are_installed(self):
-        outbound = {"type": "vless", "tag": "cherry-vless", "flow": "xtls-rprx-vision",
+        outbound = {"type": "vless", "tag": "dyn1-vless", "flow": "xtls-rprx-vision",
                     "tls": {"enabled": True}}
         profile = {"outbounds": [outbound, {"type": "direct", "tag": "direct"}]}
         original = copy.deepcopy(profile)
@@ -38,8 +38,8 @@ class DiscordTests(unittest.TestCase):
         self.assertTrue(outbound["tls"]["enabled"])
 
     def test_missing_wrong_or_chained_vless_is_rejected(self):
-        for outbound in ({"type": "ssh", "tag": "cherry-vless"},
-                         {"type": "vless", "tag": "cherry-vless", "detour": "other"}):
+        for outbound in ({"type": "ssh", "tag": "dyn1-vless"},
+                         {"type": "vless", "tag": "dyn1-vless", "detour": "other"}):
             with self.assertRaises(ValueError):
                 discord_config.make_config({"outbounds": [outbound]})
         with self.assertRaises(KeyError):

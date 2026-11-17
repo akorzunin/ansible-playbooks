@@ -3,12 +3,14 @@
 Replaces V2RayA and its obsolete NT1 SSH tunnel with the pinned sing-box 1.14.4
 container, following the migration in `../aurora-devops/playbooks/sing-box/`.
 All proxy traffic uses the selected direct VLESS outbound, defaulting to
-**`cherry-vless`**, with no other proxy or unproxied fallback.
+**`dyn1-vless`**, with no other proxy or unproxied fallback.
+Migrate the shared profile tags first; this repository change does not switch the
+currently running `cherry-vless` connection. Use a supervised maintenance window.
 No TUN, host routing changes, panel, host networking or NET_ADMIN are needed.
 
 ## Credentials
 
-The playbook selects exactly one direct VLESS outbound tagged `cherry-vless` from
+The playbook selects exactly one direct VLESS outbound tagged `dyn1-vless` from
 `sing_box_secrets.extra_outbounds` in
 `playbooks/sing-box-configs/secrets.vault.yaml`. UUID, server, TLS/Reality and flow
 settings are reused unchanged. No credentials need copying into `external_vars.yml`.
@@ -32,7 +34,7 @@ host (or group), explicitly override `sing_box_hosts`:
 ```sh
 ansible-playbook -i hosts --vault-password-file .ansible_pass \
   playbooks/sing-box/deploy.yaml -e sing_box_hosts=other_host \
-  -e sing_box_outbound_tag=cherry-vless
+  -e sing_box_outbound_tag=dyn1-vless
 ```
 
 Other hosts need Docker with Compose, Docker access for `ansible_user`, sudo to

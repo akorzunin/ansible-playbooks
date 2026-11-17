@@ -3,29 +3,31 @@
 - name: Bootstrap the isolated node and verify administrator access
   ansible.builtin.import_playbook: bootstrap.yaml
 
-- name: Deploy all four VPN protocols on the verified Cherry administrator connection
+- name: Deploy SSH, Naive and VLESS on the verified dynamic administrator connection
   hosts: vpn_test_admin
   any_errors_fatal: true
   become: true
   become_flags: -n
+  vars_files: [vars.yaml]
   vars:
     ansible_host_key_checking: true
-    vpn_node_name: cherry
-    vpn_node_domain: akorz-dyn1.duckdns.org
-    vpn_node_client_dir: "{{ playbook_dir }}/private"
-    vpn_node_ssh_private_key_path: "{{ playbook_dir }}/private/ssh/probe"
-    vpn_node_ssh_public_key_path: "{{ playbook_dir }}/private/ssh/probe.pub"
+    vpn_node_name: "{{ dyn_name }}"
+    vpn_node_domain: "{{ dyn_domain }}"
+    vpn_node_hysteria2_enabled: false
+    vpn_node_client_dir: "{{ dyn_private }}"
+    vpn_node_ssh_private_key_path: "{{ dyn_private }}/ssh/probe"
+    vpn_node_ssh_public_key_path: "{{ dyn_private }}/ssh/probe.pub"
   pre_tasks:
     # The imported bootstrap has verified a fresh non-root connection and sudo.
     # Update the manual-access alias too, not only the disposable vpn_test inventory.
-    - name: Refresh dyn1 access after verified administrator bootstrap
+    - name: Refresh dynamic node access after verified administrator bootstrap
       ansible.builtin.blockinfile:
         path: "{{ playbook_dir }}/../../hosts"
-        marker: "# {mark} ANSIBLE BOOTSTRAP dyn1"
+        marker: "# {mark} ANSIBLE BOOTSTRAP {{ dyn_name }}"
         block: |
-          bootstrap_dyn1:
+          bootstrap_{{ dyn_name }}:
             hosts:
-              dyn1:
+              {{ dyn_name }}:
                 ansible_host: {{ ansible_host | to_json }}
                 ansible_port: {{ ansible_port | default(22) | int }}
                 ansible_user: {{ ansible_user | to_json }}
@@ -46,12 +48,43 @@
       ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/secrets.vault.yaml"
       no_log: true
-    - name: Load the shared Hysteria 2 credential without rotating it per node
-      ansible.builtin.include_vars:
-        file: "{{ playbook_dir }}/hysteria2.vault.yaml"
-      no_log: true
+    - name: Check for the retired dynamic Hysteria deployment
+      ansible.builtin.stat:
+        path: /srv/deploy/vpn-hysteria2/compose.yaml
+      register: dyn_hysteria_compose
+
+    - name: Stop and remove the retired Hysteria service and its network
+      community.docker.docker_compose_v2:
+        project_src: /srv/deploy/vpn-hysteria2
+        project_name: vpn-hysteria2
+        state: absent
+      when: dyn_hysteria_compose.stat.exists
+
+    - name: Remove retired Hysteria server configuration
+      ansible.builtin.file:
+        path: /srv/deploy/vpn-hysteria2
+        state: absent
   roles:
     - vpn_node
+  post_tasks:
+    - name: Mark VPN deployment complete only after client exports are written
+      ansible.builtin.set_fact:
+        dyn_vpn_deployed: true
+
+- name: Require completed VPN deployment before monitoring and profile registration
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  any_errors_fatal: true
+  vars_files: [vars.yaml]
+  tasks:
+    - name: Reject a failed or unreachable VPN deployment
+      ansible.builtin.assert:
+        that:
+          - hostvars[dyn_name ~ '_admin'].dyn_admin_verified | default(false) | bool
+          - hostvars[dyn_name ~ '_admin'].dyn_vpn_deployed | default(false) | bool
+        fail_msg: VPN deployment did not finish; monitoring and profiles will not be changed. Check the preceding node error.
 
 - name: Register metrics and deploy workstation reachability alerts
   ansible.builtin.import_playbook: monitoring.yaml

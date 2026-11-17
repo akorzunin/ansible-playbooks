@@ -1,10 +1,11 @@
 ---
-- name: Validate recovery inputs before provisioning dyn1
+- name: Validate recovery inputs before provisioning the dynamic node
   hosts: localhost
   connection: local
   gather_facts: false
   become: false
   any_errors_fatal: true
+  vars_files: [vars.yaml]
   tasks:
     - name: Check the controller and existing encrypted state
       ansible.builtin.import_tasks: tasks/lifecycle-preflight.yaml
@@ -12,19 +13,20 @@
 - name: Restore the existing administrator and tunnel keys
   ansible.builtin.import_playbook: restore-keys.yaml
 
-- name: Provision only the dedicated dyn1 VM
+- name: Provision only the selected dynamic VM
   hosts: localhost
   connection: local
   gather_facts: false
   become: false
   any_errors_fatal: true
+  vars_files: [vars.yaml]
   vars:
-    dyn1_operation: deploy
+    dyn_operation: deploy
   tasks:
     - name: Prepare a fresh server identity only when no VM is tracked
       ansible.builtin.command:
-        argv: [python3, "{{ playbook_dir }}/prepare-bootstrap.py", --rotate-host-key]
-      when: "'cherryservers_server.vpn' not in dyn1_tracked_resources.stdout_lines"
+        argv: [python3, "{{ playbook_dir }}/prepare-bootstrap.py", --vault, "{{ dyn_root }}/secrets.vault.yaml", --rotate-host-key]
+      when: "'cherryservers_server.vpn' not in dyn_tracked_resources.stdout_lines"
       changed_when: true
 
     - name: Plan and approve creation without permitting in-place changes or replacement
@@ -35,75 +37,79 @@
 
     - name: Generate strict SSH pins and inventory from applied state
       ansible.builtin.command:
-        argv: [bash, "{{ playbook_dir }}/tofu.sh", inventory]
+        argv: [bash, "{{ playbook_dir }}/tofu.sh", --node, "{{ dyn_name }}", inventory]
       changed_when: true
 
     - name: Load the generated isolated inventory
       ansible.builtin.include_vars:
-        file: "{{ playbook_dir }}/private/inventory.yaml"
-        name: dyn1_inventory
+        file: "{{ dyn_private }}/inventory.yaml"
+        name: dyn_inventory
 
-    - name: Add only the applied Cherry VM to this run
+    - name: Add only the applied dynamic VM to this run
       vars:
-        dyn1_host: "{{ dyn1_inventory.all.children.vpn_test.hosts.cherry_vpn_test }}"
+        dyn_host: "{{ dyn_inventory.all.children.vpn_test.hosts[dyn_name] }}"
       ansible.builtin.add_host:
-        name: cherry_vpn_test
+        name: "{{ dyn_name }}"
         groups: vpn_test
-        ansible_host: "{{ dyn1_host.ansible_host }}"
-        ansible_user: "{{ dyn1_host.ansible_user }}"
+        ansible_host: "{{ dyn_host.ansible_host }}"
+        ansible_user: "{{ dyn_host.ansible_user }}"
         ansible_python_interpreter: /usr/bin/python3
-        ansible_ssh_private_key_file: "{{ dyn1_host.ansible_ssh_private_key_file }}"
-        ansible_ssh_common_args: "{{ dyn1_host.ansible_ssh_common_args }}"
+        ansible_ssh_private_key_file: "{{ dyn_host.ansible_ssh_private_key_file }}"
+        ansible_ssh_common_args: "{{ dyn_host.ansible_ssh_common_args }}"
         ansible_host_key_checking: true
-        cherry_server_id: "{{ dyn1_host.cherry_server_id }}"
+        provider_server_id: "{{ dyn_host.provider_server_id }}"
 
 - name: Bootstrap administration and configure VPN services and monitoring
   ansible.builtin.import_playbook: deploy.yaml
 
-- name: Verify dyn1 before registering it alongside existing exits
+- name: Verify the dynamic node before registering it alongside existing exits
   hosts: localhost
   connection: local
   gather_facts: false
   become: false
   any_errors_fatal: true
+  vars_files: [vars.yaml]
   tasks:
-    - name: Test isolated authenticated exits without switching the active client
+    - name: Test isolated authenticated exits and VLESS UDP without switching the active client
       ansible.builtin.command:
         argv:
           - python3
           - "{{ playbook_dir }}/../../roles/vpn_node/files/check.py"
           - --input
-          - "{{ playbook_dir }}/private/cherry-outbounds.json"
+          - "{{ dyn_private }}/{{ dyn_name }}-outbounds.json"
           - --node
-          - cherry
+          - "{{ dyn_name }}"
           - --expected-ip
-          - "{{ hostvars['cherry_vpn_test'].ansible_host }}"
+          - "{{ hostvars[dyn_name].ansible_host }}"
+          - --udp
       changed_when: false
 
-    - name: Register only Cherry entries while preserving the current profile default and tokens
+    - name: Register only this node while preserving unrelated exits and enrollment tokens
       ansible.builtin.command:
         argv:
           - python3
           - "{{ playbook_dir }}/../../playbooks/sing-box-configs/register-node.py"
           - --node
-          - cherry
+          - "{{ dyn_name }}"
           - --outbounds-file
-          - "{{ playbook_dir }}/private/cherry-outbounds.json"
-      register: dyn1_registration
-      changed_when: "'source updated' in dyn1_registration.stdout"
+          - "{{ dyn_private }}/{{ dyn_name }}-outbounds.json"
+          - --migrate-cherry
+      register: dyn_registration
+      changed_when: "'source updated' in dyn_registration.stdout"
       no_log: true
 
-- name: Publish tested dyn1 choices with unchanged enrollment URLs and default
+- name: Publish tested dynamic choices with unchanged enrollment URLs
   ansible.builtin.import_playbook: ../../playbooks/sing-box-configs/deploy.yaml
 
-- name: Verify all published dyn1 choices
+- name: Verify all published dynamic choices
   hosts: localhost
   connection: local
   gather_facts: false
   become: false
   any_errors_fatal: true
+  vars_files: [vars.yaml]
   tasks:
-    - name: Test generated direct and chained choices including the workstation SSH hop
+    - name: Test generated choices including VLESS UDP and the workstation SSH hop
       ansible.builtin.command:
         argv:
           - python3
@@ -111,11 +117,12 @@
           - --input
           - "{{ playbook_dir }}/../../playbooks/sing-box-configs/private/linux.json"
           - --node
-          - cherry
+          - "{{ dyn_name }}"
           - --expected-ip
-          - "{{ hostvars['cherry_vpn_test'].ansible_host }}"
+          - "{{ hostvars[dyn_name].ansible_host }}"
+          - --udp
       changed_when: false
 
     - name: Explain the client refresh boundary
       ansible.builtin.debug:
-        msg: dyn1 is published as cherry-*; refresh your remote profile and select it explicitly. No active client was switched.
+        msg: "{{ dyn_name }} is published as {{ dyn_name }}-*; refresh your remote profile. No active client was switched."

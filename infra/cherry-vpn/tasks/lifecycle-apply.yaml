@@ -3,10 +3,10 @@
   block:
     - name: Apply the approved encrypted plan
       ansible.builtin.command:
-        argv: [bash, "{{ playbook_dir }}/tofu.sh", apply, -input=false, -no-color, private/lifecycle.tfplan]
+        argv: [bash, "{{ playbook_dir }}/tofu.sh", --node, "{{ dyn_name }}", apply, -input=false, -no-color, private/lifecycle.tfplan]
       changed_when: true
   always:
     - name: Back up encrypted state after the apply attempt
       ansible.builtin.command:
-        argv: [bash, "{{ playbook_dir }}/tofu.sh", backup-state]
+        argv: [bash, "{{ playbook_dir }}/tofu.sh", --node, "{{ dyn_name }}", backup-state]
       changed_when: true
