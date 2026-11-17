@@ -25,24 +25,20 @@ inventory or controller-local `.env` is required.
 
 ## Workstation proxy
 
-[sing-box with `aurora-vless`](playbooks/sing-box/README.md) replaces the blocked
+[sing-box with `cherry-vless`](playbooks/sing-box/README.md) replaces the blocked
 NT1/V2RayA proxy, preserving port `20171` for existing app containers and clients.
 
 ## Budget VPN experiment
 
 See [the Cherry Servers/OpenTofu trial guide](infra/cherry-vpn/README.md) for
 credential setup, price guardrails, a disposable SSH proxy and regional probes.
-The Cherry VM `dyn1` was destroyed on 2026-11-01. Its DNS, shared SSH inventory
-entry, monitoring membership and published VPN connections were removed.
-The Cherry project has no servers, IPs or storage; encrypted state and backups
-are retained. Do not apply the provisioning configuration unless creating a new
-VM is explicitly intended.
-VPN services now run on the existing ge2 node through the reusable
-[`vpn_node` role](roles/vpn_node/README.md). All platforms default to
-`ge2-vless-via-naive`; ge2 SSH, Naïve, direct VLESS and
-SSH-via-workstation are also selectable, with Aurora retained. Private URLs/tokens
-are unchanged; refresh enrolled clients. The dyn1 SSH hop to nt1 is no longer
-available. Active local clients and the workstation Docker proxy were not changed.
+The original Cherry VM `dyn1` was destroyed on 2026-11-01; a replacement is
+now active. Published profiles and the workstation proxy default to `cherry-vless`.
+Cherry SSH, Naïve, Hysteria 2, VLESS-via-Naïve and SSH-via-workstation remain
+selectable. GE2 is blocked: its host monitoring and VPN probes are retired, and
+all GE2 routes plus `aurora-vless` are removed from generated profiles.
+Private URLs/tokens are unchanged; refresh enrolled clients. The reusable
+[`vpn_node` role](roles/vpn_node/README.md) remains available for verified nodes.
 See the [dynamic-node guide](infra/cherry-vpn/README.md) and
 [controller handoff instructions](infra/cherry-vpn/README.md#encrypted-state-and-controller-handoff).
 The updated **[Ansible lifecycle](infra/cherry-vpn/LIFECYCLE.md)** supports

@@ -16,12 +16,33 @@
           - not ansible_check_mode
           - groups.get('monitoring_servers', []) == ['remote_workstation']
           - monitoring_vpn_monitor_enabled | default(false) | bool
-        fail_msg: Enable monitoring_vpn_monitor_enabled on remote_workstation in hosts; run without --check.
+        fail_msg: Enable monitoring_vpn_monitor_enabled in hosts and run without --check.
 
     - name: Load shared profile credentials and monitor tokens
       ansible.builtin.include_vars:
         file: ../sing-box-configs/secrets.vault.yaml
       no_log: true
+
+    - name: Prefill standalone monitor servers from the shared Vault
+      ansible.builtin.command:
+        argv: [python3, "{{ playbook_dir }}/prefill-servers.py", --stdin]
+        stdin: "{{ {'sing_box_secrets': sing_box_secrets, 'nodes': vpn_monitor_nodes | default([])} | to_json }}"
+      delegate_to: localhost
+      changed_when: false
+      register: vpn_monitor_prefilled
+      when: vpn_monitor_prefill_servers | default(true) | bool
+      no_log: true
+
+    - name: Use the discovered server list without rewriting tracked settings
+      ansible.builtin.set_fact:
+        vpn_monitor_settings: "{{ vpn_monitor_settings | combine(vpn_monitor_prefilled.stdout | from_yaml) }}"
+      when: vpn_monitor_prefill_servers | default(true) | bool
+      no_log: true
+
+    - name: Require a nonempty monitor server list
+      ansible.builtin.assert:
+        that: vpn_monitor_settings.servers | length > 0
+        fail_msg: No monitor servers selected; check Vault routes or configure a manual allowlist.
 
     - name: Generate monitor configuration from the tracked settings and shared Vault
       ansible.builtin.command:

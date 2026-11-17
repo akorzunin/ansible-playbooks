@@ -4,14 +4,26 @@ Deploy the sibling [vpn-monitor](../../../vpn-monitor) checkout and provision it
 metrics in the existing workstation Prometheus/Grafana stack. No VPN servers,
 active clients, DNS records or firewall rules are changed.
 
+## Current status: retired probes
+
+GE2 is blocked and has been removed from the allowlist, including its UDP endpoint.
+`config.yaml` now has `servers: []`; the workstation monitor is stopped and
+`monitoring_vpn_monitor_enabled: false` removes its Prometheus scrape job. History
+is retained. Before deploying again, review the surviving Vault routes and enable
+the inventory opt-in. `deploy.yml` now discovers standalone servers from Vault by
+default, even when the tracked list is empty; it rejects an empty discovered list. The GE2-specific echo deployment playbook
+has been removed. No changes are made on the blocked server itself.
+
 ## Inputs
 
 - Existing `remote_workstation` must be the single `monitoring_servers` host,
   with the monitoring stack/network `ws-logs_default` already installed.
 - Add `monitoring_vpn_monitor_enabled: true` to that host in private `hosts`.
 - This repo owns the workstation configuration:
-  - [`config.yaml`](config.yaml): tracked probe settings and explicit server/protocol
-    allowlist. Each `outbound_tag` references the shared encrypted profile Vault.
+  - [`config.yaml`](config.yaml): tracked probe settings and optional manual
+    server/protocol allowlist. Each `outbound_tag` references the shared encrypted
+    profile Vault. By default the playbook replaces this list in memory with
+    discovered standalone routes.
   - [`../sing-box-configs/secrets.vault.yaml`](../sing-box-configs/secrets.vault.yaml):
     `sing_box_secrets.connections` / `extra_outbounds` supply native sing-box outbounds;
     `vpn_monitor_secrets` supplies `VPN_MONITOR_API_TOKEN` and `VPN_MONITOR_UDP_TOKEN`.
@@ -20,10 +32,49 @@ active clients, DNS records or firewall rules are changed.
   No sibling private `config.yaml` or `.env`, generated profile JSON, or prior publish
   is needed. The sibling checkout supplies application source only.
   Existing monitor tokens were migrated unchanged into Vault; no rotation is required.
-- Controller: Go 1.25+, Node 22.12+, npm and the existing Ansible collections.
+- Controller: Go 1.25+, Node 22.12+, npm, Python 3 with PyYAML, and the existing Ansible collections.
   This deployment builds a static Linux **amd64** binary. Override
   `vpn_monitor_source_dir` with an absolute checkout path if it is not adjacent.
 - Existing shared `external_vars.yml` and Vault password supply Grafana credentials.
+
+## Prefill servers from sing-box
+
+From `ansible-playbooks/`, preview standalone routes from the shared encrypted
+sing-box source (requires Python 3, PyYAML and `ansible-vault`):
+
+```sh
+python3 playbooks/vpn-monitor/prefill-servers.py
+# Or select specific nodes; repeat --node to include several:
+python3 playbooks/vpn-monitor/prefill-servers.py --node dyn2
+```
+
+Optionally save a manual selection, then deploy with automatic discovery disabled:
+
+```sh
+python3 playbooks/vpn-monitor/prefill-servers.py --node dyn2 --write
+ansible-playbook -i ./hosts --vault-password-file=.ansible_pass \
+  playbooks/vpn-monitor/deploy.yml -e vpn_monitor_prefill_servers=false
+```
+
+Omit `--node` to include **all eligible nodes in Vault**, not just the newest one.
+`--write` replaces the whole `servers` list, so stale entries disappear. Other
+settings are preserved, but YAML formatting/comments are normalized. Repeating
+an unchanged selection does not rewrite the file. Preview first and review the
+diff: every selected route adds test traffic, including configured speed tests.
+The script does not enable the inventory opt-in, start services, change Vault,
+or contact VPN hosts. No prior profile publication is needed.
+
+Tags must follow `<node>-<type>` (for example `dyn2-vless`); legacy bare protocol
+tags are grouped under `default`. Unsupported types, unrecognized aliases,
+`workstation-hop`, chains and routing overrides are skipped. Duplicate tags,
+missing requested nodes, empty selections and more than 64 routes fail without
+writing. Only names/tag references enter the public config, never credentials.
+UDP defaults to `false`; enable it explicitly only after configuring a suitable
+endpoint and confirming protocol/server support. New runs reset route-level UDP
+flags to `false`. Override paths with `--config`, `--vault-file` and
+`--vault-password-file` if needed.
+
+## Deploy
 
 ```sh
 # From ansible-playbooks/
@@ -33,11 +84,29 @@ ansible-playbook -i ./hosts --vault-password-file=.ansible_pass \
   playbooks/vpn-monitor/deploy.yml
 ```
 
-The playbook resolves allowlisted tags directly from Vault using `generate.py`.
-Missing/duplicate tags and chained outbounds fail deployment rather than silently
-omitting probes. The monitor supports standalone routes only; do not strip `detour`
-from a chain to pretend it is a direct route. Aurora and newly published outbounds
-are not monitored unless explicitly added to this repo's allowlist.
+No separate prefill run is needed: by default the playbook invokes
+`prefill-servers.py --stdin` with the Vault data Ansible already decrypted. It
+replaces `servers` **in memory only**, preserving all other tracked settings and
+leaving local `config.yaml` untouched. Every eligible Vault node is selected,
+including newly registered nodes; every selected route adds test/speed traffic.
+The inventory monitoring opt-in remains required.
+
+To monitor only specific nodes, pass a JSON list (or set it in inventory):
+
+```sh
+ansible-playbook -i ./hosts --vault-password-file=.ansible_pass \
+  playbooks/vpn-monitor/deploy.yml -e '{"vpn_monitor_nodes":["dyn2"]}'
+```
+
+Set `vpn_monitor_prefill_servers: false` (CLI: `-e vpn_monitor_prefill_servers=false`)
+to use the tracked allowlist unchanged, including any manually enabled UDP flags.
+`vpn_monitor_nodes` applies only to automatic discovery. Discovered routes have
+UDP disabled; discovery never guesses endpoint or server support.
+
+After discovery, `generate.py` resolves selected tags directly from Vault.
+Missing/duplicate tags and explicitly selected chained outbounds fail deployment.
+Automatic discovery skips chains and routing overrides; never strip `detour`
+from a chain to pretend it is a direct route.
 
 It builds on the controller, transfers only the binary/public web assets
 into a Docker build context, and uses the pinned workstation sing-box image with
@@ -81,8 +150,8 @@ docker compose ps
 docker compose logs --tail=50 vpn-monitor
 ```
 
-The tracked allowlist monitors only GE2 (SSH, Naïve and VLESS); the workstation's
-active Aurora VPN connection is independent. Generated credentials exist only in
+The tracked allowlist is empty; the workstation's active Cherry VPN connection
+is independent. When deployed, generated credentials exist only in
 Ansible memory and mode-0600 runtime `~/deploy/vpn-monitor/config.yaml` / `.env`
 (and private backups) on the workstation. The runtime config changes the tracked
 loopback listen address to `0.0.0.0:8081` for the private Docker bridge. Protect
@@ -90,56 +159,16 @@ runtime files and backups; edit tracked settings/Vault, not deployed files.
 
 ## Optional UDP and bounded downloads
 
-These tests need explicit configuration; empty Grafana panels otherwise mean
-**disabled/unsupported**, not zero loss or zero throughput. SSH and Naïve do not
-support this monitor's UDP test; the direct GE2 VLESS route does.
+UDP testing is disabled: its former GE2 endpoint is blocked. A future deployment
+needs an explicitly configured, authenticated endpoint and approved firewall
+allowlist. SSH and Naïve do not support this monitor's UDP test. Empty panels mean
+**disabled/unsupported**, not zero loss or zero throughput.
 
-The separate `echo-ge2.yml` playbook installs the project's static `--echo` binary
-as a sandboxed, reboot-persistent systemd service on existing GE2. It reads the same
-`vpn_monitor_secrets.VPN_MONITOR_UDP_TOKEN` from the shared Vault as the checker.
-For a new setup, store random API/UDP tokens of at least 24 characters there before deploying:
-
-```sh
-ansible-playbook -i ./hosts --vault-password-file=.ansible_pass \
-  playbooks/vpn-monitor/echo-ge2.yml
-```
-
-Unlike the main workstation playbook, this explicitly adds firewall rules: a
-dedicated nftables table restricts **UDP 9444 only** to GE2, Aurora's exit IP and
-GE2's VPN Docker subnet (`172.22.0.0/16`). It rate-limits accepted traffic and
-requires an HMAC-authenticated payload. Other firewall tables are untouched.
-Update the allowlist if the exits or VPN Docker subnet change. GE2-to-itself
-probes measure the tunnel, **not onward Internet UDP routing**. The allowlist
-still permits Aurora, but the workstation monitor no longer probes it.
-
-The tracked `config.yaml` enables these bounded tests with:
-
-```yaml
-udp:
-  endpoint: 94.249.187.177:9444
-  token_env: VPN_MONITOR_UDP_TOKEN
-  samples: 10
-  timeout: 1s
-speed:
-  url: https://speed.cloudflare.com/__down?bytes=4194304
-  max_bytes: 4194304
-  timeout: 15s
-```
-
-Rerun `deploy.yml` after changing tracked settings, outbounds or monitor tokens in
-Vault. After rotating the UDP token, also rerun `echo-ge2.yml` to keep both ends in sync.
-A 4 MiB download per route every five minutes consumes up to **3.4 GiB/day across
-three routes**, plus ordinary probe traffic. This is a bounded throughput sample,
-not sustained capacity. The public download service can fail independently of
-the VPN; inspect the per-test errors rather than assuming VPN blocking.
-
-Verify `vpn_monitor_udp_loss_ratio`, `vpn_monitor_udp_rtt_seconds` (GE2 VLESS),
-and `vpn_monitor_speed_bits_per_second` (three routes) in Prometheus after
-tests finish and the next scrape completes. Old disabled history is retained.
-
-To stop the endpoint, disable/stop `vpn-monitor-echo.service` on GE2. Only after
-stopping it, remove its dedicated table with `nft delete table inet vpn_monitor_echo`;
-remove/disable `udp` in the checker config to avoid failed probes.
+The retained speed settings cap each download at 4 MiB with a 15-second timeout.
+With three routes every five minutes this can consume **3.4 GiB/day**, plus
+ordinary probe traffic. No downloads run while the monitor is stopped. This is
+a bounded throughput sample, not sustained capacity; the public download service
+can fail independently of the VPN.
 
 ## Stop / rollback
 

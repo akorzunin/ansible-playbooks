@@ -19,8 +19,13 @@ spec.loader.exec_module(generate)
 class GenerationTests(unittest.TestCase):
     def setUp(self):
         self.settings = yaml.safe_load((STACK / "config.yaml").read_text())
+        # Resolver coverage uses an explicit fixture, not the retired tracked allowlist.
+        self.settings["servers"] = [{"name": "fixture", "protocols": [
+            {"name": kind, "outbound_tag": f"fixture-{kind}", "udp": kind == "vless"}
+            for kind in ("ssh", "naive", "vless")
+        ]}]
         self.outbounds = [
-            {"tag": f"ge2-{kind}", "type": kind, "server": "example.com", "password": "fixture-secret"}
+            {"tag": f"fixture-{kind}", "type": kind, "server": "example.com", "password": "fixture-secret"}
             for kind in ("ssh", "naive", "vless")
         ]
         self.secrets = {"connections": {}, "extra_outbounds": [
@@ -29,10 +34,16 @@ class GenerationTests(unittest.TestCase):
             *self.outbounds,
         ]}
 
-    def test_tracked_allowlist_selects_only_ge2_and_preserves_outbound_fields(self):
+    def test_tracked_allowlist_is_empty_after_ge2_retirement(self):
+        settings = yaml.safe_load((STACK / "config.yaml").read_text())
+        self.assertEqual(settings["servers"], [])
+        self.assertNotIn("udp", settings)
+        self.assertEqual(generate.make_config(settings, {})["servers"], [])
+
+    def test_explicit_allowlist_preserves_outbound_fields(self):
         original = copy.deepcopy((self.settings, self.secrets))
         config = generate.make_config(self.settings, self.secrets)
-        self.assertEqual([server["name"] for server in config["servers"]], ["ge2"])
+        self.assertEqual([server["name"] for server in config["servers"]], ["fixture"])
         protocols = config["servers"][0]["protocols"]
         self.assertEqual([p["name"] for p in protocols], ["ssh", "naive", "vless"])
         self.assertEqual([p["udp"] for p in protocols], [False, False, True])

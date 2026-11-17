@@ -83,6 +83,21 @@ class RegistrationTests(unittest.TestCase):
         self.assertEqual(registration.remove(self.data, 'ge2', 'unused')['sing_box_secrets']['default_outbound'],
                          'aurora-vless')
 
+    def test_retiring_ge2_and_aurora_preserves_cherry_hop_and_enrollment(self):
+        merged = registration.merge(self.data, 'ge2', self.outbounds, 'ge2-vless-via-naive')
+        cherry = [{'tag': 'cherry-' + kind, 'type': kind}
+                  for kind in ['ssh', 'naive', 'vless', 'hysteria2']]
+        merged = registration.merge(merged, 'cherry', cherry)
+        retired = registration.remove(registration.remove(merged, 'ge2', 'cherry-vless'), 'aurora')
+        secrets = retired['sing_box_secrets']
+        self.assertEqual(secrets['extra_outbounds'], [{'tag': 'workstation-hop', 'type': 'ssh'}, *cherry])
+        self.assertEqual(secrets['default_outbound'], 'cherry-vless')
+        self.assertEqual(secrets['tokens'], self.data['sing_box_secrets']['tokens'])
+        profile = registration.generate.make_profile({}, {}, [], secrets['extra_outbounds'],
+                                                     secrets['default_outbound'])
+        self.assertEqual(profile['outbounds'][0]['outbounds'], [o['tag'] for o in cherry])
+        self.assertEqual(profile['outbounds'][0]['default'], 'cherry-vless')
+
     def test_rejects_cross_node_tags_incomplete_exports_and_foreign_default(self):
         for outbounds, default in [(self.outbounds[:2], 'ge2-ssh'), (self.outbounds, 'aurora-vless'),
                                    ([*self.outbounds, self.outbounds[0]], 'ge2-ssh'),

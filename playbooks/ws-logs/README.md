@@ -305,7 +305,9 @@ explicit integration; no VPN checker is deployed by this repository.
 
 ## Adding, disabling, and retiring nodes
 
-`nt1` and `GE1` are retired. In private `hosts`, remove a retired node from
+`nt1`, `GE1` and blocked `ge2` are retired. GE2's VPN monitor allowlist is also
+empty; the monitor is stopped and its inventory scrape opt-in is disabled.
+In private `hosts`, remove a retired node from
 `monitored_nodes`, add it to `retired_nodes`, and run the ordinary server `deploy.yml`
 command above. This removes its scrape target and availability/disk alerts without
 deleting Prometheus history or contacting the retired host. Keep private SSH and

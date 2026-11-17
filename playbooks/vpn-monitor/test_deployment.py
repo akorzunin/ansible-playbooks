@@ -74,34 +74,31 @@ class DeploymentTests(unittest.TestCase):
             if copy.get("dest", "").endswith("/.env"):
                 self.assertNotIn("src", copy)
                 self.assertIn("vpn_monitor_secrets", copy["content"])
-        echo = yaml.safe_load((STACK / "echo-ge2.yml").read_text())[0]
-        self.assertIn("vpn_monitor_secrets", echo["vars"]["vpn_monitor_udp_token"])
-        self.assertNotIn("ansible.builtin.ini", (STACK / "echo-ge2.yml").read_text())
 
-    def test_ge2_echo_is_authenticated_sandboxed_and_port_scoped(self):
-        play, = yaml.safe_load((STACK / "echo-ge2.yml").read_text())
-        self.assertEqual(play["hosts"], "ge2")
-        copies = {task["ansible.builtin.copy"]["dest"]: task
-                  for task in play["tasks"] if "ansible.builtin.copy" in task}
-        secret = copies["/etc/vpn-monitor/echo.env"]
-        self.assertEqual(secret["ansible.builtin.copy"]["mode"], "0600")
-        self.assertTrue(secret["no_log"])
-        self.assertFalse(secret["diff"])
-        unit = copies["/etc/systemd/system/vpn-monitor-echo.service"]["ansible.builtin.copy"]["content"]
-        self.assertIn("DynamicUser=yes", unit)
-        self.assertIn("ProtectSystem=strict", unit)
-        self.assertIn("EnvironmentFile=/etc/vpn-monitor/echo.env", unit)
-        self.assertIn("ExecStartPre=+/usr/sbin/nft -f /etc/vpn-monitor/echo.nft", unit)
-        self.assertIn("--echo --echo-listen 94.249.187.177:9444", unit)
-        firewall = copies["/etc/vpn-monitor/echo.nft"]["ansible.builtin.copy"]["content"]
-        self.assertNotIn("flush ruleset", firewall)
-        self.assertIn("flush table inet vpn_monitor_echo", firewall)
-        self.assertIn("limit rate 100/second", firewall)
-        self.assertIn("94.249.186.199", firewall)
-        self.assertIn("172.22.0.0/16", firewall)
-        rules = [line for line in firewall.splitlines() if line.startswith("add rule")]
-        self.assertTrue(all("udp dport 9444" in line for line in rules))
-        self.assertTrue(rules[-1].endswith("drop"))
+    def test_deployment_prefills_before_validation_and_resolution(self):
+        tasks = yaml.safe_load((STACK / "deploy.yml").read_text())[0]["pre_tasks"]
+        names = [task["name"] for task in tasks]
+        prefill = next(task for task in tasks if task.get("register") == "vpn_monitor_prefilled")
+        self.assertEqual(prefill["ansible.builtin.command"]["argv"],
+                         ["python3", "{{ playbook_dir }}/prefill-servers.py", "--stdin"])
+        self.assertIn("sing_box_secrets", prefill["ansible.builtin.command"]["stdin"])
+        self.assertIn("vpn_monitor_nodes | default([])", prefill["ansible.builtin.command"]["stdin"])
+        self.assertEqual(prefill["delegate_to"], "localhost")
+        self.assertFalse(prefill["changed_when"])
+        self.assertTrue(prefill["no_log"])
+        self.assertEqual(prefill["when"], "vpn_monitor_prefill_servers | default(true) | bool")
+        merge = next(task for task in tasks if task["name"].startswith("Use the discovered"))
+        self.assertEqual(merge["when"], prefill["when"])
+        self.assertTrue(merge["no_log"])
+        self.assertIn("combine(vpn_monitor_prefilled.stdout | from_yaml)",
+                      merge["ansible.builtin.set_fact"]["vpn_monitor_settings"])
+        validate = next(task for task in tasks if task["name"] == "Require a nonempty monitor server list")
+        self.assertEqual(validate["ansible.builtin.assert"]["that"], "vpn_monitor_settings.servers | length > 0")
+        self.assertLess(names.index("Load shared profile credentials and monitor tokens"), names.index(prefill["name"]))
+        self.assertLess(names.index(prefill["name"]), names.index(merge["name"]))
+        self.assertLess(names.index(merge["name"]), names.index(validate["name"]))
+        self.assertLess(names.index(validate["name"]),
+                        names.index("Generate monitor configuration from the tracked settings and shared Vault"))
 
 
 if __name__ == "__main__":

@@ -11,12 +11,6 @@ speed:
   url: https://speed.cloudflare.com/__down?bytes=4194304
   max_bytes: 4194304
   timeout: 15s
-# GE2-local probes measure the tunnel, not onward Internet UDP routing.
-udp:
-  endpoint: 94.249.187.177:9444
-  token_env: VPN_MONITOR_UDP_TOKEN
-  samples: 10
-  timeout: 1s
 controls:
   - name: example
     url: https://example.com/
@@ -31,16 +25,5 @@ targets:
   - name: cloudflare
     url: https://www.cloudflare.com/cdn-cgi/trace
     status: 200
-# Explicit allowlist: new published outbounds do not silently become probes.
-servers:
-  - name: ge2
-    protocols:
-      - name: ssh
-        outbound_tag: ge2-ssh
-        udp: false
-      - name: naive
-        outbound_tag: ge2-naive
-        udp: false
-      - name: vless
-        outbound_tag: ge2-vless
-        udp: true
+# GE2 is blocked. Keep the monitor disabled until new targets are explicitly approved.
+servers: []
