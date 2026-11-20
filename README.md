@@ -23,6 +23,12 @@ Grafana's public environment defaults are tracked in `playbooks/ws-logs/grafana.
 credentials come from the existing `external_vars.yml`. No separate monitoring
 inventory or controller-local `.env` is required.
 
+## Workstation GPU reliability
+
+See the [NVIDIA cgroup permission fix](playbooks/nvidia-runtime/README.md) for
+persistent device links and explicit Jellyfin/ARR GPU mappings. This prevents
+systemd reloads from revoking access without restarting the Docker daemon.
+
 ## Workstation proxy
 
 [sing-box with `cherry-vless`](playbooks/sing-box/README.md) replaces the blocked

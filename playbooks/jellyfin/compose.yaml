@@ -27,6 +27,13 @@ services:
           create_host_path: false
     restart: unless-stopped
     runtime: nvidia
+    # Track device permissions in Docker, not only the legacy NVIDIA hook.
+    # Single-GPU workstation; migrate to CDI for multi-GPU/MIG hardware.
+    devices:
+      - /dev/nvidia0:/dev/nvidia0:rw
+      - /dev/nvidiactl:/dev/nvidiactl:rw
+      - /dev/nvidia-uvm:/dev/nvidia-uvm:rw
+      - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools:rw
     deploy:
       resources:
         reservations:

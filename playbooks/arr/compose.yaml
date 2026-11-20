@@ -99,7 +99,7 @@ services:
 
   bot:
     profiles: [bot]
-    image: ghcr.io/akorzunin/arr-telegram-bot:2ee5270081094db478ca71cb1d48e226c1b1011d
+    image: ghcr.io/akorzunin/arr-telegram-bot:c81a5e14d8574e1c5873846be954a870087af141
     user: "${BOT_UID:-1000}:${BOT_GID:-1000}"
     env_file: bot.env
     environment:
@@ -136,7 +136,7 @@ services:
 
   prepare:
     profiles: [prepare]
-    image: ghcr.io/akorzunin/arr-telegram-bot:worker-2ee5270081094db478ca71cb1d48e226c1b1011d
+    image: ghcr.io/akorzunin/arr-telegram-bot:worker-c81a5e14d8574e1c5873846be954a870087af141
     user: "${BOT_UID:-1000}:${BOT_GID:-1000}"
     env_file: worker.env
     environment:
@@ -153,6 +153,13 @@ services:
         bind:
           create_host_path: false
     runtime: nvidia
+    # Track device permissions in Docker, not only the legacy NVIDIA hook.
+    # Single-GPU workstation; migrate to CDI for multi-GPU/MIG hardware.
+    devices:
+      - /dev/nvidia0:/dev/nvidia0:rw
+      - /dev/nvidiactl:/dev/nvidiactl:rw
+      - /dev/nvidia-uvm:/dev/nvidia-uvm:rw
+      - /dev/nvidia-uvm-tools:/dev/nvidia-uvm-tools:rw
     restart: unless-stopped
     deploy:
       resources:

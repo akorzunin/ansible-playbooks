@@ -1,0 +1,73 @@
+---
+- name: Preserve workstation NVIDIA device access across systemd reloads
+  hosts: local_workstation,remote_workstation
+  become: true
+  tasks:
+    - name: Check the installed NVIDIA device link helper
+      ansible.builtin.command:
+        argv: [/usr/bin/nvidia-ctk, system, create-dev-char-symlinks, --help]
+      changed_when: false
+
+    - name: Install NVIDIA device link boot service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/nvidia-dev-char.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Create NVIDIA character device links before Docker
+          Wants=systemd-udev-settle.service
+          After=systemd-udev-settle.service
+          Before=docker.service
+
+          [Service]
+          Type=oneshot
+          ExecStartPre=/sbin/modprobe nvidia
+          ExecStartPre=/sbin/modprobe nvidia_uvm
+          ExecStartPre=/usr/bin/udevadm settle
+          # Scan existing nodes: toolkit 1.13's --create-all fails with driver 560.
+          ExecStart=/usr/bin/nvidia-ctk system create-dev-char-symlinks
+          RemainAfterExit=yes
+
+          [Install]
+          WantedBy=multi-user.target
+      register: nvidia_dev_char_unit
+
+    - name: Recreate NVIDIA links when the driver is added
+      ansible.builtin.copy:
+        dest: /etc/udev/rules.d/71-nvidia-dev-char.rules
+        mode: "0644"
+        content: |
+          # The boot service also scans after udev settles, before Docker starts.
+          ACTION=="add", DEVPATH=="/bus/pci/drivers/nvidia", RUN+="/usr/bin/nvidia-ctk system create-dev-char-symlinks"
+      notify: Reload NVIDIA udev rules
+
+    - name: Ensure links exist before any systemd reload
+      ansible.builtin.command:
+        argv: [/usr/bin/nvidia-ctk, system, create-dev-char-symlinks]
+      # The helper safely rescans on every deployment, including when nodes change.
+      changed_when: false
+
+    - name: Enable NVIDIA links before Docker at boot without restarting Docker
+      ansible.builtin.systemd_service:
+        name: nvidia-dev-char.service
+        daemon_reload: "{{ nvidia_dev_char_unit.changed }}"
+        enabled: true
+        state: started
+
+    - name: Verify required NVIDIA device links resolve to the correct nodes
+      ansible.builtin.shell: |
+        set -eu
+        for device in /dev/nvidia0 /dev/nvidiactl /dev/nvidia-uvm /dev/nvidia-uvm-tools; do
+          test -c "$device"
+          major=$(stat -c %t "$device")
+          minor=$(stat -c %T "$device")
+          link=$(printf '/dev/char/%d:%d' "0x$major" "0x$minor")
+          test "$(readlink -f "$link")" = "$device"
+        done
+      changed_when: false
+
+  handlers:
+    - name: Reload NVIDIA udev rules
+      ansible.builtin.command:
+        argv: [udevadm, control, --reload-rules]
+      changed_when: true

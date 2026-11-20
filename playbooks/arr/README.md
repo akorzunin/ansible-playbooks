@@ -196,6 +196,11 @@ This is **implemented but not enabled by default**. Publish both updated images
 from `../arr-telegram-bot/` first, matching the pinned `:SHA` bot and `:worker-SHA`
 GPU worker tags in `compose.yaml`. Do not start a second Telegram poller. The worker has GPU access, not the Telegram polling process.
 
+For the existing workstation's legacy runtime, apply the
+[NVIDIA cgroup permission fix](../nvidia-runtime/README.md) before deploying GPU
+services. It persists device links at boot; the Compose mappings prevent systemd
+reloads/resource updates from silently revoking GPU access.
+
 1. Confirm **the target workstation's Docker daemon** has the `nvidia` runtime:
    `docker info --format '{{json .Runtimes}}'`. The deployment refuses to enable
    preparation otherwise. NVIDIA Container Toolkit being installed is not enough;
@@ -244,7 +249,12 @@ avoid video encoding. Other SDR video uses NVENC at ~12 Mbps (14 Mbps maxrate, 1
 Final outputs undergo full decode and bitrate validation before publication.
 HDR is blocked pending a tested tone-mapping implementation. Optimized files keep
 one default/first audio track, AAC mono/stereo; originals retain all tracks.
-External SRT and embedded plain text are supported, not PGS burn-in or ASS styling.
+The updated worker copies external SRT/PGS `.sup` and extracts embedded plain text
+or PGS into sidecars. Existing prepared videos gain missing subtitles without a
+video rebuild. Selecting PGS in Chrome requires Jellyfin's real-time subtitle
+burn-in/transcoding; preparation does not use OCR or permanently burn subtitles.
+Other image/styled formats remain in originals. Episodes are prepared in numeric
+order within each season, including legacy out-of-order queues.
 Later Bazarr SRT additions/updates are mirrored. See the bot README for exact rules.
 
 `/active` now includes compatibility checking, queued/preparing percentage,
